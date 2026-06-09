@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-50 text-slate-800 antialiased;
+}
+
+/* Scrollbar discreta sobre el tema claro */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; } /* slate-300 */
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; } /* slate-400 */
