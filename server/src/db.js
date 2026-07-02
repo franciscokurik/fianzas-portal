@@ -18,8 +18,9 @@ function client() {
   _sql = neon(process.env.DATABASE_URL);
   return _sql;
 }
+// El driver HTTP de Neon se invoca como función: sql(texto, params) -> filas.
 const sql = {
-  query: (text, params) => client().query(text, params),
+  query: (text, params) => client()(text, params),
 };
 
 // Convierte los '?' posicionales al formato $1, $2, ... de Postgres.

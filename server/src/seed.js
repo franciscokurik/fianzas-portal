@@ -3,7 +3,7 @@
 // También se exporta seed()/seedIfEmpty() para el endpoint /api/setup.
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
-import { fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import db, { initSchema } from './db.js';
 import { addMonths, todayISO } from './lib/dates.js';
 
@@ -120,7 +120,7 @@ export async function seedIfEmpty() {
 }
 
 // Ejecución directa como CLI
-if (process.argv[1] && import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   console.log('🌱 Sembrando datos en Postgres...');
   seed()
     .then((r) => {
