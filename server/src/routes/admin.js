@@ -14,7 +14,7 @@ router.use(requireAuth, requireAdmin);
 // GET /api/admin/clientes -> todos los clientes con estatus general
 router.get('/clientes', (req, res) => {
   const clientes = db
-    .prepare(`SELECT id, razon_social, rfc, email, linea_credito FROM clients WHERE role = 'client' ORDER BY razon_social`)
+    .prepare(`SELECT id, razon_social, rfc, email FROM clients WHERE role = 'client' ORDER BY razon_social`)
     .all();
 
   const enriquecidos = clientes.map((c) => {
@@ -47,31 +47,51 @@ router.get('/clientes', (req, res) => {
 
 // POST /api/admin/clientes -> alta de cliente
 router.post('/clientes', (req, res) => {
-  const { razon_social, rfc, email, password, linea_credito, telefono } = req.body || {};
+  const { razon_social, rfc, email, password, telefono } = req.body || {};
   if (!razon_social || !email || !password) {
     return res.status(400).json({ error: 'razon_social, email y password son obligatorios' });
   }
   try {
     const info = db.prepare(
-      `INSERT INTO clients (razon_social, rfc, email, password_hash, linea_credito, telefono)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(razon_social, rfc || null, email, bcrypt.hashSync(password, 10),
-          Number(linea_credito) || 0, telefono || null);
+      `INSERT INTO clients (razon_social, rfc, email, password_hash, telefono)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(razon_social, rfc || null, email, bcrypt.hashSync(password, 10), telefono || null);
     res.json({ ok: true, id: info.lastInsertRowid });
   } catch (e) {
     res.status(400).json({ error: 'No se pudo crear (¿RFC o email duplicado?)', detail: e.message });
   }
 });
 
-// PUT /api/admin/clientes/:id -> actualizar datos básicos / línea de crédito
+// PUT /api/admin/clientes/:id -> actualizar datos básicos
 router.put('/clientes/:id', (req, res) => {
-  const { razon_social, linea_credito, telefono } = req.body || {};
+  const { razon_social, telefono } = req.body || {};
   db.prepare(
     `UPDATE clients SET razon_social = COALESCE(?, razon_social),
-       linea_credito = COALESCE(?, linea_credito),
        telefono = COALESCE(?, telefono)
      WHERE id = ?`
-  ).run(razon_social ?? null, linea_credito ?? null, telefono ?? null, Number(req.params.id));
+  ).run(razon_social ?? null, telefono ?? null, Number(req.params.id));
+  res.json({ ok: true });
+});
+
+// PUT /api/admin/clientes/:id/lineas -> fijar/actualizar la línea de una afianzadora (upsert)
+router.put('/clientes/:id/lineas', (req, res) => {
+  const clientId = Number(req.params.id);
+  const { afianzadora_id, linea_credito } = req.body || {};
+  if (!afianzadora_id) return res.status(400).json({ error: 'afianzadora_id requerido' });
+  db.prepare(
+    `INSERT INTO client_credit_lines (client_id, afianzadora_id, linea_credito)
+     VALUES (?, ?, ?)
+     ON CONFLICT(client_id, afianzadora_id)
+       DO UPDATE SET linea_credito = excluded.linea_credito`
+  ).run(clientId, Number(afianzadora_id), Number(linea_credito) || 0);
+  res.json({ ok: true });
+});
+
+// DELETE /api/admin/clientes/:id/lineas/:afianzadoraId -> quitar línea de una afianzadora
+router.delete('/clientes/:id/lineas/:afianzadoraId', (req, res) => {
+  db.prepare(
+    'DELETE FROM client_credit_lines WHERE client_id = ? AND afianzadora_id = ?'
+  ).run(Number(req.params.id), Number(req.params.afianzadoraId));
   res.json({ ok: true });
 });
 
@@ -153,13 +173,38 @@ router.post('/papeleria', (req, res) => {
 // GET /api/admin/clientes/:id/detalle -> fianzas, documentos y papelería de un cliente
 router.get('/clientes/:id/detalle', (req, res) => {
   const id = Number(req.params.id);
-  const cliente = db.prepare('SELECT id, razon_social, rfc, email, linea_credito, telefono FROM clients WHERE id = ?').get(id);
+  const cliente = db.prepare('SELECT id, razon_social, rfc, email, telefono FROM clients WHERE id = ?').get(id);
   if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
 
   const fianzas = db.prepare(
     `SELECT f.*, a.nombre AS afianzadora_nombre FROM fianzas f
      JOIN afianzadoras a ON a.id = f.afianzadora_id WHERE f.client_id = ? ORDER BY f.fecha_vigencia`
   ).all(id).map((f) => ({ ...f, estado: estadoFianza(f.fecha_vigencia) }));
+
+  // Comprometido por afianzadora (fianzas no vencidas)
+  const comprometidoPorAfi = new Map();
+  for (const f of fianzas) {
+    if (f.estado === 'vencida') continue;
+    comprometidoPorAfi.set(
+      f.afianzadora_id,
+      (comprometidoPorAfi.get(f.afianzadora_id) || 0) + (f.monto_afianzado || 0)
+    );
+  }
+
+  const lineas = db.prepare(
+    `SELECT cl.afianzadora_id, a.nombre AS afianzadora_nombre, cl.linea_credito
+     FROM client_credit_lines cl
+     JOIN afianzadoras a ON a.id = cl.afianzadora_id
+     WHERE cl.client_id = ? ORDER BY a.nombre`
+  ).all(id).map((l) => {
+    const comprometido = comprometidoPorAfi.get(l.afianzadora_id) || 0;
+    return {
+      ...l,
+      linea_credito: l.linea_credito || 0,
+      comprometido,
+      disponible: (l.linea_credito || 0) - comprometido,
+    };
+  });
 
   const documentos = db.prepare(
     `SELECT dt.nombre, dt.id AS document_type_id, cd.uploaded_at, cd.vencimiento, cd.original_name, cd.file_path
@@ -176,7 +221,7 @@ router.get('/clientes/:id/detalle', (req, res) => {
      WHERE p.client_id = ? ORDER BY p.created_at DESC`
   ).all(id);
 
-  res.json({ cliente, fianzas, documentos, papeleria });
+  res.json({ cliente, lineas, fianzas, documentos, papeleria });
 });
 
 // GET /api/admin/descargar?path=client_1/archivo.pdf -> descarga doc subido por cliente

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, LogOut, FileText, AlertTriangle, Wallet } from 'lucide-react';
+import { ShieldCheck, LogOut, FileText, AlertTriangle, Wallet, CreditCard } from 'lucide-react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { mxn } from '../lib.jsx';
@@ -93,12 +93,46 @@ export default function Dashboard() {
 
         {/* KPIs */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <Kpi tone="emerald" label="Línea de crédito disponible" value={mxn(m?.linea_disponible)}
-               sub={m ? `de ${mxn(m.linea_credito_total)}` : null} />
+          <Kpi tone="emerald" label="Línea disponible total" value={mxn(m?.linea_disponible)}
+               sub={m ? `de ${mxn(m.linea_credito_total)} autorizado` : null} />
           <Kpi tone="sky" label="Fianzas activas" value={m?.fianzas_activas ?? '—'} />
           <Kpi tone="violet" label="Prima neta total" value={mxn(m?.prima_neta_total)} />
           <Kpi tone="amber" label="Por vencer (< 30 días)" value={m?.fianzas_por_vencer_30 ?? '—'} />
         </div>
+
+        {/* Líneas de crédito por afianzadora */}
+        {m?.lineas?.length > 0 && (
+          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden mb-6">
+            <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-slate-500" />
+              <h3 className="text-sm font-semibold text-slate-700">Líneas de crédito por afianzadora</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50/60 text-slate-500 uppercase tracking-wider text-[10px]">
+                  <tr>
+                    <th className="text-left px-3 py-2">Afianzadora</th>
+                    <th className="text-right px-3 py-2">Línea autorizada</th>
+                    <th className="text-right px-3 py-2">Comprometido</th>
+                    <th className="text-right px-3 py-2">Disponible</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {m.lineas.map((l) => (
+                    <tr key={l.afianzadora_id} className="hover:bg-slate-50/40">
+                      <td className="px-3 py-1.5 text-slate-700 font-medium">{l.afianzadora_nombre}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{mxn(l.linea_credito)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxn(l.comprometido)}</td>
+                      <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${l.disponible < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                        {mxn(l.disponible)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex items-center gap-1 border-b border-slate-200 mb-5">

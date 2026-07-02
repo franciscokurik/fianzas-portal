@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
   ShieldCheck, LogOut, Building2, Plus, Save, Download,
-  Users, FileText, Files, CheckCircle2,
+  Users, FileText, Files, CheckCircle2, UserPlus, AlertTriangle,
+  CreditCard, Trash2,
 } from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
@@ -69,6 +70,7 @@ export default function Admin() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Columna izquierda */}
           <div className="space-y-4">
+            <NuevoCliente onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }} />
             <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
 
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -120,6 +122,83 @@ export default function Admin() {
   );
 }
 
+function NuevoCliente({ onDone }) {
+  const [open, setOpen] = useState(false);
+  const empty = { razon_social: '', email: '', password: '', rfc: '', telefono: '' };
+  const [f, setF] = useState(empty);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  async function guardar() {
+    setError('');
+    if (!f.razon_social || !f.email || !f.password) {
+      setError('Razón social, correo y contraseña son obligatorios.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.post('/admin/clientes', f);
+      setF(empty);
+      setOpen(false);
+      onDone(r.id);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
+      >
+        <UserPlus className="w-4 h-4 text-indigo-600" /> Agregar cliente
+        <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
+      </button>
+      {open && (
+        <div className="p-4 space-y-2.5">
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Razón social<Req /></label>
+            <input value={f.razon_social} onChange={set('razon_social')} className={inputCls} />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Correo electrónico<Req /></label>
+            <input type="email" value={f.email} onChange={set('email')} className={inputCls} />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Contraseña<Req /></label>
+            <input type="text" value={f.password} onChange={set('password')} placeholder="Contraseña inicial" className={inputCls} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">RFC</label>
+              <input value={f.rfc} onChange={set('rfc')} className={inputCls} />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">Teléfono</label>
+              <input value={f.telefono} onChange={set('telefono')} className={inputCls} />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-400">
+            Las líneas de crédito se asignan por afianzadora desde el detalle del cliente.
+          </p>
+          {error && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-700 flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+            </div>
+          )}
+          <button onClick={guardar} disabled={busy} className={`${btnPrimary} w-full justify-center`}>
+            <Save className="w-4 h-4" /> {busy ? 'Guardando…' : 'Crear cliente'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NuevaAfianzadora({ onDone }) {
   const [nombre, setNombre] = useState('');
   async function add() {
@@ -140,7 +219,9 @@ function NuevaAfianzadora({ onDone }) {
 }
 
 function DetalleCliente({ detalle, afianzadoras, onChange, flash }) {
-  const { cliente, fianzas, documentos, papeleria } = detalle;
+  const { cliente, lineas = [], fianzas, documentos, papeleria } = detalle;
+  const lineaTotal = lineas.reduce((s, l) => s + (l.linea_credito || 0), 0);
+  const disponibleTotal = lineas.reduce((s, l) => s + (l.disponible || 0), 0);
 
   function descargar(rel) {
     fetch(`/api/admin/descargar?path=${encodeURIComponent(rel)}`, {
@@ -161,10 +242,23 @@ function DetalleCliente({ detalle, afianzadoras, onChange, flash }) {
       <div className="bg-white border border-slate-200 rounded-lg p-4">
         <h2 className="text-base font-semibold text-slate-800">{cliente.razon_social}</h2>
         <p className="text-xs text-slate-500 mt-0.5">{cliente.rfc} · {cliente.email}</p>
-        <div className="mt-2 inline-flex items-center gap-1.5 text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md">
-          Línea de crédito: <span className="font-semibold tabular-nums">{mxn(cliente.linea_credito)}</span>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <div className="inline-flex items-center gap-1.5 text-xs bg-slate-50 text-slate-600 px-2 py-1 rounded-md">
+            Línea total: <span className="font-semibold tabular-nums text-slate-800">{mxn(lineaTotal)}</span>
+          </div>
+          <div className="inline-flex items-center gap-1.5 text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md">
+            Disponible total: <span className="font-semibold tabular-nums">{mxn(disponibleTotal)}</span>
+          </div>
         </div>
       </div>
+
+      {/* Líneas de crédito por afianzadora */}
+      <LineasCredito
+        clienteId={cliente.id}
+        lineas={lineas}
+        afianzadoras={afianzadoras}
+        onChange={() => { onChange(); flash('Línea de crédito actualizada'); }}
+      />
 
       {/* Fianzas */}
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -259,6 +353,104 @@ function DetalleCliente({ detalle, afianzadoras, onChange, flash }) {
 }
 
 function Req() { return <span className="text-rose-500">*</span>; }
+
+function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
+  const [edits, setEdits] = useState({}); // afianzadora_id -> valor en edición
+  const [nuevaAfi, setNuevaAfi] = useState('');
+  const [nuevoMonto, setNuevoMonto] = useState('');
+
+  const usadas = new Set(lineas.map((l) => l.afianzadora_id));
+  const disponiblesParaAgregar = afianzadoras.filter((a) => !usadas.has(a.id));
+
+  async function guardar(afianzadora_id, linea_credito) {
+    await api.put(`/admin/clientes/${clienteId}/lineas`, { afianzadora_id, linea_credito: Number(linea_credito) || 0 });
+    setEdits((e) => { const n = { ...e }; delete n[afianzadora_id]; return n; });
+    onChange();
+  }
+
+  async function eliminar(afianzadora_id) {
+    await api.del(`/admin/clientes/${clienteId}/lineas/${afianzadora_id}`);
+    onChange();
+  }
+
+  async function agregar() {
+    if (!nuevaAfi) return;
+    await api.put(`/admin/clientes/${clienteId}/lineas`, { afianzadora_id: Number(nuevaAfi), linea_credito: Number(nuevoMonto) || 0 });
+    setNuevaAfi(''); setNuevoMonto('');
+    onChange();
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <CreditCard className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Líneas de crédito por afianzadora</h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-50/60 text-slate-500 uppercase tracking-wider text-[10px]">
+            <tr>
+              <th className="text-left px-3 py-2">Afianzadora</th>
+              <th className="text-right px-3 py-2">Línea autorizada</th>
+              <th className="text-right px-3 py-2">Comprometido</th>
+              <th className="text-right px-3 py-2">Disponible</th>
+              <th className="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {lineas.map((l) => {
+              const editing = edits[l.afianzadora_id] ?? l.linea_credito;
+              const negativo = l.disponible < 0;
+              return (
+                <tr key={l.afianzadora_id} className="hover:bg-slate-50/40">
+                  <td className="px-3 py-1.5 text-slate-700 font-medium">{l.afianzadora_nombre}</td>
+                  <td className="px-3 py-1.5 text-right">
+                    <input
+                      type="number"
+                      value={editing}
+                      onChange={(e) => setEdits((s) => ({ ...s, [l.afianzadora_id]: e.target.value }))}
+                      className="w-32 px-2 py-1 text-right rounded-md border border-slate-200 bg-white tabular-nums focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
+                    />
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxn(l.comprometido)}</td>
+                  <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${negativo ? 'text-rose-600' : 'text-emerald-700'}`}>
+                    {mxn(l.disponible)}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button onClick={() => guardar(l.afianzadora_id, editing)} className={btnSecondary} title="Guardar">
+                        <Save className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => eliminar(l.afianzadora_id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Quitar línea">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {!lineas.length && (
+              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Sin líneas de crédito asignadas.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {disponiblesParaAgregar.length > 0 && (
+        <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
+          <p className="text-xs font-medium text-slate-600 mb-2">Asignar línea a otra afianzadora</p>
+          <div className="flex flex-col md:flex-row gap-2">
+            <select value={nuevaAfi} onChange={(e) => setNuevaAfi(e.target.value)} className={`${inputCls} md:w-56`}>
+              <option value="">Selecciona afianzadora…</option>
+              {disponiblesParaAgregar.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+            </select>
+            <input type="number" value={nuevoMonto} onChange={(e) => setNuevoMonto(e.target.value)} placeholder="Monto de la línea" className={inputCls} />
+            <button onClick={agregar} className={btnPrimary}><Plus className="w-4 h-4" /> Asignar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function NuevaFianza({ clienteId, afianzadoras, onDone }) {
   const empty = { afianzadora_id: '', numero_poliza: '', tipo_fianza: '', prima_neta: '', monto_afianzado: '', fecha_inicio: '', fecha_vigencia: '' };

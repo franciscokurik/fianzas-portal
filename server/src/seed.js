@@ -69,6 +69,17 @@ const c2 = insClient.run(
   'client', 2000000, '5559876543'
 ).lastInsertRowid;
 
+// --- Líneas de crédito por afianzadora ---
+const insLinea = db.prepare(
+  `INSERT INTO client_credit_lines (client_id, afianzadora_id, linea_credito) VALUES (?, ?, ?)`
+);
+// Cliente 1: línea autorizada en tres afianzadoras
+insLinea.run(c1, afiIds['aserta'], 3000000);
+insLinea.run(c1, afiIds['berkley'], 1000000);
+insLinea.run(c1, afiIds['tokio-marine'], 2000000);
+// Cliente 2: línea en Chubb
+insLinea.run(c2, afiIds['chubb'], 1000000);
+
 // --- Fianzas del cliente 1 (variando vigencias para ver los estados) ---
 const insFianza = db.prepare(
   `INSERT INTO fianzas (client_id, afianzadora_id, numero_poliza, tipo_fianza, prima_neta, monto_afianzado, fecha_inicio, fecha_vigencia)

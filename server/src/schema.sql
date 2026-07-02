@@ -32,6 +32,23 @@ CREATE TABLE IF NOT EXISTS afianzadoras (
 );
 
 -- ----------------------------------------------------------------
+-- Líneas de crédito por (cliente × afianzadora)
+-- Cada afianzadora autoriza su propia línea para el cliente.
+-- El "disponible" se calcula = linea_credito - Σ monto_afianzado
+--   de las fianzas NO vencidas de esa afianzadora.
+-- (Sustituye al campo global clients.linea_credito, que queda en desuso.)
+-- ----------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS client_credit_lines (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id      INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  afianzadora_id INTEGER NOT NULL REFERENCES afianzadoras(id) ON DELETE CASCADE,
+  linea_credito  REAL    NOT NULL DEFAULT 0,
+  created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(client_id, afianzadora_id)
+);
+CREATE INDEX IF NOT EXISTS idx_credit_lines_client ON client_credit_lines(client_id);
+
+-- ----------------------------------------------------------------
 -- Fianzas (pólizas) de cada cliente
 -- El "estado" (Activa/Por vencer/Vencida) se calcula desde fecha_vigencia.
 -- ----------------------------------------------------------------

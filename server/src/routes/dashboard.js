@@ -10,30 +10,57 @@ router.get('/', requireAuth, (req, res) => {
   const clientId = req.user.id;
 
   const client = db
-    .prepare('SELECT id, razon_social, linea_credito FROM clients WHERE id = ?')
+    .prepare('SELECT id, razon_social FROM clients WHERE id = ?')
     .get(clientId);
   if (!client) return res.status(404).json({ error: 'Cliente no encontrado' });
 
   const fianzas = db
-    .prepare('SELECT prima_neta, monto_afianzado, fecha_vigencia FROM fianzas WHERE client_id = ?')
+    .prepare('SELECT afianzadora_id, prima_neta, monto_afianzado, fecha_vigencia FROM fianzas WHERE client_id = ?')
     .all(clientId);
 
   let activas = 0;
   let porVencer30 = 0;
   let primaNetaTotal = 0;
-  let montoComprometido = 0;
+  // Monto comprometido (fianzas no vencidas) acumulado por afianzadora
+  const comprometidoPorAfi = new Map();
 
   for (const f of fianzas) {
     const estado = estadoFianza(f.fecha_vigencia);
     primaNetaTotal += f.prima_neta || 0;
     if (estado !== 'vencida') {
       activas += 1;
-      montoComprometido += f.monto_afianzado || 0;
+      comprometidoPorAfi.set(
+        f.afianzadora_id,
+        (comprometidoPorAfi.get(f.afianzadora_id) || 0) + (f.monto_afianzado || 0)
+      );
     }
     if (estado === 'por_vencer') porVencer30 += 1;
   }
 
-  const lineaDisponible = (client.linea_credito || 0) - montoComprometido;
+  // Líneas de crédito por afianzadora del cliente
+  const lineasRows = db
+    .prepare(
+      `SELECT cl.afianzadora_id, a.nombre AS afianzadora_nombre, cl.linea_credito
+       FROM client_credit_lines cl
+       JOIN afianzadoras a ON a.id = cl.afianzadora_id
+       WHERE cl.client_id = ?
+       ORDER BY a.nombre`
+    )
+    .all(clientId);
+
+  const lineas = lineasRows.map((l) => {
+    const comprometido = comprometidoPorAfi.get(l.afianzadora_id) || 0;
+    return {
+      afianzadora_id: l.afianzadora_id,
+      afianzadora_nombre: l.afianzadora_nombre,
+      linea_credito: l.linea_credito || 0,
+      comprometido,
+      disponible: (l.linea_credito || 0) - comprometido,
+    };
+  });
+
+  const lineaCreditoTotal = lineas.reduce((s, l) => s + l.linea_credito, 0);
+  const lineaDisponible = lineas.reduce((s, l) => s + l.disponible, 0);
 
   // Documentos pendientes/por vencer y solicitudes de papelería pendientes
   const docsPendientes = db
@@ -53,7 +80,8 @@ router.get('/', requireAuth, (req, res) => {
     razon_social: client.razon_social,
     metricas: {
       linea_disponible: lineaDisponible,
-      linea_credito_total: client.linea_credito || 0,
+      linea_credito_total: lineaCreditoTotal,
+      lineas,
       fianzas_activas: activas,
       prima_neta_total: primaNetaTotal,
       fianzas_por_vencer_30: porVencer30,
