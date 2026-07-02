@@ -1,0 +1,15 @@
+{
+  "name": "fianzas-portal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Portal de Fianzas Fortex — despliegue de un solo servicio (API + app compilada)",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "build": "npm --prefix client install --include=dev && npm --prefix client run build && npm --prefix server install",
+    "start": "node --no-warnings server/src/index.js",
+    "seed": "node --no-warnings server/src/seed.js"
+  }
+}

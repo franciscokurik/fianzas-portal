@@ -2,8 +2,11 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { initSchema } from './db.js';
+import db, { initSchema } from './db.js';
 import authRoutes from './routes/auth.js';
 import dashboardRoutes from './routes/dashboard.js';
 import fianzasRoutes from './routes/fianzas.js';
@@ -11,7 +14,17 @@ import documentosRoutes from './routes/documentos.js';
 import adminRoutes from './routes/admin.js';
 import { correrAlertas } from './services/alerts.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 initSchema();
+
+// En un despliegue nuevo (BD vacía, p.ej. hosting efímero) siembra los datos
+// demo automáticamente para que el portal esté listo sin pasos manuales.
+const { c: totalClientes } = db.prepare('SELECT COUNT(*) c FROM clients').get();
+if (totalClientes === 0) {
+  console.log('🌱 Base de datos vacía: sembrando datos demo...');
+  await import('./seed.js');
+}
 
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || true }));
@@ -30,6 +43,17 @@ app.post('/api/alertas/correr', async (req, res) => {
   const n = await correrAlertas();
   res.json({ ok: true, notificaciones: n });
 });
+
+// En producción, sirve la app de React ya compilada (client/dist).
+// Así todo corre en un solo servicio y una sola URL pública.
+const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
+if (fs.existsSync(CLIENT_DIST)) {
+  app.use(express.static(CLIENT_DIST));
+  // Fallback SPA: cualquier ruta que no sea /api devuelve index.html
+  app.get(/^(?!\/api).*/, (req, res) => {
+    res.sendFile(path.join(CLIENT_DIST, 'index.html'));
+  });
+}
 
 // Manejo de errores (incluye límite de tamaño de multer)
 app.use((err, req, res, next) => {
