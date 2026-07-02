@@ -4,13 +4,8 @@
 // Mantiene una API parecida a la de node:sqlite (prepare().get/all/run) pero
 // ASÍNCRONA: cada método devuelve una Promesa. Los placeholders siguen siendo
 // '?' y aquí se convierten a $1, $2, ... de Postgres.
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { neon } from '@neondatabase/serverless';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
+import { SCHEMA_SQL } from './schema.js';
 
 // Cliente Neon perezoso: se construye en el primer uso para no fallar al
 // importar el módulo cuando aún no hay DATABASE_URL (p.ej. durante el build).
@@ -65,11 +60,10 @@ const db = {
 };
 
 // Aplica el esquema. El driver HTTP corre UNA sentencia por llamada, así que
-// dividimos el archivo en sentencias individuales (sin comentarios de línea).
+// dividimos el DDL en sentencias individuales (sin comentarios de línea).
 export async function initSchema() {
-  const raw = fs.readFileSync(SCHEMA_PATH, 'utf8');
-  const stripped = raw.replace(/--[^\n]*/g, '');
-  const statements = stripped
+  const statements = SCHEMA_SQL
+    .replace(/--[^\n]*/g, '')
     .split(';')
     .map((s) => s.trim())
     .filter(Boolean);
