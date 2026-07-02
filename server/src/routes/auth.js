@@ -7,14 +7,14 @@ const router = Router();
 
 // POST /api/auth/login  { identificador, password }
 // identificador puede ser RFC o correo
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const { identificador, password } = req.body || {};
   if (!identificador || !password) {
     return res.status(400).json({ error: 'Faltan credenciales' });
   }
 
   const id = String(identificador).trim();
-  const user = db
+  const user = await db
     .prepare(
       `SELECT * FROM clients
        WHERE lower(email) = lower(?) OR upper(rfc) = upper(?)
@@ -40,8 +40,8 @@ router.post('/login', (req, res) => {
 });
 
 // GET /api/auth/me  -> datos del usuario autenticado
-router.get('/me', requireAuth, (req, res) => {
-  const user = db
+router.get('/me', requireAuth, async (req, res) => {
+  const user = await db
     .prepare('SELECT id, razon_social, email, rfc, role FROM clients WHERE id = ?')
     .get(req.user.id);
   if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });

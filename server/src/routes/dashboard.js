@@ -6,15 +6,15 @@ import { estadoFianza } from '../lib/dates.js';
 const router = Router();
 
 // GET /api/dashboard -> métricas del cliente autenticado
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   const clientId = req.user.id;
 
-  const client = db
+  const client = await db
     .prepare('SELECT id, razon_social FROM clients WHERE id = ?')
     .get(clientId);
   if (!client) return res.status(404).json({ error: 'Cliente no encontrado' });
 
-  const fianzas = db
+  const fianzas = await db
     .prepare('SELECT afianzadora_id, prima_neta, monto_afianzado, fecha_vigencia FROM fianzas WHERE client_id = ?')
     .all(clientId);
 
@@ -38,7 +38,7 @@ router.get('/', requireAuth, (req, res) => {
   }
 
   // Líneas de crédito por afianzadora del cliente
-  const lineasRows = db
+  const lineasRows = await db
     .prepare(
       `SELECT cl.afianzadora_id, a.nombre AS afianzadora_nombre, cl.linea_credito
        FROM client_credit_lines cl
@@ -63,18 +63,18 @@ router.get('/', requireAuth, (req, res) => {
   const lineaDisponible = lineas.reduce((s, l) => s + l.disponible, 0);
 
   // Documentos pendientes/por vencer y solicitudes de papelería pendientes
-  const docsPendientes = db
+  const docsPendientes = (await db
     .prepare(
-      `SELECT COUNT(*) c FROM document_types dt
+      `SELECT COUNT(*)::int c FROM document_types dt
        LEFT JOIN client_documents cd
          ON cd.document_type_id = dt.id AND cd.client_id = ?
        WHERE cd.id IS NULL`
     )
-    .get(clientId).c;
+    .get(clientId)).c;
 
-  const papeleriaPendiente = db
-    .prepare(`SELECT COUNT(*) c FROM papeleria_requests WHERE client_id = ? AND estado = 'pendiente'`)
-    .get(clientId).c;
+  const papeleriaPendiente = (await db
+    .prepare(`SELECT COUNT(*)::int c FROM papeleria_requests WHERE client_id = ? AND estado = 'pendiente'`)
+    .get(clientId)).c;
 
   res.json({
     razon_social: client.razon_social,
