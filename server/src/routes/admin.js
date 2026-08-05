@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db.js';
 import { requireAuth, requireAdmin } from '../auth/middleware.js';
-import { estadoFianza } from '../lib/dates.js';
+import { estadoFianza, daysUntil, todayISO } from '../lib/dates.js';
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
@@ -16,9 +16,21 @@ router.get('/clientes', async (req, res) => {
     .all();
 
   const enriquecidos = await Promise.all(clientes.map(async (c) => {
-    const fianzas = await db.prepare('SELECT fecha_vigencia FROM fianzas WHERE client_id = ?').all(c.id);
+    const fianzas = await db.prepare(
+      `SELECT fecha_vigencia, fecha_recordatorio, recordatorio_atendido_el
+       FROM fianzas WHERE client_id = ?`
+    ).all(c.id);
     const porVencer = fianzas.filter((f) => estadoFianza(f.fecha_vigencia) === 'por_vencer').length;
     const vencidas = fianzas.filter((f) => estadoFianza(f.fecha_vigencia) === 'vencida').length;
+    const recordatorios = fianzas.filter((f) => {
+      if (!f.fecha_recordatorio || f.recordatorio_atendido_el) return false;
+      const d = daysUntil(f.fecha_recordatorio);
+      return d !== null && d <= 7;
+    }).length;
+
+    const proyectos = (await db.prepare(
+      'SELECT COUNT(*)::int c FROM proyectos WHERE client_id = ?'
+    ).get(c.id)).c;
 
     const docsPendientes = (await db.prepare(
       `SELECT COUNT(*)::int c FROM document_types dt
@@ -32,9 +44,11 @@ router.get('/clientes', async (req, res) => {
 
     return {
       ...c,
+      total_proyectos: proyectos,
       total_fianzas: fianzas.length,
       fianzas_por_vencer: porVencer,
       fianzas_vencidas: vencidas,
+      recordatorios_pendientes: recordatorios,
       docs_pendientes: docsPendientes,
       papeleria_pendiente: papeleriaPend,
     };
@@ -112,45 +126,221 @@ router.post('/afianzadoras', async (req, res) => {
   }
 });
 
-// --- Fianzas (pólizas) ---
+// --- Catálogo de tipos de fianza ---
 
-// POST /api/admin/fianzas -> cargar/actualizar póliza de un cliente
-router.post('/fianzas', async (req, res) => {
-  const { client_id, afianzadora_id, numero_poliza, tipo_fianza,
-          prima_neta, monto_afianzado, fecha_inicio, fecha_vigencia } = req.body || {};
-  if (!client_id || !afianzadora_id || !numero_poliza || !tipo_fianza) {
-    return res.status(400).json({ error: 'Faltan campos obligatorios' });
+router.get('/tipos-fianza', async (req, res) => {
+  const tipos = await db
+    .prepare('SELECT id, nombre, orden, activo FROM tipos_fianza WHERE activo = 1 ORDER BY orden, nombre')
+    .all();
+  res.json({ tipos });
+});
+
+router.post('/tipos-fianza', async (req, res) => {
+  const nombre = String(req.body?.nombre || '').trim();
+  if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
+  try {
+    // Si el tipo existía y estaba desactivado, se reactiva en vez de duplicarlo.
+    const row = await db.prepare(
+      `INSERT INTO tipos_fianza (nombre, orden) VALUES (?, 500)
+       ON CONFLICT (nombre) DO UPDATE SET activo = 1
+       RETURNING id`
+    ).get(nombre);
+    res.json({ ok: true, id: row.id });
+  } catch (e) {
+    res.status(400).json({ error: 'No se pudo agregar el tipo', detail: e.message });
+  }
+});
+
+// Baja lógica: las fianzas que ya lo usan conservan su tipo.
+router.delete('/tipos-fianza/:id', async (req, res) => {
+  await db.prepare('UPDATE tipos_fianza SET activo = 0 WHERE id = ?').run(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+// --- Proyectos (obras) ---
+
+const CAMPOS_PROYECTO = ['nombre', 'numero_contrato', 'beneficiario', 'monto_contrato',
+                         'fecha_inicio', 'fecha_termino', 'estatus', 'notas'];
+
+router.post('/proyectos', async (req, res) => {
+  const { client_id } = req.body || {};
+  const nombre = String(req.body?.nombre || '').trim();
+  if (!client_id || !nombre) {
+    return res.status(400).json({ error: 'client_id y nombre son obligatorios' });
   }
   const row = await db.prepare(
-    `INSERT INTO fianzas
-       (client_id, afianzadora_id, numero_poliza, tipo_fianza, prima_neta, monto_afianzado, fecha_inicio, fecha_vigencia)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
-  ).get(client_id, afianzadora_id, numero_poliza, tipo_fianza,
-        Number(prima_neta) || 0, Number(monto_afianzado) || 0,
-        fecha_inicio || null, fecha_vigencia || null);
+    `INSERT INTO proyectos (client_id, nombre, numero_contrato, beneficiario, monto_contrato,
+                            fecha_inicio, fecha_termino, estatus, notas)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+  ).get(Number(client_id), nombre,
+        req.body.numero_contrato || null, req.body.beneficiario || null,
+        Number(req.body.monto_contrato) || 0,
+        req.body.fecha_inicio || null, req.body.fecha_termino || null,
+        req.body.estatus || 'en_proceso', req.body.notas || null);
   res.json({ ok: true, id: row.id });
 });
 
+router.put('/proyectos/:id', async (req, res) => {
+  const { sets, valores } = camposAActualizar(req.body, CAMPOS_PROYECTO);
+  if (!sets.length) return res.status(400).json({ error: 'Nada que actualizar' });
+  await db.prepare(`UPDATE proyectos SET ${sets.join(', ')} WHERE id = ?`)
+    .run(...valores, Number(req.params.id));
+  res.json({ ok: true });
+});
+
+// Solo se permite borrar proyectos sin fianzas: si tiene, hay que moverlas antes.
+router.delete('/proyectos/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const { c } = await db.prepare('SELECT COUNT(*)::int c FROM fianzas WHERE proyecto_id = ?').get(id);
+  if (c > 0) {
+    return res.status(400).json({
+      error: `El proyecto tiene ${c} fianza(s). Reasígnalas a otro proyecto antes de eliminarlo.`,
+    });
+  }
+  await db.prepare('DELETE FROM proyectos WHERE id = ?').run(id);
+  res.json({ ok: true });
+});
+
+// --- Fianzas (pólizas) ---
+
+const CAMPOS_FIANZA = ['proyecto_id', 'afianzadora_id', 'numero_poliza', 'tipo_fianza_id',
+                       'prima_neta', 'monto_afianzado', 'fecha_inicio', 'fecha_vigencia',
+                       'fecha_recordatorio', 'nota_recordatorio'];
+
+// Construye el SET de un UPDATE solo con los campos que vienen en el body.
+// A diferencia de COALESCE, esto sí permite vaciar un campo mandando null.
+function camposAActualizar(body, permitidos) {
+  const sets = [];
+  const valores = [];
+  for (const campo of permitidos) {
+    if (!(campo in (body || {}))) continue;
+    const v = body[campo];
+    sets.push(`${campo} = ?`);
+    valores.push(v === '' ? null : v);
+  }
+  return { sets, valores };
+}
+
+// Valida que el proyecto exista y sea del cliente; devuelve el error o null.
+async function validarProyecto(proyectoId, clientId) {
+  if (!proyectoId) return 'Toda fianza debe pertenecer a un proyecto';
+  const p = await db.prepare('SELECT client_id FROM proyectos WHERE id = ?').get(Number(proyectoId));
+  if (!p) return 'El proyecto no existe';
+  if (clientId != null && p.client_id !== Number(clientId)) {
+    return 'El proyecto pertenece a otro cliente';
+  }
+  return null;
+}
+
+// El catálogo manda: el texto de tipo_fianza se deriva del id, nunca al revés.
+async function nombreTipo(tipoId) {
+  if (!tipoId) return null;
+  const t = await db.prepare('SELECT nombre FROM tipos_fianza WHERE id = ?').get(Number(tipoId));
+  return t ? t.nombre : null;
+}
+
+// POST /api/admin/fianzas -> alta de póliza dentro de un proyecto
+router.post('/fianzas', async (req, res) => {
+  const { client_id, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza_id,
+          prima_neta, monto_afianzado, fecha_inicio, fecha_vigencia,
+          fecha_recordatorio, nota_recordatorio } = req.body || {};
+
+  if (!client_id || !afianzadora_id || !numero_poliza) {
+    return res.status(400).json({ error: 'Cliente, afianzadora y número de póliza son obligatorios' });
+  }
+  const errProyecto = await validarProyecto(proyecto_id, client_id);
+  if (errProyecto) return res.status(400).json({ error: errProyecto });
+
+  const tipo = await nombreTipo(tipo_fianza_id);
+  if (!tipo) return res.status(400).json({ error: 'Selecciona un tipo de fianza del catálogo' });
+
+  const row = await db.prepare(
+    `INSERT INTO fianzas
+       (client_id, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza, tipo_fianza_id,
+        prima_neta, monto_afianzado, fecha_inicio, fecha_vigencia,
+        fecha_recordatorio, nota_recordatorio)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+  ).get(Number(client_id), Number(proyecto_id), Number(afianzadora_id), numero_poliza,
+        tipo, Number(tipo_fianza_id),
+        Number(prima_neta) || 0, Number(monto_afianzado) || 0,
+        fecha_inicio || null, fecha_vigencia || null,
+        fecha_recordatorio || null, nota_recordatorio || null);
+  res.json({ ok: true, id: row.id });
+});
+
+// PUT /api/admin/fianzas/:id -> edición completa de la póliza
 router.put('/fianzas/:id', async (req, res) => {
-  const f = req.body || {};
-  await db.prepare(
-    `UPDATE fianzas SET
-       numero_poliza = COALESCE(?, numero_poliza),
-       tipo_fianza   = COALESCE(?, tipo_fianza),
-       prima_neta    = COALESCE(?, prima_neta),
-       monto_afianzado = COALESCE(?, monto_afianzado),
-       fecha_inicio  = COALESCE(?, fecha_inicio),
-       fecha_vigencia = COALESCE(?, fecha_vigencia)
-     WHERE id = ?`
-  ).run(f.numero_poliza ?? null, f.tipo_fianza ?? null, f.prima_neta ?? null,
-        f.monto_afianzado ?? null, f.fecha_inicio ?? null, f.fecha_vigencia ?? null,
-        Number(req.params.id));
+  const id = Number(req.params.id);
+  const actual = await db
+    .prepare('SELECT client_id, fecha_recordatorio FROM fianzas WHERE id = ?')
+    .get(id);
+  if (!actual) return res.status(404).json({ error: 'Fianza no encontrada' });
+
+  const body = { ...(req.body || {}) };
+
+  if ('proyecto_id' in body) {
+    const err = await validarProyecto(body.proyecto_id, actual.client_id);
+    if (err) return res.status(400).json({ error: err });
+    body.proyecto_id = Number(body.proyecto_id);
+  }
+
+  // Si cambia el tipo, se reescribe también el texto denormalizado.
+  if ('tipo_fianza_id' in body) {
+    const tipo = await nombreTipo(body.tipo_fianza_id);
+    if (!tipo) return res.status(400).json({ error: 'Selecciona un tipo de fianza del catálogo' });
+    body.tipo_fianza_id = Number(body.tipo_fianza_id);
+  }
+
+  const { sets, valores } = camposAActualizar(body, CAMPOS_FIANZA);
+  if ('tipo_fianza_id' in body) {
+    sets.push('tipo_fianza = (SELECT nombre FROM tipos_fianza WHERE id = ?)');
+    valores.push(body.tipo_fianza_id);
+  }
+  // Si le ponen una fecha de recordatorio distinta, el aviso vuelve a estar vivo
+  // aunque el anterior ya se hubiera marcado como atendido.
+  if ('fecha_recordatorio' in body && (body.fecha_recordatorio || null) !== actual.fecha_recordatorio) {
+    sets.push('recordatorio_atendido_el = NULL');
+  }
+  if (!sets.length) return res.status(400).json({ error: 'Nada que actualizar' });
+
+  await db.prepare(`UPDATE fianzas SET ${sets.join(', ')} WHERE id = ?`).run(...valores, id);
+  res.json({ ok: true });
+});
+
+// Marca el recordatorio como atendido sin borrar la fecha (queda el histórico).
+router.put('/fianzas/:id/recordatorio', async (req, res) => {
+  const atendido = req.body?.atendido !== false;
+  await db.prepare('UPDATE fianzas SET recordatorio_atendido_el = ? WHERE id = ?')
+    .run(atendido ? todayISO() : null, Number(req.params.id));
   res.json({ ok: true });
 });
 
 router.delete('/fianzas/:id', async (req, res) => {
   await db.prepare('DELETE FROM fianzas WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
+});
+
+// GET /api/admin/recordatorios -> avisos internos vencidos o próximos (7 días)
+router.get('/recordatorios', async (req, res) => {
+  const dias = Number(req.query.dias) || 7;
+  const rows = await db.prepare(
+    `SELECT f.id, f.numero_poliza, f.tipo_fianza, f.fecha_recordatorio, f.nota_recordatorio,
+            f.monto_afianzado, c.id AS client_id, c.razon_social,
+            a.nombre AS afianzadora_nombre, p.nombre AS proyecto_nombre
+     FROM fianzas f
+     JOIN clients c ON c.id = f.client_id
+     JOIN afianzadoras a ON a.id = f.afianzadora_id
+     LEFT JOIN proyectos p ON p.id = f.proyecto_id
+     WHERE f.fecha_recordatorio IS NOT NULL
+       AND f.recordatorio_atendido_el IS NULL
+     ORDER BY f.fecha_recordatorio`
+  ).all();
+
+  const recordatorios = rows
+    .map((r) => ({ ...r, dias_restantes: daysUntil(r.fecha_recordatorio) }))
+    .filter((r) => r.dias_restantes !== null && r.dias_restantes <= dias);
+
+  res.json({ recordatorios });
 });
 
 // --- Papelería específica (solicitudes que crea Fortex) ---
@@ -175,10 +365,20 @@ router.get('/clientes/:id/detalle', async (req, res) => {
   if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
 
   const fianzasRows = await db.prepare(
-    `SELECT f.*, a.nombre AS afianzadora_nombre FROM fianzas f
-     JOIN afianzadoras a ON a.id = f.afianzadora_id WHERE f.client_id = ? ORDER BY f.fecha_vigencia`
+    `SELECT f.*, a.nombre AS afianzadora_nombre,
+            COALESCE(t.nombre, f.tipo_fianza) AS tipo_fianza,
+            p.nombre AS proyecto_nombre
+     FROM fianzas f
+     JOIN afianzadoras a ON a.id = f.afianzadora_id
+     LEFT JOIN tipos_fianza t ON t.id = f.tipo_fianza_id
+     LEFT JOIN proyectos p ON p.id = f.proyecto_id
+     WHERE f.client_id = ? ORDER BY f.fecha_vigencia`
   ).all(id);
-  const fianzas = fianzasRows.map((f) => ({ ...f, estado: estadoFianza(f.fecha_vigencia) }));
+  const fianzas = fianzasRows.map((f) => ({
+    ...f,
+    estado: estadoFianza(f.fecha_vigencia),
+    dias_para_recordatorio: daysUntil(f.fecha_recordatorio),
+  }));
 
   // Comprometido por afianzadora (fianzas no vencidas)
   const comprometidoPorAfi = new Map();
@@ -221,7 +421,30 @@ router.get('/clientes/:id/detalle', async (req, res) => {
      WHERE p.client_id = ? ORDER BY p.created_at DESC`
   ).all(id);
 
-  res.json({ cliente, lineas, fianzas, documentos, papeleria });
+  // Proyectos con sus fianzas dentro. Es la agrupación que ve el admin.
+  const proyectosRows = await db.prepare(
+    `SELECT * FROM proyectos WHERE client_id = ? ORDER BY estatus, nombre`
+  ).all(id);
+
+  const proyectos = proyectosRows.map((p) => {
+    const suyas = fianzas.filter((f) => f.proyecto_id === p.id);
+    const afianzado = suyas
+      .filter((f) => f.estado !== 'vencida')
+      .reduce((s, f) => s + (f.monto_afianzado || 0), 0);
+    return {
+      ...p,
+      fianzas: suyas,
+      total_fianzas: suyas.length,
+      monto_afianzado: afianzado,
+      prima_total: suyas.reduce((s, f) => s + (f.prima_neta || 0), 0),
+      // Qué tanto del contrato está respaldado por fianzas vigentes.
+      pct_contrato_afianzado: p.monto_contrato > 0
+        ? Math.round((afianzado / p.monto_contrato) * 100)
+        : null,
+    };
+  });
+
+  res.json({ cliente, lineas, proyectos, fianzas, documentos, papeleria });
 });
 
 // GET /api/admin/descargar?path=<url-del-blob> -> redirige al archivo público (Vercel Blob)
