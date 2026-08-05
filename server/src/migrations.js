@@ -17,6 +17,10 @@ export const MIGRACIONES = [
     // Reparte las fianzas que existían antes de que hubiera proyectos y tipos
     // de catálogo. Tiene que correr ANTES de 003, que tira la columna de texto.
     nombre: '001_backfill_proyectos_y_tipos',
+    // Si la 003 ya se llevó la columna de texto, no hay nada que repartir
+    // (y consultarla reventaría). Ninguna fianza nueva puede nacer huérfana:
+    // la API exige proyecto y tipo.
+    omitirSi: async (db) => (await tipoDeColumna(db, 'fianzas', 'tipo_fianza')) === null,
     sql: `
       INSERT INTO tipos_fianza (nombre, orden)
       SELECT DISTINCT btrim(f.tipo_fianza), 500
@@ -53,6 +57,10 @@ export const MIGRACIONES = [
     // Dinero a BIGINT en centavos. El float acumulaba error en montos de
     // millones; el redondeo se hace vía numeric, que es exacto.
     nombre: '002_dinero_en_centavos',
+    // Cinturón y tirantes: el registro de schema_migrations ya evita repetirla,
+    // pero si ese registro se perdiera, correrla de nuevo multiplicaría por 100
+    // otra vez. Si los montos ya son BIGINT, no hay nada que convertir.
+    omitirSi: async (db) => (await tipoDeColumna(db, 'fianzas', 'monto_afianzado')) === 'bigint',
     sql: `
       ALTER TABLE clients
         ALTER COLUMN linea_credito TYPE BIGINT USING round(linea_credito::numeric * 100);
@@ -108,6 +116,14 @@ export async function tablaExiste(db, nombre) {
   return Boolean(fila?.existe);
 }
 
+export async function tipoDeColumna(db, tabla, columna) {
+  const fila = await db.prepare(
+    `SELECT data_type FROM information_schema.columns
+     WHERE table_name = ? AND column_name = ?`
+  ).get(tabla, columna);
+  return fila?.data_type ?? null;
+}
+
 async function asegurarRegistro(db) {
   await db.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
     nombre      TEXT PRIMARY KEY,
@@ -150,11 +166,16 @@ export async function correrMigraciones(db) {
   const corridas = [];
   for (const m of MIGRACIONES) {
     if (aplicadas.has(m.nombre)) continue;
-    for (const stmt of sentencias(m.sql)) {
-      await db.query(stmt);
+
+    // La migración se da por hecha aunque no haya que ejecutarla: así queda
+    // registrada y no se vuelve a evaluar en cada arranque.
+    if (!(m.omitirSi && (await m.omitirSi(db)))) {
+      for (const stmt of sentencias(m.sql)) {
+        await db.query(stmt);
+      }
+      corridas.push(m.nombre);
     }
     await db.prepare('INSERT INTO schema_migrations (nombre) VALUES (?)').run(m.nombre);
-    corridas.push(m.nombre);
   }
   return corridas;
 }

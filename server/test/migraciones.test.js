@@ -70,6 +70,20 @@ test('volver a llamar /api/setup NO vuelve a multiplicar los montos', async () =
   assert.deepEqual(despues, antes, 'los montos cambiaron al re-aplicar el esquema');
 });
 
+test('aunque se pierda el registro de migraciones, los montos no se duplican', async () => {
+  const db = await baseVieja();
+  await inicializar(db);
+  const antes = await sumas(db);
+
+  // Caso catastrófico: alguien vacía schema_migrations (o se restaura un
+  // respaldo viejo del registro) y /api/setup vuelve a correr.
+  await db.query('DELETE FROM schema_migrations');
+  await inicializar(db);
+
+  assert.deepEqual(await sumas(db), antes,
+    'la conversión a centavos se aplicó dos veces');
+});
+
 test('deja los montos como BIGINT', async () => {
   const db = await baseVieja();
   await inicializar(db);
