@@ -4,24 +4,22 @@
 // Mantiene una API parecida a la de node:sqlite (prepare().get/all/run) pero
 // ASÍNCRONA: cada método devuelve una Promesa. Los placeholders siguen siendo
 // '?' y aquí se convierten a $1, $2, ... de Postgres.
-import { neon, types as pgTypes } from '@neondatabase/serverless';
+import { neon } from '@neondatabase/serverless';
 import { inicializar } from './migrations.js';
 
-// El dinero vive en BIGINT (centavos). Por omisión el driver entrega int8 y
-// numeric como STRING, así que `total + fila.monto` concatenaría texto en vez
-// de sumar. Los convertimos a Number aquí, en la frontera con la base:
-// son centavos enteros, siempre muy por debajo de 2^53, así que la suma y la
-// resta son exactas (que es justo lo que el float no garantizaba).
-const OID_INT8 = 20;
-const OID_NUMERIC = 1700;
-const types = {
-  getTypeParser(oid, format) {
-    if (oid === OID_INT8 || oid === OID_NUMERIC) {
-      return (valor) => (valor === null ? null : Number(valor));
-    }
-    return pgTypes.getTypeParser(oid, format);
-  },
-};
+// El dinero vive en BIGINT (centavos), y el driver entrega int8 y numeric como
+// STRING. Sin convertirlos, `total + fila.monto` CONCATENA en vez de sumar y
+// tres fianzas de $387,584.82 dan "$3,875,848,238,758,482,000,000".
+//
+// Ojo: la opción `types` de neon() NO sirve para esto — el driver HTTP la
+// ignora en silencio (verificado en server/test/driver-neon.test.js). La vía
+// que sí funciona es pedir `fullResults`, que además de las filas devuelve el
+// TIPO de cada columna, y convertir con base en eso.
+//
+// Tiene que ser por tipo de columna y no por cómo se ve el valor: numero_poliza
+// es TEXT y suele traer ceros a la izquierda ("0301121"), que se perderían.
+const OID_INT8 = 20;     // bigint
+const OID_NUMERIC = 1700; // numeric (lo que devuelve SUM sobre un bigint)
 
 // Cliente Neon perezoso: se construye en el primer uso para no fallar al
 // importar el módulo cuando aún no hay DATABASE_URL (p.ej. durante el build).
@@ -31,12 +29,32 @@ function client() {
   if (!process.env.DATABASE_URL) {
     throw new Error('Falta DATABASE_URL: define la cadena de conexión de Postgres (Neon).');
   }
-  _sql = neon(process.env.DATABASE_URL, { types });
+  _sql = neon(process.env.DATABASE_URL, { fullResults: true });
   return _sql;
 }
-// El driver HTTP de Neon se invoca como función: sql(texto, params) -> filas.
+
+// Convierte a Number las columnas que Postgres manda como texto por ser
+// enteros de 64 bits. Son centavos, muy por debajo de 2^53, así que sumar y
+// restar es exacto — que es justo lo que el float no garantizaba.
+function convertirEnteros({ fields = [], rows = [] }) {
+  const numericas = fields
+    .filter((f) => f.dataTypeID === OID_INT8 || f.dataTypeID === OID_NUMERIC)
+    .map((f) => f.name);
+  if (!numericas.length) return rows;
+
+  for (const fila of rows) {
+    for (const columna of numericas) {
+      if (fila[columna] !== null && fila[columna] !== undefined) {
+        fila[columna] = Number(fila[columna]);
+      }
+    }
+  }
+  return rows;
+}
+
+// El driver HTTP de Neon se invoca como función: sql(texto, params).
 const sql = {
-  query: (text, params) => client()(text, params),
+  query: async (text, params) => convertirEnteros(await client()(text, params)),
 };
 
 // Convierte los '?' posicionales al formato $1, $2, ... de Postgres.
