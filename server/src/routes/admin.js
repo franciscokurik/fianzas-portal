@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import db from '../db.js';
 import { requireAuth, requireAdmin } from '../auth/middleware.js';
 import { estadoFianza, daysUntil, todayISO } from '../lib/dates.js';
+import { centavos } from '../lib/dinero.js';
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
@@ -95,7 +96,7 @@ router.put('/clientes/:id/lineas', async (req, res) => {
      VALUES (?, ?, ?)
      ON CONFLICT(client_id, afianzadora_id)
        DO UPDATE SET linea_credito = excluded.linea_credito`
-  ).run(clientId, Number(afianzadora_id), Number(linea_credito) || 0);
+  ).run(clientId, Number(afianzadora_id), centavos(linea_credito));
   res.json({ ok: true });
 });
 
@@ -174,14 +175,16 @@ router.post('/proyectos', async (req, res) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
   ).get(Number(client_id), nombre,
         req.body.numero_contrato || null, req.body.beneficiario || null,
-        Number(req.body.monto_contrato) || 0,
+        centavos(req.body.monto_contrato),
         req.body.fecha_inicio || null, req.body.fecha_termino || null,
         req.body.estatus || 'en_proceso', req.body.notas || null);
   res.json({ ok: true, id: row.id });
 });
 
 router.put('/proyectos/:id', async (req, res) => {
-  const { sets, valores } = camposAActualizar(req.body, CAMPOS_PROYECTO);
+  const body = { ...(req.body || {}) };
+  if ('monto_contrato' in body) body.monto_contrato = centavos(body.monto_contrato);
+  const { sets, valores } = camposAActualizar(body, CAMPOS_PROYECTO);
   if (!sets.length) return res.status(400).json({ error: 'Nada que actualizar' });
   await db.prepare(`UPDATE proyectos SET ${sets.join(', ')} WHERE id = ?`)
     .run(...valores, Number(req.params.id));
@@ -232,11 +235,11 @@ async function validarProyecto(proyectoId, clientId) {
   return null;
 }
 
-// El catálogo manda: el texto de tipo_fianza se deriva del id, nunca al revés.
-async function nombreTipo(tipoId) {
-  if (!tipoId) return null;
-  const t = await db.prepare('SELECT nombre FROM tipos_fianza WHERE id = ?').get(Number(tipoId));
-  return t ? t.nombre : null;
+// El tipo lo manda el catálogo; la fianza solo guarda la referencia.
+async function tipoExiste(tipoId) {
+  if (!tipoId) return false;
+  const t = await db.prepare('SELECT id FROM tipos_fianza WHERE id = ?').get(Number(tipoId));
+  return Boolean(t);
 }
 
 // POST /api/admin/fianzas -> alta de póliza dentro de un proyecto
@@ -251,18 +254,19 @@ router.post('/fianzas', async (req, res) => {
   const errProyecto = await validarProyecto(proyecto_id, client_id);
   if (errProyecto) return res.status(400).json({ error: errProyecto });
 
-  const tipo = await nombreTipo(tipo_fianza_id);
-  if (!tipo) return res.status(400).json({ error: 'Selecciona un tipo de fianza del catálogo' });
+  if (!(await tipoExiste(tipo_fianza_id))) {
+    return res.status(400).json({ error: 'Selecciona un tipo de fianza del catálogo' });
+  }
 
   const row = await db.prepare(
     `INSERT INTO fianzas
-       (client_id, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza, tipo_fianza_id,
+       (client_id, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza_id,
         prima_neta, monto_afianzado, fecha_inicio, fecha_vigencia,
         fecha_recordatorio, nota_recordatorio)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
   ).get(Number(client_id), Number(proyecto_id), Number(afianzadora_id), numero_poliza,
-        tipo, Number(tipo_fianza_id),
-        Number(prima_neta) || 0, Number(monto_afianzado) || 0,
+        Number(tipo_fianza_id),
+        centavos(prima_neta), centavos(monto_afianzado),
         fecha_inicio || null, fecha_vigencia || null,
         fecha_recordatorio || null, nota_recordatorio || null);
   res.json({ ok: true, id: row.id });
@@ -284,18 +288,19 @@ router.put('/fianzas/:id', async (req, res) => {
     body.proyecto_id = Number(body.proyecto_id);
   }
 
-  // Si cambia el tipo, se reescribe también el texto denormalizado.
   if ('tipo_fianza_id' in body) {
-    const tipo = await nombreTipo(body.tipo_fianza_id);
-    if (!tipo) return res.status(400).json({ error: 'Selecciona un tipo de fianza del catálogo' });
+    if (!(await tipoExiste(body.tipo_fianza_id))) {
+      return res.status(400).json({ error: 'Selecciona un tipo de fianza del catálogo' });
+    }
     body.tipo_fianza_id = Number(body.tipo_fianza_id);
   }
 
-  const { sets, valores } = camposAActualizar(body, CAMPOS_FIANZA);
-  if ('tipo_fianza_id' in body) {
-    sets.push('tipo_fianza = (SELECT nombre FROM tipos_fianza WHERE id = ?)');
-    valores.push(body.tipo_fianza_id);
+  // Los montos llegan en centavos; se normalizan a entero por si acaso.
+  for (const campo of ['prima_neta', 'monto_afianzado']) {
+    if (campo in body) body[campo] = centavos(body[campo]);
   }
+
+  const { sets, valores } = camposAActualizar(body, CAMPOS_FIANZA);
   // Si le ponen una fecha de recordatorio distinta, el aviso vuelve a estar vivo
   // aunque el anterior ya se hubiera marcado como atendido.
   if ('fecha_recordatorio' in body && (body.fecha_recordatorio || null) !== actual.fecha_recordatorio) {
@@ -324,12 +329,14 @@ router.delete('/fianzas/:id', async (req, res) => {
 router.get('/recordatorios', async (req, res) => {
   const dias = Number(req.query.dias) || 7;
   const rows = await db.prepare(
-    `SELECT f.id, f.numero_poliza, f.tipo_fianza, f.fecha_recordatorio, f.nota_recordatorio,
+    `SELECT f.id, f.numero_poliza, t.nombre AS tipo_fianza,
+            f.fecha_recordatorio, f.nota_recordatorio,
             f.monto_afianzado, c.id AS client_id, c.razon_social,
             a.nombre AS afianzadora_nombre, p.nombre AS proyecto_nombre
      FROM fianzas f
      JOIN clients c ON c.id = f.client_id
      JOIN afianzadoras a ON a.id = f.afianzadora_id
+     LEFT JOIN tipos_fianza t ON t.id = f.tipo_fianza_id
      LEFT JOIN proyectos p ON p.id = f.proyecto_id
      WHERE f.fecha_recordatorio IS NOT NULL
        AND f.recordatorio_atendido_el IS NULL
@@ -366,7 +373,7 @@ router.get('/clientes/:id/detalle', async (req, res) => {
 
   const fianzasRows = await db.prepare(
     `SELECT f.*, a.nombre AS afianzadora_nombre,
-            COALESCE(t.nombre, f.tipo_fianza) AS tipo_fianza,
+            t.nombre AS tipo_fianza,
             p.nombre AS proyecto_nombre
      FROM fianzas f
      JOIN afianzadoras a ON a.id = f.afianzadora_id

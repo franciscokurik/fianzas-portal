@@ -41,7 +41,7 @@ router.get('/proyectos', requireAuth, async (req, res) => {
 router.get('/', requireAuth, async (req, res) => {
   const { afianzadora_id, proyecto_id } = req.query;
   let sql = `SELECT f.*, a.nombre AS afianzadora_nombre, a.slug AS afianzadora_slug,
-                    COALESCE(t.nombre, f.tipo_fianza) AS tipo_fianza,
+                    t.nombre AS tipo_fianza,
                     p.nombre AS proyecto_nombre, p.numero_contrato, p.monto_contrato
              FROM fianzas f
              JOIN afianzadoras a ON a.id = f.afianzadora_id

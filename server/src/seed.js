@@ -9,6 +9,9 @@ import { addMonths, todayISO } from './lib/dates.js';
 
 const hash = (p) => bcrypt.hashSync(p, 10);
 
+// Los montos se guardan en centavos: aquí se escriben en pesos por legibilidad.
+const pesos = (n) => Math.round(n * 100);
+
 export async function seed() {
   await initSchema();
 
@@ -77,10 +80,10 @@ export async function seed() {
   const insLinea = db.prepare(
     `INSERT INTO client_credit_lines (client_id, afianzadora_id, linea_credito) VALUES (?, ?, ?)`
   );
-  await insLinea.run(c1, afiIds['aserta'], 3000000);
-  await insLinea.run(c1, afiIds['berkley'], 1000000);
-  await insLinea.run(c1, afiIds['tokio-marine'], 2000000);
-  await insLinea.run(c2, afiIds['chubb'], 1000000);
+  await insLinea.run(c1, afiIds['aserta'], pesos(3000000));
+  await insLinea.run(c1, afiIds['berkley'], pesos(1000000));
+  await insLinea.run(c1, afiIds['tokio-marine'], pesos(2000000));
+  await insLinea.run(c2, afiIds['chubb'], pesos(1000000));
 
   const hoy = todayISO();
 
@@ -96,31 +99,31 @@ export async function seed() {
   );
   const pAcueducto = (await insProyecto.get(
     c1, 'Acueducto Poniente – Etapa II', 'CFE-2024-0871', 'Comisión Federal de Electricidad',
-    24000000, addMonths(hoy, -12), addMonths(hoy, 6), 'en_proceso'
+    pesos(24000000), addMonths(hoy, -12), addMonths(hoy, 6), 'en_proceso'
   )).id;
   const pHospital = (await insProyecto.get(
     c1, 'Ampliación Hospital General', 'IMSS-LP-2025-14', 'IMSS',
-    18500000, addMonths(hoy, -3), addMonths(hoy, 12), 'en_proceso'
+    pesos(18500000), addMonths(hoy, -3), addMonths(hoy, 12), 'en_proceso'
   )).id;
   const pPavimento = (await insProyecto.get(
     c1, 'Repavimentación Av. Constitución', 'MTY-OP-2023-330', 'Municipio de Monterrey',
-    7200000, addMonths(hoy, -16), addMonths(hoy, -2), 'terminado'
+    pesos(7200000), addMonths(hoy, -16), addMonths(hoy, -2), 'terminado'
   )).id;
   const pSubestacion = (await insProyecto.get(
     c2, 'Subestación eléctrica Apodaca', 'CFE-2024-1102', 'Comisión Federal de Electricidad',
-    9800000, addMonths(hoy, -10), addMonths(hoy, 3), 'en_proceso'
+    pesos(9800000), addMonths(hoy, -10), addMonths(hoy, 3), 'en_proceso'
   )).id;
 
   // --- Fianzas (variando vigencias para ver los estados) ---
   const insFianza = db.prepare(
-    `INSERT INTO fianzas (client_id, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza,
+    `INSERT INTO fianzas (client_id, proyecto_id, afianzadora_id, numero_poliza,
                           tipo_fianza_id, prima_neta, monto_afianzado, fecha_inicio, fecha_vigencia,
                           fecha_recordatorio, nota_recordatorio)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const fianza = (clientId, proyectoId, afiSlug, poliza, tipo, prima, monto, ini, fin, rec = null, nota = null) =>
-    insFianza.run(clientId, proyectoId, afiIds[afiSlug], poliza, tipo, tipoIdPorNombre.get(tipo) ?? null,
-                  prima, monto, ini, fin, rec, nota);
+    insFianza.run(clientId, proyectoId, afiIds[afiSlug], poliza, tipoIdPorNombre.get(tipo) ?? null,
+                  pesos(prima), pesos(monto), ini, fin, rec, nota);
 
   await fianza(c1, pAcueducto, 'aserta', 'ASE-2024-0012', 'Cumplimiento', 18500, 1200000,
     addMonths(hoy, -10), addMonths(hoy, 8),

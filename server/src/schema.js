@@ -1,6 +1,12 @@
 // Esquema de la base de datos como cadena JS (no como archivo .sql) para que
 // SIEMPRE quede incluido en el bundle serverless de Vercel (un fs.readFile de
 // un .sql podría no empaquetarse). Dialecto: PostgreSQL (Neon / Vercel Postgres).
+//
+// AQUÍ SOLO VA DDL IDEMPOTENTE: este bloque corre completo en cada /api/setup.
+// Lo que solo puede pasar una vez (convertir montos, tirar columnas) va en
+// migrations.js.
+//
+// El dinero se guarda en BIGINT y en CENTAVOS, nunca en punto flotante.
 const TS_DEFAULT = "to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')";
 
 export const SCHEMA_SQL = `
@@ -11,7 +17,7 @@ CREATE TABLE IF NOT EXISTS clients (
   email         TEXT    UNIQUE NOT NULL,
   password_hash TEXT    NOT NULL,
   role          TEXT    NOT NULL DEFAULT 'client',
-  linea_credito DOUBLE PRECISION NOT NULL DEFAULT 0,
+  linea_credito BIGINT  NOT NULL DEFAULT 0,
   telefono      TEXT,
   created_at    TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
 );
@@ -27,7 +33,7 @@ CREATE TABLE IF NOT EXISTS client_credit_lines (
   id             SERIAL PRIMARY KEY,
   client_id      INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   afianzadora_id INTEGER NOT NULL REFERENCES afianzadoras(id) ON DELETE CASCADE,
-  linea_credito  DOUBLE PRECISION NOT NULL DEFAULT 0,
+  linea_credito  BIGINT  NOT NULL DEFAULT 0,
   created_at     TEXT    NOT NULL DEFAULT ${TS_DEFAULT},
   UNIQUE(client_id, afianzadora_id)
 );
@@ -48,7 +54,7 @@ CREATE TABLE IF NOT EXISTS proyectos (
   nombre          TEXT    NOT NULL,
   numero_contrato TEXT,
   beneficiario    TEXT,
-  monto_contrato  DOUBLE PRECISION NOT NULL DEFAULT 0,
+  monto_contrato  BIGINT  NOT NULL DEFAULT 0,
   fecha_inicio    TEXT,
   fecha_termino   TEXT,
   estatus         TEXT    NOT NULL DEFAULT 'en_proceso',
@@ -57,14 +63,17 @@ CREATE TABLE IF NOT EXISTS proyectos (
 );
 CREATE INDEX IF NOT EXISTS idx_proyectos_client ON proyectos(client_id);
 
+-- El tipo lo manda tipos_fianza. En bases viejas todavía existe la columna de
+-- texto libre 'tipo_fianza'; la migración 003 la tira una vez respaldada.
 CREATE TABLE IF NOT EXISTS fianzas (
   id             SERIAL PRIMARY KEY,
   client_id      INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  proyecto_id    INTEGER REFERENCES proyectos(id) ON DELETE RESTRICT,
   afianzadora_id INTEGER NOT NULL REFERENCES afianzadoras(id),
   numero_poliza  TEXT    NOT NULL,
-  tipo_fianza    TEXT    NOT NULL,
-  prima_neta     DOUBLE PRECISION NOT NULL DEFAULT 0,
-  monto_afianzado DOUBLE PRECISION NOT NULL DEFAULT 0,
+  tipo_fianza_id INTEGER REFERENCES tipos_fianza(id),
+  prima_neta     BIGINT  NOT NULL DEFAULT 0,
+  monto_afianzado BIGINT NOT NULL DEFAULT 0,
   fecha_inicio   TEXT,
   fecha_vigencia TEXT,
   created_at     TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
@@ -129,7 +138,8 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 -- ---------------------------------------------------------------------------
--- Datos base y migración de lo que ya existe. Todo re-ejecutable sin efectos.
+-- Datos base. Re-ejecutable sin efectos; el backfill de lo que ya existía
+-- vive en migrations.js porque solo puede correr una vez.
 -- ---------------------------------------------------------------------------
 
 -- Catálogo estándar del ramo. El admin puede agregar más desde el panel.
@@ -145,37 +155,4 @@ INSERT INTO tipos_fianza (nombre, orden) VALUES
   ('Judicial', 90),
   ('Crédito', 100)
 ON CONFLICT (nombre) DO NOTHING;
-
--- Los tipos que hoy están capturados como texto libre y no coinciden con el
--- catálogo se agregan tal cual, para no perder información de nadie.
-INSERT INTO tipos_fianza (nombre, orden)
-SELECT DISTINCT btrim(f.tipo_fianza), 500
-FROM fianzas f
-WHERE f.tipo_fianza IS NOT NULL
-  AND btrim(f.tipo_fianza) <> ''
-  AND NOT EXISTS (
-    SELECT 1 FROM tipos_fianza t WHERE lower(t.nombre) = lower(btrim(f.tipo_fianza))
-  )
-ON CONFLICT (nombre) DO NOTHING;
-
-UPDATE fianzas f SET tipo_fianza_id = t.id
-FROM tipos_fianza t
-WHERE f.tipo_fianza_id IS NULL
-  AND lower(t.nombre) = lower(btrim(f.tipo_fianza));
-
--- Toda fianza requiere proyecto: a las que venían sueltas se les crea uno
--- llamado 'General' por cliente para que el admin las reasigne después.
-INSERT INTO proyectos (client_id, nombre, notas)
-SELECT DISTINCT f.client_id, 'General', 'Creado automáticamente al migrar fianzas que no tenían proyecto.'
-FROM fianzas f
-WHERE f.proyecto_id IS NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM proyectos p WHERE p.client_id = f.client_id AND p.nombre = 'General'
-  );
-
-UPDATE fianzas f SET proyecto_id = p.id
-FROM proyectos p
-WHERE f.proyecto_id IS NULL
-  AND p.client_id = f.client_id
-  AND p.nombre = 'General';
 `;

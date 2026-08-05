@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { mxn, mxnCents, fmtDate, EstadoBadge } from '../lib.jsx';
+import { mxn, mxnCents, fmtDate, EstadoBadge, InputPesos } from '../lib.jsx';
 
 const inputCls =
   'w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100';
@@ -406,13 +406,14 @@ function Req() { return <span className="text-rose-500">*</span>; }
 function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
   const [edits, setEdits] = useState({}); // afianzadora_id -> valor en edición
   const [nuevaAfi, setNuevaAfi] = useState('');
-  const [nuevoMonto, setNuevoMonto] = useState('');
+  const [nuevoMonto, setNuevoMonto] = useState(0); // en centavos
 
   const usadas = new Set(lineas.map((l) => l.afianzadora_id));
   const disponiblesParaAgregar = afianzadoras.filter((a) => !usadas.has(a.id));
 
   async function guardar(afianzadora_id, linea_credito) {
-    await api.put(`/admin/clientes/${clienteId}/lineas`, { afianzadora_id, linea_credito: Number(linea_credito) || 0 });
+    // linea_credito ya viene en centavos desde InputPesos.
+    await api.put(`/admin/clientes/${clienteId}/lineas`, { afianzadora_id, linea_credito });
     setEdits((e) => { const n = { ...e }; delete n[afianzadora_id]; return n; });
     onChange();
   }
@@ -424,8 +425,8 @@ function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
 
   async function agregar() {
     if (!nuevaAfi) return;
-    await api.put(`/admin/clientes/${clienteId}/lineas`, { afianzadora_id: Number(nuevaAfi), linea_credito: Number(nuevoMonto) || 0 });
-    setNuevaAfi(''); setNuevoMonto('');
+    await api.put(`/admin/clientes/${clienteId}/lineas`, { afianzadora_id: Number(nuevaAfi), linea_credito: nuevoMonto });
+    setNuevaAfi(''); setNuevoMonto(0);
     onChange();
   }
 
@@ -454,10 +455,9 @@ function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
                 <tr key={l.afianzadora_id} className="hover:bg-slate-50/40">
                   <td className="px-3 py-1.5 text-slate-700 font-medium">{l.afianzadora_nombre}</td>
                   <td className="px-3 py-1.5 text-right">
-                    <input
-                      type="number"
-                      value={editing}
-                      onChange={(e) => setEdits((s) => ({ ...s, [l.afianzadora_id]: e.target.value }))}
+                    <InputPesos
+                      valor={editing}
+                      onChange={(centavos) => setEdits((s) => ({ ...s, [l.afianzadora_id]: centavos }))}
                       className="w-32 px-2 py-1 text-right rounded-md border border-slate-200 bg-white tabular-nums focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
                     />
                   </td>
@@ -492,7 +492,7 @@ function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
               <option value="">Selecciona afianzadora…</option>
               {disponiblesParaAgregar.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
             </select>
-            <input type="number" value={nuevoMonto} onChange={(e) => setNuevoMonto(e.target.value)} placeholder="Monto de la línea" className={inputCls} />
+            <InputPesos valor={nuevoMonto} onChange={setNuevoMonto} placeholder="Monto de la línea" className={inputCls} />
             <button onClick={agregar} className={btnPrimary}><Plus className="w-4 h-4" /> Asignar</button>
           </div>
         </div>
@@ -765,7 +765,7 @@ function FormProyecto({ inicial, onSubmit, onCancel }) {
     nombre: inicial?.nombre || '',
     numero_contrato: inicial?.numero_contrato || '',
     beneficiario: inicial?.beneficiario || '',
-    monto_contrato: inicial?.monto_contrato ?? '',
+    monto_contrato: inicial?.monto_contrato ?? 0, // centavos
     fecha_inicio: inicial?.fecha_inicio || '',
     fecha_termino: inicial?.fecha_termino || '',
     estatus: inicial?.estatus || 'en_proceso',
@@ -780,7 +780,7 @@ function FormProyecto({ inicial, onSubmit, onCancel }) {
     if (!f.nombre.trim()) return setError('El nombre del proyecto es obligatorio.');
     setBusy(true);
     try {
-      await onSubmit({ ...f, monto_contrato: Number(f.monto_contrato) || 0 });
+      await onSubmit(f); // monto_contrato ya está en centavos
     } catch (e) {
       setError(e.message);
     } finally {
@@ -814,7 +814,11 @@ function FormProyecto({ inicial, onSubmit, onCancel }) {
         </div>
         <div>
           <label className="text-[11px] text-slate-500 mb-1 block">Monto del contrato</label>
-          <input type="number" value={f.monto_contrato} onChange={set('monto_contrato')} className={inputCls} />
+          <InputPesos
+            valor={f.monto_contrato}
+            onChange={(centavos) => setF((s) => ({ ...s, monto_contrato: centavos }))}
+            className={inputCls}
+          />
         </div>
         <div>
           <label className="text-[11px] text-slate-500 mb-1 block">Fecha de inicio</label>
@@ -888,8 +892,8 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
     afianzadora_id: inicial?.afianzadora_id ?? '',
     numero_poliza: inicial?.numero_poliza || '',
     tipo_fianza_id: inicial?.tipo_fianza_id ?? '',
-    monto_afianzado: inicial?.monto_afianzado ?? '',
-    prima_neta: inicial?.prima_neta ?? '',
+    monto_afianzado: inicial?.monto_afianzado ?? 0, // centavos
+    prima_neta: inicial?.prima_neta ?? 0,           // centavos
     fecha_inicio: inicial?.fecha_inicio || '',
     fecha_vigencia: inicial?.fecha_vigencia || '',
     fecha_recordatorio: inicial?.fecha_recordatorio || '',
@@ -907,13 +911,12 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
     if (!f.tipo_fianza_id) return setError('Marca el tipo de fianza.');
     setBusy(true);
     try {
+      // monto_afianzado y prima_neta ya van en centavos.
       await onSubmit({
         ...f,
         proyecto_id: Number(f.proyecto_id),
         afianzadora_id: Number(f.afianzadora_id),
         tipo_fianza_id: Number(f.tipo_fianza_id),
-        monto_afianzado: Number(f.monto_afianzado) || 0,
-        prima_neta: Number(f.prima_neta) || 0,
       });
     } catch (e) {
       setError(e.message);
@@ -955,14 +958,22 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
               Monto afianzado
               <span className="text-slate-400 font-normal"> · lo que cubre la fianza</span>
             </label>
-            <input type="number" value={f.monto_afianzado} onChange={set('monto_afianzado')} className={inputCls} />
+            <InputPesos
+              valor={f.monto_afianzado}
+              onChange={(centavos) => setF((s) => ({ ...s, monto_afianzado: centavos }))}
+              className={inputCls}
+            />
           </div>
           <div>
             <label className="text-[11px] text-slate-500 mb-1 block">
               Prima neta
               <span className="text-slate-400 font-normal"> · lo que se paga</span>
             </label>
-            <input type="number" value={f.prima_neta} onChange={set('prima_neta')} className={inputCls} />
+            <InputPesos
+              valor={f.prima_neta}
+              onChange={(centavos) => setF((s) => ({ ...s, prima_neta: centavos }))}
+              className={inputCls}
+            />
           </div>
           <div>
             <label className="text-[11px] text-slate-500 mb-1 block">Fecha de inicio</label>
