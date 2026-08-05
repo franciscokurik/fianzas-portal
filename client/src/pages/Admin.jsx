@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import {
   ShieldCheck, LogOut, Building2, Plus, Save, Download,
   Users, FileText, Files, CheckCircle2, UserPlus, AlertTriangle,
-  CreditCard, Trash2,
+  CreditCard, Trash2, Briefcase, Pencil, X, Bell, ListChecks, Check,
 } from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { mxn, mxnCents, fmtDate, EstadoBadge } from '../lib.jsx';
+import { mxn, mxnCents, fmtDate, EstadoBadge, InputPesos } from '../lib.jsx';
 
 const inputCls =
   'w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100';
@@ -15,18 +15,31 @@ const btnPrimary =
 const btnSecondary =
   'flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300';
 
+const ESTATUS_PROYECTO = [
+  ['en_proceso', 'En proceso'],
+  ['terminado', 'Terminado'],
+  ['entregado', 'Entregado'],
+  ['cerrado', 'Cerrado'],
+  ['cancelado', 'Cancelado'],
+];
+const etiquetaEstatus = (v) => (ESTATUS_PROYECTO.find(([k]) => k === v) || [, v])[1];
+
 export default function Admin() {
   const { logout } = useAuth();
   const [clientes, setClientes] = useState([]);
   const [afianzadoras, setAfianzadoras] = useState([]);
+  const [tipos, setTipos] = useState([]);
+  const [recordatorios, setRecordatorios] = useState([]);
   const [sel, setSel] = useState(null);
   const [detalle, setDetalle] = useState(null);
   const [msg, setMsg] = useState('');
 
   const cargarClientes = () => api.get('/admin/clientes').then((d) => setClientes(d.clientes));
   const cargarAfianzadoras = () => api.get('/admin/afianzadoras').then((d) => setAfianzadoras(d.afianzadoras));
+  const cargarTipos = () => api.get('/admin/tipos-fianza').then((d) => setTipos(d.tipos));
+  const cargarRecordatorios = () => api.get('/admin/recordatorios').then((d) => setRecordatorios(d.recordatorios));
 
-  useEffect(() => { cargarClientes(); cargarAfianzadoras(); }, []);
+  useEffect(() => { cargarClientes(); cargarAfianzadoras(); cargarTipos(); cargarRecordatorios(); }, []);
 
   function abrirDetalle(id) {
     setSel(id);
@@ -34,6 +47,9 @@ export default function Admin() {
   }
   const recargarDetalle = () => sel && api.get(`/admin/clientes/${sel}/detalle`).then(setDetalle);
   const flash = (t) => { setMsg(t); setTimeout(() => setMsg(''), 3000); };
+
+  // Cualquier cambio en fianzas puede mover los recordatorios pendientes.
+  const refrescarTodo = () => { recargarDetalle(); cargarClientes(); cargarRecordatorios(); };
 
   return (
     <div className="min-h-screen">
@@ -57,7 +73,7 @@ export default function Admin() {
             <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
               <Building2 className="w-5 h-5 text-indigo-600" /> Panel de administración
             </h1>
-            <p className="text-sm text-slate-500 mt-0.5">Home Office · gestión de clientes y pólizas</p>
+            <p className="text-sm text-slate-500 mt-0.5">Home Office · gestión de clientes, proyectos y pólizas</p>
           </div>
         </div>
 
@@ -67,11 +83,18 @@ export default function Admin() {
           </div>
         )}
 
+        <Recordatorios
+          recordatorios={recordatorios}
+          onAbrirCliente={abrirDetalle}
+          onAtendido={() => { cargarRecordatorios(); recargarDetalle(); flash('Recordatorio marcado como atendido'); }}
+        />
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Columna izquierda */}
           <div className="space-y-4">
             <NuevoCliente onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }} />
             <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
+            <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
 
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
               <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
@@ -80,7 +103,9 @@ export default function Admin() {
               </div>
               <div className="divide-y divide-slate-100 max-h-[65vh] overflow-y-auto">
                 {clientes.map((c) => {
-                  const alerta = c.fianzas_vencidas > 0 || c.docs_pendientes > 0 || c.papeleria_pendiente > 0 || c.fianzas_por_vencer > 0;
+                  const alerta = c.fianzas_vencidas > 0 || c.docs_pendientes > 0
+                    || c.papeleria_pendiente > 0 || c.fianzas_por_vencer > 0
+                    || c.recordatorios_pendientes > 0;
                   return (
                     <button
                       key={c.id}
@@ -92,7 +117,10 @@ export default function Admin() {
                         {alerta && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />}
                       </div>
                       <p className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
-                        {c.total_fianzas} fianzas · {c.fianzas_vencidas} vencidas · {c.docs_pendientes} docs pend.
+                        {c.total_proyectos} proyectos · {c.total_fianzas} fianzas · {c.fianzas_vencidas} vencidas
+                        {c.recordatorios_pendientes > 0 && (
+                          <span className="text-amber-600"> · {c.recordatorios_pendientes} recordatorio(s)</span>
+                        )}
                       </p>
                     </button>
                   );
@@ -111,7 +139,8 @@ export default function Admin() {
               <DetalleCliente
                 detalle={detalle}
                 afianzadoras={afianzadoras}
-                onChange={() => { recargarDetalle(); cargarClientes(); }}
+                tipos={tipos}
+                onChange={refrescarTodo}
                 flash={flash}
               />
             )}
@@ -121,6 +150,886 @@ export default function Admin() {
     </div>
   );
 }
+
+/* --------------------------------------------------------------------------
+   Recordatorios internos (solo Fortex; el cliente no los ve)
+   -------------------------------------------------------------------------- */
+
+function Recordatorios({ recordatorios, onAbrirCliente, onAtendido }) {
+  if (!recordatorios.length) return null;
+
+  async function atender(id) {
+    await api.put(`/admin/fianzas/${id}/recordatorio`, { atendido: true });
+    onAtendido();
+  }
+
+  return (
+    <div className="bg-white border border-amber-200 rounded-lg overflow-hidden mb-4">
+      <div className="px-4 py-2.5 border-b border-amber-200 bg-amber-50 flex items-center gap-2">
+        <Bell className="w-4 h-4 text-amber-600" />
+        <h3 className="text-sm font-semibold text-amber-800">
+          Recordatorios ({recordatorios.length})
+        </h3>
+        <span className="text-[11px] text-amber-700/70 ml-auto">Uso interno · no visible para el cliente</span>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {recordatorios.map((r) => (
+          <div key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm hover:bg-amber-50/30">
+            <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium shrink-0 ${
+              r.dias_restantes < 0 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+            }`}>
+              {r.dias_restantes < 0 ? `Vencido ${Math.abs(r.dias_restantes)}d` : `En ${r.dias_restantes}d`}
+            </span>
+            <button
+              onClick={() => onAbrirCliente(r.client_id)}
+              className="text-slate-700 font-medium hover:text-indigo-700 hover:underline"
+            >
+              {r.razon_social}
+            </button>
+            <span className="text-xs text-slate-500">
+              <span className="font-mono">{r.numero_poliza}</span>
+              {r.proyecto_nombre && ` · ${r.proyecto_nombre}`} · {r.afianzadora_nombre}
+            </span>
+            {r.nota_recordatorio && (
+              <span className="text-xs text-slate-600 basis-full sm:basis-auto flex-1">{r.nota_recordatorio}</span>
+            )}
+            <button onClick={() => atender(r.id)} className={`${btnSecondary} ml-auto`}>
+              <Check className="h-3.5 w-3.5" /> Atendido
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Catálogo de tipos de fianza (editable por el admin)
+   -------------------------------------------------------------------------- */
+
+function CatalogoTipos({ tipos, onChange, flash }) {
+  const [open, setOpen] = useState(false);
+  const [nombre, setNombre] = useState('');
+
+  async function agregar() {
+    const n = nombre.trim();
+    if (!n) return;
+    await api.post('/admin/tipos-fianza', { nombre: n });
+    setNombre('');
+    onChange();
+    flash('Tipo de fianza agregado');
+  }
+
+  async function quitar(id) {
+    await api.del(`/admin/tipos-fianza/${id}`);
+    onChange();
+    flash('Tipo de fianza desactivado');
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
+      >
+        <ListChecks className="w-4 h-4 text-indigo-600" /> Tipos de fianza ({tipos.length})
+        <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
+      </button>
+      {open && (
+        <div className="p-4 space-y-2.5">
+          <div className="flex gap-2">
+            <input
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && agregar()}
+              placeholder="Nuevo tipo…"
+              className={inputCls}
+            />
+            <button onClick={agregar} className={btnPrimary}><Plus className="w-4 h-4" /></button>
+          </div>
+          <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto border border-slate-100 rounded-lg">
+            {tipos.map((t) => (
+              <div key={t.id} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                <span className="text-slate-700">{t.nombre}</span>
+                <button
+                  onClick={() => quitar(t.id)}
+                  className="text-slate-300 hover:text-rose-600"
+                  title="Desactivar (las fianzas que ya lo usan lo conservan)"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Detalle del cliente
+   -------------------------------------------------------------------------- */
+
+function DetalleCliente({ detalle, afianzadoras, tipos, onChange, flash }) {
+  const { cliente, lineas = [], proyectos = [], fianzas = [], documentos, papeleria } = detalle;
+  const lineaTotal = lineas.reduce((s, l) => s + (l.linea_credito || 0), 0);
+  const disponibleTotal = lineas.reduce((s, l) => s + (l.disponible || 0), 0);
+  const afianzadoTotal = fianzas
+    .filter((f) => f.estado !== 'vencida')
+    .reduce((s, f) => s + (f.monto_afianzado || 0), 0);
+  const primaTotal = fianzas.reduce((s, f) => s + (f.prima_neta || 0), 0);
+
+  function descargar(rel) {
+    fetch(`/api/admin/descargar?path=${encodeURIComponent(rel)}`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+      .then((r) => r.blob())
+      .then((b) => {
+        const url = URL.createObjectURL(b);
+        const a = document.createElement('a');
+        a.href = url; a.download = rel.split('/').pop(); a.click();
+        URL.revokeObjectURL(url);
+      });
+  }
+
+  return (
+    <>
+      {/* Encabezado del cliente */}
+      <div className="bg-white border border-slate-200 rounded-lg p-4">
+        <h2 className="text-base font-semibold text-slate-800">{cliente.razon_social}</h2>
+        <p className="text-xs text-slate-500 mt-0.5">{cliente.rfc} · {cliente.email}</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Pill label="Línea total" valor={mxn(lineaTotal)} />
+          <Pill label="Disponible" valor={mxn(disponibleTotal)} tono="emerald" />
+          <Pill label="Monto afianzado" valor={mxn(afianzadoTotal)} tono="sky"
+                ayuda="Suma de lo que cubren las fianzas vigentes" />
+          <Pill label="Prima" valor={mxn(primaTotal)} tono="violet"
+                ayuda="Lo que se paga por las fianzas" />
+        </div>
+      </div>
+
+      {/* Líneas de crédito por afianzadora */}
+      <LineasCredito
+        clienteId={cliente.id}
+        lineas={lineas}
+        afianzadoras={afianzadoras}
+        onChange={() => { onChange(); flash('Línea de crédito actualizada'); }}
+      />
+
+      {/* Proyectos con sus fianzas */}
+      <Proyectos
+        clienteId={cliente.id}
+        proyectos={proyectos}
+        afianzadoras={afianzadoras}
+        tipos={tipos}
+        onChange={onChange}
+        flash={flash}
+      />
+
+      {/* Documentos */}
+      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+          <FileText className="w-4 h-4 text-slate-500" />
+          <h3 className="text-sm font-semibold text-slate-700">Documentos del cliente</h3>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {documentos.map((d) => (
+            <div key={d.document_type_id} className="flex items-center justify-between px-4 py-2 text-sm hover:bg-slate-50/40">
+              <span className="text-slate-700">{d.nombre}</span>
+              <span className="flex items-center gap-3">
+                {d.uploaded_at ? (
+                  <>
+                    <span className="text-[11px] text-slate-500">{fmtDate(d.uploaded_at)}</span>
+                    {d.file_path && (
+                      <button onClick={() => descargar(d.file_path)} className={btnSecondary}>
+                        <Download className="h-3.5 w-3.5" /> Descargar
+                      </button>
+                    )}
+                  </>
+                ) : <EstadoBadge estado="pendiente" />}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Papelería específica */}
+      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+          <Files className="w-4 h-4 text-slate-500" />
+          <h3 className="text-sm font-semibold text-slate-700">Papelería específica</h3>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {papeleria.map((p) => (
+            <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm hover:bg-slate-50/40">
+              <span className="flex-1 text-slate-700">
+                {p.descripcion}
+                {p.afianzadora_nombre && <span className="text-slate-400"> · {p.afianzadora_nombre}</span>}
+              </span>
+              <EstadoBadge estado={p.estado} />
+              {p.file_path && (
+                <button onClick={() => descargar(p.file_path)} className={btnSecondary}>
+                  <Download className="h-3.5 w-3.5" /> Ver
+                </button>
+              )}
+            </div>
+          ))}
+          {!papeleria.length && <div className="px-4 py-6 text-center text-xs text-slate-400">Sin solicitudes.</div>}
+        </div>
+        <NuevaPapeleria clienteId={cliente.id} afianzadoras={afianzadoras} onDone={() => { onChange(); flash('Solicitud creada'); }} />
+      </div>
+    </>
+  );
+}
+
+function Pill({ label, valor, tono = 'slate', ayuda }) {
+  const tonos = {
+    slate: 'bg-slate-50 text-slate-600',
+    emerald: 'bg-emerald-50 text-emerald-700',
+    sky: 'bg-sky-50 text-sky-700',
+    violet: 'bg-violet-50 text-violet-700',
+  };
+  return (
+    <div className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md ${tonos[tono]}`} title={ayuda}>
+      {label}: <span className="font-semibold tabular-nums">{valor}</span>
+    </div>
+  );
+}
+
+function Req() { return <span className="text-rose-500">*</span>; }
+
+/* --------------------------------------------------------------------------
+   Líneas de crédito
+   -------------------------------------------------------------------------- */
+
+function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
+  const [edits, setEdits] = useState({}); // afianzadora_id -> valor en edición
+  const [nuevaAfi, setNuevaAfi] = useState('');
+  const [nuevoMonto, setNuevoMonto] = useState(0); // en centavos
+
+  const usadas = new Set(lineas.map((l) => l.afianzadora_id));
+  const disponiblesParaAgregar = afianzadoras.filter((a) => !usadas.has(a.id));
+
+  async function guardar(afianzadora_id, linea_credito) {
+    // linea_credito ya viene en centavos desde InputPesos.
+    await api.put(`/admin/clientes/${clienteId}/lineas`, { afianzadora_id, linea_credito });
+    setEdits((e) => { const n = { ...e }; delete n[afianzadora_id]; return n; });
+    onChange();
+  }
+
+  async function eliminar(afianzadora_id) {
+    await api.del(`/admin/clientes/${clienteId}/lineas/${afianzadora_id}`);
+    onChange();
+  }
+
+  async function agregar() {
+    if (!nuevaAfi) return;
+    await api.put(`/admin/clientes/${clienteId}/lineas`, { afianzadora_id: Number(nuevaAfi), linea_credito: nuevoMonto });
+    setNuevaAfi(''); setNuevoMonto(0);
+    onChange();
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <CreditCard className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Líneas de crédito por afianzadora</h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-50/60 text-slate-500 uppercase tracking-wider text-[10px]">
+            <tr>
+              <th className="text-left px-3 py-2">Afianzadora</th>
+              <th className="text-right px-3 py-2">Línea autorizada</th>
+              <th className="text-right px-3 py-2">Comprometido</th>
+              <th className="text-right px-3 py-2">Disponible</th>
+              <th className="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {lineas.map((l) => {
+              const editing = edits[l.afianzadora_id] ?? l.linea_credito;
+              const negativo = l.disponible < 0;
+              return (
+                <tr key={l.afianzadora_id} className="hover:bg-slate-50/40">
+                  <td className="px-3 py-1.5 text-slate-700 font-medium">{l.afianzadora_nombre}</td>
+                  <td className="px-3 py-1.5 text-right">
+                    <InputPesos
+                      valor={editing}
+                      onChange={(centavos) => setEdits((s) => ({ ...s, [l.afianzadora_id]: centavos }))}
+                      className="w-32 px-2 py-1 text-right rounded-md border border-slate-200 bg-white tabular-nums focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
+                    />
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxn(l.comprometido)}</td>
+                  <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${negativo ? 'text-rose-600' : 'text-emerald-700'}`}>
+                    {mxn(l.disponible)}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button onClick={() => guardar(l.afianzadora_id, editing)} className={btnSecondary} title="Guardar">
+                        <Save className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => eliminar(l.afianzadora_id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Quitar línea">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {!lineas.length && (
+              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Sin líneas de crédito asignadas.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {disponiblesParaAgregar.length > 0 && (
+        <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
+          <p className="text-xs font-medium text-slate-600 mb-2">Asignar línea a otra afianzadora</p>
+          <div className="flex flex-col md:flex-row gap-2">
+            <select value={nuevaAfi} onChange={(e) => setNuevaAfi(e.target.value)} className={`${inputCls} md:w-56`}>
+              <option value="">Selecciona afianzadora…</option>
+              {disponiblesParaAgregar.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+            </select>
+            <InputPesos valor={nuevoMonto} onChange={setNuevoMonto} placeholder="Monto de la línea" className={inputCls} />
+            <button onClick={agregar} className={btnPrimary}><Plus className="w-4 h-4" /> Asignar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Proyectos y sus fianzas
+   -------------------------------------------------------------------------- */
+
+function Proyectos({ clienteId, proyectos, afianzadoras, tipos, onChange, flash }) {
+  const [creando, setCreando] = useState(false);
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <Briefcase className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Proyectos ({proyectos.length})</h3>
+        <button onClick={() => setCreando((c) => !c)} className={`${btnSecondary} ml-auto`}>
+          <Plus className={`h-3.5 w-3.5 transition-transform ${creando ? 'rotate-45' : ''}`} /> Nuevo proyecto
+        </button>
+      </div>
+
+      {creando && (
+        <FormProyecto
+          onCancel={() => setCreando(false)}
+          onSubmit={async (datos) => {
+            await api.post('/admin/proyectos', { client_id: clienteId, ...datos });
+            setCreando(false);
+            onChange();
+            flash('Proyecto creado');
+          }}
+        />
+      )}
+
+      <div className="divide-y divide-slate-100">
+        {proyectos.map((p) => (
+          <Proyecto
+            key={p.id}
+            proyecto={p}
+            proyectos={proyectos}
+            clienteId={clienteId}
+            afianzadoras={afianzadoras}
+            tipos={tipos}
+            onChange={onChange}
+            flash={flash}
+          />
+        ))}
+        {!proyectos.length && !creando && (
+          <div className="px-4 py-8 text-center text-sm text-slate-400">
+            Este cliente no tiene proyectos. Crea uno para poder registrar sus fianzas.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, onChange, flash }) {
+  const [abierto, setAbierto] = useState(true);
+  const [editando, setEditando] = useState(false);
+  const [nuevaFianza, setNuevaFianza] = useState(false);
+  const [error, setError] = useState('');
+
+  async function borrar() {
+    setError('');
+    try {
+      await api.del(`/admin/proyectos/${p.id}`);
+      onChange();
+      flash('Proyecto eliminado');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <div>
+      {/* Encabezado del proyecto */}
+      <div className="px-4 py-3 hover:bg-slate-50/40">
+        <div className="flex flex-wrap items-start gap-3">
+          <button onClick={() => setAbierto((a) => !a)} className="flex-1 text-left min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-slate-800">{p.nombre}</span>
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-600">
+                {etiquetaEstatus(p.estatus)}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {p.numero_contrato && <span className="font-mono">{p.numero_contrato}</span>}
+              {p.beneficiario && <span> · {p.beneficiario}</span>}
+              {p.fecha_termino && <span> · termina {fmtDate(p.fecha_termino)}</span>}
+            </p>
+          </button>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {p.monto_contrato > 0 && (
+              <Pill label="Contrato" valor={mxn(p.monto_contrato)} />
+            )}
+            <Pill label="Afianzado" valor={mxn(p.monto_afianzado)} tono="sky" />
+            {p.pct_contrato_afianzado != null && (
+              <span className="text-[11px] text-slate-500 tabular-nums">
+                {p.pct_contrato_afianzado}% del contrato
+              </span>
+            )}
+            <button onClick={() => setEditando((e) => !e)} className={btnSecondary} title="Editar proyecto">
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+            <button onClick={borrar} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Eliminar proyecto">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+          </div>
+        )}
+      </div>
+
+      {editando && (
+        <FormProyecto
+          inicial={p}
+          onCancel={() => setEditando(false)}
+          onSubmit={async (datos) => {
+            await api.put(`/admin/proyectos/${p.id}`, datos);
+            setEditando(false);
+            onChange();
+            flash('Proyecto actualizado');
+          }}
+        />
+      )}
+
+      {abierto && (
+        <div className="bg-slate-50/40 border-t border-slate-100">
+          <TablaFianzas
+            fianzas={p.fianzas || []}
+            proyectos={proyectos}
+            afianzadoras={afianzadoras}
+            tipos={tipos}
+            onChange={onChange}
+            flash={flash}
+          />
+          <div className="px-4 py-2.5 border-t border-slate-100">
+            <button onClick={() => setNuevaFianza((n) => !n)} className={btnSecondary}>
+              <Plus className={`h-3.5 w-3.5 transition-transform ${nuevaFianza ? 'rotate-45' : ''}`} /> Agregar fianza a este proyecto
+            </button>
+          </div>
+          {nuevaFianza && (
+            <FormFianza
+              proyectos={proyectos}
+              proyectoId={p.id}
+              afianzadoras={afianzadoras}
+              tipos={tipos}
+              onCancel={() => setNuevaFianza(false)}
+              onSubmit={async (datos) => {
+                await api.post('/admin/fianzas', { client_id: clienteId, ...datos });
+                setNuevaFianza(false);
+                onChange();
+                flash('Fianza agregada');
+              }}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, onChange, flash }) {
+  const [editandoId, setEditandoId] = useState(null);
+
+  if (!fianzas.length) {
+    return <div className="px-4 py-5 text-center text-xs text-slate-400">Sin fianzas en este proyecto.</div>;
+  }
+
+  async function borrar(id) {
+    await api.del(`/admin/fianzas/${id}`);
+    onChange();
+    flash('Fianza eliminada');
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead className="bg-white/60 text-slate-500 uppercase tracking-wider text-[10px]">
+          <tr>
+            <th className="text-left px-3 py-2">Póliza</th>
+            <th className="text-left px-3 py-2">Afianzadora</th>
+            <th className="text-left px-3 py-2">Tipo</th>
+            <th className="text-right px-3 py-2">Monto afianzado</th>
+            <th className="text-right px-3 py-2">Prima</th>
+            <th className="text-left px-3 py-2">Vigencia</th>
+            <th className="text-left px-3 py-2">Recordatorio</th>
+            <th className="text-left px-3 py-2">Estado</th>
+            <th className="px-3 py-2"></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {fianzas.map((f) => (
+            editandoId === f.id ? (
+              <tr key={f.id}>
+                <td colSpan={9} className="p-0">
+                  <FormFianza
+                    inicial={f}
+                    proyectos={proyectos}
+                    proyectoId={f.proyecto_id}
+                    afianzadoras={afianzadoras}
+                    tipos={tipos}
+                    onCancel={() => setEditandoId(null)}
+                    onSubmit={async (datos) => {
+                      await api.put(`/admin/fianzas/${f.id}`, datos);
+                      setEditandoId(null);
+                      onChange();
+                      flash('Fianza actualizada');
+                    }}
+                  />
+                </td>
+              </tr>
+            ) : (
+              <tr key={f.id} className="hover:bg-white/70">
+                <td className="px-3 py-1.5 font-mono text-slate-700">{f.numero_poliza}</td>
+                <td className="px-3 py-1.5 text-slate-600">{f.afianzadora_nombre}</td>
+                <td className="px-3 py-1.5 text-slate-700 font-medium">{f.tipo_fianza}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-slate-800">{mxnCents(f.monto_afianzado)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{mxnCents(f.prima_neta)}</td>
+                <td className="px-3 py-1.5 text-slate-600">{fmtDate(f.fecha_vigencia)}</td>
+                <td className="px-3 py-1.5">
+                  {f.fecha_recordatorio ? (
+                    <span
+                      className={`tabular-nums ${
+                        f.recordatorio_atendido_el ? 'text-slate-400 line-through'
+                        : f.dias_para_recordatorio <= 7 ? 'text-amber-700 font-medium'
+                        : 'text-slate-600'
+                      }`}
+                      title={f.nota_recordatorio || ''}
+                    >
+                      {fmtDate(f.fecha_recordatorio)}
+                    </span>
+                  ) : <span className="text-slate-300">—</span>}
+                </td>
+                <td className="px-3 py-1.5"><EstadoBadge estado={f.estado} /></td>
+                <td className="px-3 py-1.5">
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button onClick={() => setEditandoId(f.id)} className={btnSecondary} title="Editar fianza">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => borrar(f.id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Eliminar fianza">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            )
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Formularios
+   -------------------------------------------------------------------------- */
+
+function FormProyecto({ inicial, onSubmit, onCancel }) {
+  const [f, setF] = useState({
+    nombre: inicial?.nombre || '',
+    numero_contrato: inicial?.numero_contrato || '',
+    beneficiario: inicial?.beneficiario || '',
+    monto_contrato: inicial?.monto_contrato ?? 0, // centavos
+    fecha_inicio: inicial?.fecha_inicio || '',
+    fecha_termino: inicial?.fecha_termino || '',
+    estatus: inicial?.estatus || 'en_proceso',
+    notas: inicial?.notas || '',
+  });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  async function guardar() {
+    setError('');
+    if (!f.nombre.trim()) return setError('El nombre del proyecto es obligatorio.');
+    setBusy(true);
+    try {
+      await onSubmit(f); // monto_contrato ya está en centavos
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-slate-200 bg-indigo-50/30 px-4 py-3">
+      <p className="text-xs font-medium text-slate-600 mb-2">
+        {inicial ? 'Editar proyecto' : 'Nuevo proyecto'}
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <div className="md:col-span-2">
+          <label className="text-[11px] text-slate-500 mb-1 block">Nombre del proyecto u obra<Req /></label>
+          <input value={f.nombre} onChange={set('nombre')} className={inputCls} />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Estatus</label>
+          <select value={f.estatus} onChange={set('estatus')} className={inputCls}>
+            {ESTATUS_PROYECTO.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">N° de contrato</label>
+          <input value={f.numero_contrato} onChange={set('numero_contrato')} className={inputCls} />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Beneficiario</label>
+          <input value={f.beneficiario} onChange={set('beneficiario')} placeholder="CFE, IMSS, municipio…" className={inputCls} />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Monto del contrato</label>
+          <InputPesos
+            valor={f.monto_contrato}
+            onChange={(centavos) => setF((s) => ({ ...s, monto_contrato: centavos }))}
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Fecha de inicio</label>
+          <input type="date" value={f.fecha_inicio} onChange={set('fecha_inicio')} className={inputCls} />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Fecha de término</label>
+          <input type="date" value={f.fecha_termino} onChange={set('fecha_termino')} className={inputCls} />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Notas</label>
+          <input value={f.notas} onChange={set('notas')} className={inputCls} />
+        </div>
+      </div>
+      {error && (
+        <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+      <div className="flex gap-2 mt-3">
+        <button onClick={guardar} disabled={busy} className={btnPrimary}>
+          <Save className="w-4 h-4" /> {busy ? 'Guardando…' : 'Guardar proyecto'}
+        </button>
+        <button onClick={onCancel} className={btnSecondary}><X className="h-3.5 w-3.5" /> Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+// Lista de tipos en forma de checklist: se marca uno solo (el tipo principal).
+function ChecklistTipos({ tipos, valor, onChange }) {
+  return (
+    <div className="border border-slate-200 rounded-lg bg-white max-h-44 overflow-y-auto divide-y divide-slate-100">
+      {tipos.map((t) => {
+        const activo = Number(valor) === t.id;
+        return (
+          <label
+            key={t.id}
+            className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer ${
+              activo ? 'bg-indigo-50 text-indigo-800 font-medium' : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <input
+              type="radio"
+              name="tipo_fianza"
+              className="sr-only"
+              checked={activo}
+              onChange={() => onChange(t.id)}
+            />
+            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
+              activo ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300 bg-white'
+            }`}>
+              {activo && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
+            </span>
+            {t.nombre}
+          </label>
+        );
+      })}
+      {!tipos.length && (
+        <p className="px-3 py-3 text-xs text-slate-400">
+          No hay tipos en el catálogo. Agrégalos desde "Tipos de fianza".
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSubmit, onCancel }) {
+  const [f, setF] = useState({
+    proyecto_id: inicial?.proyecto_id ?? proyectoId ?? '',
+    afianzadora_id: inicial?.afianzadora_id ?? '',
+    numero_poliza: inicial?.numero_poliza || '',
+    tipo_fianza_id: inicial?.tipo_fianza_id ?? '',
+    monto_afianzado: inicial?.monto_afianzado ?? 0, // centavos
+    prima_neta: inicial?.prima_neta ?? 0,           // centavos
+    fecha_inicio: inicial?.fecha_inicio || '',
+    fecha_vigencia: inicial?.fecha_vigencia || '',
+    fecha_recordatorio: inicial?.fecha_recordatorio || '',
+    nota_recordatorio: inicial?.nota_recordatorio || '',
+  });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  async function guardar() {
+    setError('');
+    if (!f.proyecto_id) return setError('Selecciona el proyecto al que pertenece la fianza.');
+    if (!f.afianzadora_id) return setError('Selecciona la afianzadora.');
+    if (!f.numero_poliza.trim()) return setError('Captura el número de póliza.');
+    if (!f.tipo_fianza_id) return setError('Marca el tipo de fianza.');
+    setBusy(true);
+    try {
+      // monto_afianzado y prima_neta ya van en centavos.
+      await onSubmit({
+        ...f,
+        proyecto_id: Number(f.proyecto_id),
+        afianzadora_id: Number(f.afianzadora_id),
+        tipo_fianza_id: Number(f.tipo_fianza_id),
+      });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-slate-200 bg-indigo-50/30 px-4 py-3">
+      <p className="text-xs font-medium text-slate-600 mb-2">
+        {inicial ? `Editar fianza ${inicial.numero_poliza}` : 'Nueva fianza'}
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* Datos de la póliza */}
+        <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Proyecto<Req /></label>
+            <select value={f.proyecto_id} onChange={set('proyecto_id')} className={inputCls}>
+              <option value="">Selecciona…</option>
+              {proyectos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Afianzadora<Req /></label>
+            <select value={f.afianzadora_id} onChange={set('afianzadora_id')} className={inputCls}>
+              <option value="">Selecciona…</option>
+              {afianzadoras.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">N° de póliza<Req /></label>
+            <input value={f.numero_poliza} onChange={set('numero_poliza')} className={inputCls} />
+          </div>
+          <div className="hidden sm:block" />
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">
+              Monto afianzado
+              <span className="text-slate-400 font-normal"> · lo que cubre la fianza</span>
+            </label>
+            <InputPesos
+              valor={f.monto_afianzado}
+              onChange={(centavos) => setF((s) => ({ ...s, monto_afianzado: centavos }))}
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">
+              Prima neta
+              <span className="text-slate-400 font-normal"> · lo que se paga</span>
+            </label>
+            <InputPesos
+              valor={f.prima_neta}
+              onChange={(centavos) => setF((s) => ({ ...s, prima_neta: centavos }))}
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Fecha de inicio</label>
+            <input type="date" value={f.fecha_inicio} onChange={set('fecha_inicio')} className={inputCls} />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Fecha de vigencia</label>
+            <input type="date" value={f.fecha_vigencia} onChange={set('fecha_vigencia')} className={inputCls} />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">
+              Fecha de recordatorio
+              <span className="text-slate-400 font-normal"> · interno</span>
+            </label>
+            <input type="date" value={f.fecha_recordatorio} onChange={set('fecha_recordatorio')} className={inputCls} />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Nota del recordatorio</label>
+            <input
+              value={f.nota_recordatorio}
+              onChange={set('nota_recordatorio')}
+              placeholder="Qué hay que hacer ese día"
+              className={inputCls}
+            />
+          </div>
+        </div>
+
+        {/* Tipo de fianza */}
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Tipo de fianza<Req /></label>
+          <ChecklistTipos
+            tipos={tipos}
+            valor={f.tipo_fianza_id}
+            onChange={(id) => setF((s) => ({ ...s, tipo_fianza_id: id }))}
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+      <div className="flex gap-2 mt-3">
+        <button onClick={guardar} disabled={busy} className={btnPrimary}>
+          <Save className="w-4 h-4" /> {busy ? 'Guardando…' : 'Guardar fianza'}
+        </button>
+        <button onClick={onCancel} className={btnSecondary}><X className="h-3.5 w-3.5" /> Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Altas simples
+   -------------------------------------------------------------------------- */
 
 function NuevoCliente({ onDone }) {
   const [open, setOpen] = useState(false);
@@ -214,294 +1123,6 @@ function NuevaAfianzadora({ onDone }) {
         <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre" className={inputCls} />
         <button onClick={add} className={btnPrimary}><Plus className="w-4 h-4" /> Añadir</button>
       </div>
-    </div>
-  );
-}
-
-function DetalleCliente({ detalle, afianzadoras, onChange, flash }) {
-  const { cliente, lineas = [], fianzas, documentos, papeleria } = detalle;
-  const lineaTotal = lineas.reduce((s, l) => s + (l.linea_credito || 0), 0);
-  const disponibleTotal = lineas.reduce((s, l) => s + (l.disponible || 0), 0);
-
-  function descargar(rel) {
-    fetch(`/api/admin/descargar?path=${encodeURIComponent(rel)}`, {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
-      .then((r) => r.blob())
-      .then((b) => {
-        const url = URL.createObjectURL(b);
-        const a = document.createElement('a');
-        a.href = url; a.download = rel.split('/').pop(); a.click();
-        URL.revokeObjectURL(url);
-      });
-  }
-
-  return (
-    <>
-      {/* Encabezado del cliente */}
-      <div className="bg-white border border-slate-200 rounded-lg p-4">
-        <h2 className="text-base font-semibold text-slate-800">{cliente.razon_social}</h2>
-        <p className="text-xs text-slate-500 mt-0.5">{cliente.rfc} · {cliente.email}</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <div className="inline-flex items-center gap-1.5 text-xs bg-slate-50 text-slate-600 px-2 py-1 rounded-md">
-            Línea total: <span className="font-semibold tabular-nums text-slate-800">{mxn(lineaTotal)}</span>
-          </div>
-          <div className="inline-flex items-center gap-1.5 text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md">
-            Disponible total: <span className="font-semibold tabular-nums">{mxn(disponibleTotal)}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Líneas de crédito por afianzadora */}
-      <LineasCredito
-        clienteId={cliente.id}
-        lineas={lineas}
-        afianzadoras={afianzadoras}
-        onChange={() => { onChange(); flash('Línea de crédito actualizada'); }}
-      />
-
-      {/* Fianzas */}
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-          <FileText className="w-4 h-4 text-slate-500" />
-          <h3 className="text-sm font-semibold text-slate-700">Fianzas ({fianzas.length})</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="bg-slate-50/60 text-slate-500 uppercase tracking-wider text-[10px]">
-              <tr>
-                <th className="text-left px-3 py-2">Póliza</th>
-                <th className="text-left px-3 py-2">Afianzadora</th>
-                <th className="text-left px-3 py-2">Tipo</th>
-                <th className="text-right px-3 py-2">Prima</th>
-                <th className="text-left px-3 py-2">Vigencia</th>
-                <th className="text-left px-3 py-2">Estado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {fianzas.map((f) => (
-                <tr key={f.id} className="hover:bg-slate-50/40">
-                  <td className="px-3 py-1.5 font-mono text-slate-700">{f.numero_poliza}</td>
-                  <td className="px-3 py-1.5 text-slate-600">{f.afianzadora_nombre}</td>
-                  <td className="px-3 py-1.5 text-slate-700 font-medium">{f.tipo_fianza}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-slate-800">{mxnCents(f.prima_neta)}</td>
-                  <td className="px-3 py-1.5 text-slate-600">{fmtDate(f.fecha_vigencia)}</td>
-                  <td className="px-3 py-1.5"><EstadoBadge estado={f.estado} /></td>
-                </tr>
-              ))}
-              {!fianzas.length && <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Sin fianzas.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-        <NuevaFianza clienteId={cliente.id} afianzadoras={afianzadoras} onDone={() => { onChange(); flash('Fianza agregada'); }} />
-      </div>
-
-      {/* Documentos */}
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-          <FileText className="w-4 h-4 text-slate-500" />
-          <h3 className="text-sm font-semibold text-slate-700">Documentos del cliente</h3>
-        </div>
-        <div className="divide-y divide-slate-100">
-          {documentos.map((d) => (
-            <div key={d.document_type_id} className="flex items-center justify-between px-4 py-2 text-sm hover:bg-slate-50/40">
-              <span className="text-slate-700">{d.nombre}</span>
-              <span className="flex items-center gap-3">
-                {d.uploaded_at ? (
-                  <>
-                    <span className="text-[11px] text-slate-500">{fmtDate(d.uploaded_at)}</span>
-                    {d.file_path && (
-                      <button onClick={() => descargar(d.file_path)} className={btnSecondary}>
-                        <Download className="h-3.5 w-3.5" /> Descargar
-                      </button>
-                    )}
-                  </>
-                ) : <EstadoBadge estado="pendiente" />}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Papelería específica */}
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-          <Files className="w-4 h-4 text-slate-500" />
-          <h3 className="text-sm font-semibold text-slate-700">Papelería específica</h3>
-        </div>
-        <div className="divide-y divide-slate-100">
-          {papeleria.map((p) => (
-            <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm hover:bg-slate-50/40">
-              <span className="flex-1 text-slate-700">
-                {p.descripcion}
-                {p.afianzadora_nombre && <span className="text-slate-400"> · {p.afianzadora_nombre}</span>}
-              </span>
-              <EstadoBadge estado={p.estado} />
-              {p.file_path && (
-                <button onClick={() => descargar(p.file_path)} className={btnSecondary}>
-                  <Download className="h-3.5 w-3.5" /> Ver
-                </button>
-              )}
-            </div>
-          ))}
-          {!papeleria.length && <div className="px-4 py-6 text-center text-xs text-slate-400">Sin solicitudes.</div>}
-        </div>
-        <NuevaPapeleria clienteId={cliente.id} afianzadoras={afianzadoras} onDone={() => { onChange(); flash('Solicitud creada'); }} />
-      </div>
-    </>
-  );
-}
-
-function Req() { return <span className="text-rose-500">*</span>; }
-
-function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
-  const [edits, setEdits] = useState({}); // afianzadora_id -> valor en edición
-  const [nuevaAfi, setNuevaAfi] = useState('');
-  const [nuevoMonto, setNuevoMonto] = useState('');
-
-  const usadas = new Set(lineas.map((l) => l.afianzadora_id));
-  const disponiblesParaAgregar = afianzadoras.filter((a) => !usadas.has(a.id));
-
-  async function guardar(afianzadora_id, linea_credito) {
-    await api.put(`/admin/clientes/${clienteId}/lineas`, { afianzadora_id, linea_credito: Number(linea_credito) || 0 });
-    setEdits((e) => { const n = { ...e }; delete n[afianzadora_id]; return n; });
-    onChange();
-  }
-
-  async function eliminar(afianzadora_id) {
-    await api.del(`/admin/clientes/${clienteId}/lineas/${afianzadora_id}`);
-    onChange();
-  }
-
-  async function agregar() {
-    if (!nuevaAfi) return;
-    await api.put(`/admin/clientes/${clienteId}/lineas`, { afianzadora_id: Number(nuevaAfi), linea_credito: Number(nuevoMonto) || 0 });
-    setNuevaAfi(''); setNuevoMonto('');
-    onChange();
-  }
-
-  return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-        <CreditCard className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-700">Líneas de crédito por afianzadora</h3>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="bg-slate-50/60 text-slate-500 uppercase tracking-wider text-[10px]">
-            <tr>
-              <th className="text-left px-3 py-2">Afianzadora</th>
-              <th className="text-right px-3 py-2">Línea autorizada</th>
-              <th className="text-right px-3 py-2">Comprometido</th>
-              <th className="text-right px-3 py-2">Disponible</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {lineas.map((l) => {
-              const editing = edits[l.afianzadora_id] ?? l.linea_credito;
-              const negativo = l.disponible < 0;
-              return (
-                <tr key={l.afianzadora_id} className="hover:bg-slate-50/40">
-                  <td className="px-3 py-1.5 text-slate-700 font-medium">{l.afianzadora_nombre}</td>
-                  <td className="px-3 py-1.5 text-right">
-                    <input
-                      type="number"
-                      value={editing}
-                      onChange={(e) => setEdits((s) => ({ ...s, [l.afianzadora_id]: e.target.value }))}
-                      className="w-32 px-2 py-1 text-right rounded-md border border-slate-200 bg-white tabular-nums focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
-                    />
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxn(l.comprometido)}</td>
-                  <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${negativo ? 'text-rose-600' : 'text-emerald-700'}`}>
-                    {mxn(l.disponible)}
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => guardar(l.afianzadora_id, editing)} className={btnSecondary} title="Guardar">
-                        <Save className="h-3.5 w-3.5" />
-                      </button>
-                      <button onClick={() => eliminar(l.afianzadora_id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Quitar línea">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {!lineas.length && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">Sin líneas de crédito asignadas.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      {disponiblesParaAgregar.length > 0 && (
-        <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
-          <p className="text-xs font-medium text-slate-600 mb-2">Asignar línea a otra afianzadora</p>
-          <div className="flex flex-col md:flex-row gap-2">
-            <select value={nuevaAfi} onChange={(e) => setNuevaAfi(e.target.value)} className={`${inputCls} md:w-56`}>
-              <option value="">Selecciona afianzadora…</option>
-              {disponiblesParaAgregar.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
-            </select>
-            <input type="number" value={nuevoMonto} onChange={(e) => setNuevoMonto(e.target.value)} placeholder="Monto de la línea" className={inputCls} />
-            <button onClick={agregar} className={btnPrimary}><Plus className="w-4 h-4" /> Asignar</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NuevaFianza({ clienteId, afianzadoras, onDone }) {
-  const empty = { afianzadora_id: '', numero_poliza: '', tipo_fianza: '', prima_neta: '', monto_afianzado: '', fecha_inicio: '', fecha_vigencia: '' };
-  const [f, setF] = useState(empty);
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-
-  async function guardar() {
-    if (!f.afianzadora_id || !f.numero_poliza || !f.tipo_fianza) return;
-    await api.post('/admin/fianzas', { client_id: clienteId, ...f });
-    setF(empty);
-    onDone();
-  }
-
-  return (
-    <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
-      <p className="text-xs font-medium text-slate-600 mb-2">Agregar fianza</p>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-        <div>
-          <label className="text-[11px] text-slate-500 mb-1 block">Afianzadora<Req /></label>
-          <select value={f.afianzadora_id} onChange={set('afianzadora_id')} className={inputCls}>
-            <option value="">Selecciona…</option>
-            {afianzadoras.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-[11px] text-slate-500 mb-1 block">N° de póliza<Req /></label>
-          <input value={f.numero_poliza} onChange={set('numero_poliza')} className={inputCls} />
-        </div>
-        <div>
-          <label className="text-[11px] text-slate-500 mb-1 block">Tipo de fianza<Req /></label>
-          <input value={f.tipo_fianza} onChange={set('tipo_fianza')} className={inputCls} />
-        </div>
-        <div>
-          <label className="text-[11px] text-slate-500 mb-1 block">Prima neta</label>
-          <input type="number" value={f.prima_neta} onChange={set('prima_neta')} className={inputCls} />
-        </div>
-        <div>
-          <label className="text-[11px] text-slate-500 mb-1 block">Monto afianzado</label>
-          <input type="number" value={f.monto_afianzado} onChange={set('monto_afianzado')} className={inputCls} />
-        </div>
-        <div className="hidden md:block" />
-        <div>
-          <label className="text-[11px] text-slate-500 mb-1 block">Fecha inicio</label>
-          <input type="date" value={f.fecha_inicio} onChange={set('fecha_inicio')} className={inputCls} />
-        </div>
-        <div>
-          <label className="text-[11px] text-slate-500 mb-1 block">Fecha vigencia</label>
-          <input type="date" value={f.fecha_vigencia} onChange={set('fecha_vigencia')} className={inputCls} />
-        </div>
-      </div>
-      <button onClick={guardar} className={`${btnPrimary} mt-3`}><Save className="w-4 h-4" /> Guardar fianza</button>
     </div>
   );
 }

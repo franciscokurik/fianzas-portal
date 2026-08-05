@@ -1,6 +1,12 @@
 // Esquema de la base de datos como cadena JS (no como archivo .sql) para que
 // SIEMPRE quede incluido en el bundle serverless de Vercel (un fs.readFile de
 // un .sql podría no empaquetarse). Dialecto: PostgreSQL (Neon / Vercel Postgres).
+//
+// AQUÍ SOLO VA DDL IDEMPOTENTE: este bloque corre completo en cada /api/setup.
+// Lo que solo puede pasar una vez (convertir montos, tirar columnas) va en
+// migrations.js.
+//
+// El dinero se guarda en BIGINT y en CENTAVOS, nunca en punto flotante.
 const TS_DEFAULT = "to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')";
 
 export const SCHEMA_SQL = `
@@ -11,7 +17,7 @@ CREATE TABLE IF NOT EXISTS clients (
   email         TEXT    UNIQUE NOT NULL,
   password_hash TEXT    NOT NULL,
   role          TEXT    NOT NULL DEFAULT 'client',
-  linea_credito DOUBLE PRECISION NOT NULL DEFAULT 0,
+  linea_credito BIGINT  NOT NULL DEFAULT 0,
   telefono      TEXT,
   created_at    TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
 );
@@ -27,25 +33,62 @@ CREATE TABLE IF NOT EXISTS client_credit_lines (
   id             SERIAL PRIMARY KEY,
   client_id      INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   afianzadora_id INTEGER NOT NULL REFERENCES afianzadoras(id) ON DELETE CASCADE,
-  linea_credito  DOUBLE PRECISION NOT NULL DEFAULT 0,
+  linea_credito  BIGINT  NOT NULL DEFAULT 0,
   created_at     TEXT    NOT NULL DEFAULT ${TS_DEFAULT},
   UNIQUE(client_id, afianzadora_id)
 );
 CREATE INDEX IF NOT EXISTS idx_credit_lines_client ON client_credit_lines(client_id);
 
+-- Catálogo editable de tipos de fianza (el admin puede dar de alta más).
+CREATE TABLE IF NOT EXISTS tipos_fianza (
+  id     SERIAL PRIMARY KEY,
+  nombre TEXT UNIQUE NOT NULL,
+  orden  INTEGER NOT NULL DEFAULT 50,
+  activo INTEGER NOT NULL DEFAULT 1
+);
+
+-- Obras / contratos del cliente. Toda fianza cuelga de un proyecto.
+CREATE TABLE IF NOT EXISTS proyectos (
+  id              SERIAL PRIMARY KEY,
+  client_id       INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  nombre          TEXT    NOT NULL,
+  numero_contrato TEXT,
+  beneficiario    TEXT,
+  monto_contrato  BIGINT  NOT NULL DEFAULT 0,
+  fecha_inicio    TEXT,
+  fecha_termino   TEXT,
+  estatus         TEXT    NOT NULL DEFAULT 'en_proceso',
+  notas           TEXT,
+  created_at      TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
+);
+CREATE INDEX IF NOT EXISTS idx_proyectos_client ON proyectos(client_id);
+
+-- El tipo lo manda tipos_fianza. En bases viejas todavía existe la columna de
+-- texto libre 'tipo_fianza'; la migración 003 la tira una vez respaldada.
 CREATE TABLE IF NOT EXISTS fianzas (
   id             SERIAL PRIMARY KEY,
   client_id      INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  proyecto_id    INTEGER REFERENCES proyectos(id) ON DELETE RESTRICT,
   afianzadora_id INTEGER NOT NULL REFERENCES afianzadoras(id),
   numero_poliza  TEXT    NOT NULL,
-  tipo_fianza    TEXT    NOT NULL,
-  prima_neta     DOUBLE PRECISION NOT NULL DEFAULT 0,
-  monto_afianzado DOUBLE PRECISION NOT NULL DEFAULT 0,
+  tipo_fianza_id INTEGER REFERENCES tipos_fianza(id),
+  prima_neta     BIGINT  NOT NULL DEFAULT 0,
+  monto_afianzado BIGINT NOT NULL DEFAULT 0,
   fecha_inicio   TEXT,
   fecha_vigencia TEXT,
   created_at     TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
 );
 CREATE INDEX IF NOT EXISTS idx_fianzas_client ON fianzas(client_id);
+
+-- Columnas nuevas sobre tablas que ya existen en producción. Idempotentes:
+-- initSchema() corre en cada /api/setup, así que nada aquí puede fallar dos veces.
+ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS proyecto_id INTEGER REFERENCES proyectos(id) ON DELETE RESTRICT;
+ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS tipo_fianza_id INTEGER REFERENCES tipos_fianza(id);
+ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS fecha_recordatorio TEXT;
+ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS nota_recordatorio TEXT;
+ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS recordatorio_atendido_el TEXT;
+CREATE INDEX IF NOT EXISTS idx_fianzas_proyecto ON fianzas(proyecto_id);
+CREATE INDEX IF NOT EXISTS idx_fianzas_recordatorio ON fianzas(fecha_recordatorio);
 
 CREATE TABLE IF NOT EXISTS document_types (
   id                SERIAL PRIMARY KEY,
@@ -93,4 +136,23 @@ CREATE TABLE IF NOT EXISTS notifications (
   sent_at    TEXT NOT NULL DEFAULT ${TS_DEFAULT},
   UNIQUE(client_id, tipo, ref_key)
 );
+
+-- ---------------------------------------------------------------------------
+-- Datos base. Re-ejecutable sin efectos; el backfill de lo que ya existía
+-- vive en migrations.js porque solo puede correr una vez.
+-- ---------------------------------------------------------------------------
+
+-- Catálogo estándar del ramo. El admin puede agregar más desde el panel.
+INSERT INTO tipos_fianza (nombre, orden) VALUES
+  ('Anticipo', 10),
+  ('Cumplimiento', 20),
+  ('Buena calidad (vicios ocultos)', 30),
+  ('Sostenimiento de oferta', 40),
+  ('Arrendamiento', 50),
+  ('Fiscal', 60),
+  ('Concesión', 70),
+  ('Fidelidad', 80),
+  ('Judicial', 90),
+  ('Crédito', 100)
+ON CONFLICT (nombre) DO NOTHING;
 `;

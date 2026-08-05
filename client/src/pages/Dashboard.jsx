@@ -77,7 +77,10 @@ export default function Dashboard() {
               <Wallet className="w-5 h-5 text-indigo-600" />
               {data?.razon_social || 'Mi panel'}
             </h1>
-            <p className="text-sm text-slate-500 mt-0.5">Resumen de tus fianzas y documentación</p>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Resumen de tus fianzas y documentación
+              {m?.proyectos_activos > 0 && ` · ${m.proyectos_activos} proyecto(s) en proceso`}
+            </p>
           </div>
         </div>
 
@@ -95,8 +98,11 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <Kpi tone="emerald" label="Línea disponible total" value={mxn(m?.linea_disponible)}
                sub={m ? `de ${mxn(m.linea_credito_total)} autorizado` : null} />
-          <Kpi tone="sky" label="Fianzas activas" value={m?.fianzas_activas ?? '—'} />
-          <Kpi tone="violet" label="Prima neta total" value={mxn(m?.prima_neta_total)} />
+          {/* Monto afianzado = lo que CUBREN las fianzas. Prima = lo que se PAGA por ellas. */}
+          <Kpi tone="sky" label="Monto afianzado" value={mxn(m?.monto_afianzado_total)}
+               sub={m ? `cubierto por ${m.fianzas_activas} fianza(s) vigente(s)` : null} />
+          <Kpi tone="violet" label="Prima neta total" value={mxn(m?.prima_neta_total)}
+               sub="lo que pagas por tus fianzas" />
           <Kpi tone="amber" label="Por vencer (< 30 días)" value={m?.fianzas_por_vencer_30 ?? '—'} />
         </div>
 

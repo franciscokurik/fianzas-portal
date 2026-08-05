@@ -20,7 +20,8 @@ router.get('/', requireAuth, async (req, res) => {
 
   let activas = 0;
   let porVencer30 = 0;
-  let primaNetaTotal = 0;
+  let primaNetaTotal = 0;      // lo que se PAGA por las fianzas
+  let montoAfianzadoTotal = 0; // lo que las fianzas CUBREN (vigentes)
   // Monto comprometido (fianzas no vencidas) acumulado por afianzadora
   const comprometidoPorAfi = new Map();
 
@@ -29,6 +30,7 @@ router.get('/', requireAuth, async (req, res) => {
     primaNetaTotal += f.prima_neta || 0;
     if (estado !== 'vencida') {
       activas += 1;
+      montoAfianzadoTotal += f.monto_afianzado || 0;
       comprometidoPorAfi.set(
         f.afianzadora_id,
         (comprometidoPorAfi.get(f.afianzadora_id) || 0) + (f.monto_afianzado || 0)
@@ -76,6 +78,10 @@ router.get('/', requireAuth, async (req, res) => {
     .prepare(`SELECT COUNT(*)::int c FROM papeleria_requests WHERE client_id = ? AND estado = 'pendiente'`)
     .get(clientId)).c;
 
+  const proyectosActivos = (await db
+    .prepare(`SELECT COUNT(*)::int c FROM proyectos WHERE client_id = ? AND estatus = 'en_proceso'`)
+    .get(clientId)).c;
+
   res.json({
     razon_social: client.razon_social,
     metricas: {
@@ -83,8 +89,10 @@ router.get('/', requireAuth, async (req, res) => {
       linea_credito_total: lineaCreditoTotal,
       lineas,
       fianzas_activas: activas,
+      monto_afianzado_total: montoAfianzadoTotal,
       prima_neta_total: primaNetaTotal,
       fianzas_por_vencer_30: porVencer30,
+      proyectos_activos: proyectosActivos,
     },
     alertas: {
       documentos_pendientes: docsPendientes,
