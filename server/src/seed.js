@@ -157,6 +157,44 @@ export async function seed() {
   return { clientes: 3, afianzadoras: afianzadoras.length };
 }
 
+// Deja el portal listo para operar de verdad: borra TODOS los datos de
+// clientes y no siembra nada de demostración.
+//
+// Conserva: las cuentas admin (con su contraseña actual), las afianzadoras y
+// los catálogos. Borra: clientes, proyectos, fianzas, líneas, documentos,
+// papelería y notificaciones.
+export async function reiniciarVacio() {
+  await initSchema();
+
+  // Sin cuenta admin nadie podría volver a entrar: mejor no tocar nada.
+  const { total: admins } = await db
+    .prepare(`SELECT COUNT(*)::int AS total FROM clients WHERE role = 'admin'`)
+    .get();
+  if (admins === 0) {
+    throw new Error(
+      'No hay ninguna cuenta admin en la base: reiniciar dejaría el portal sin acceso.'
+    );
+  }
+
+  const contar = async (tabla) =>
+    (await db.prepare(`SELECT COUNT(*)::int AS total FROM ${tabla}`).get()).total;
+  const borrados = {
+    clientes: (await contar('clients')) - admins,
+    proyectos: await contar('proyectos'),
+    fianzas: await contar('fianzas'),
+  };
+
+  // El orden importa: fianzas.proyecto_id es ON DELETE RESTRICT, así que si
+  // se dejara al CASCADE de clients podría intentar borrar el proyecto antes
+  // que sus fianzas y abortar. Se van de abajo hacia arriba.
+  const deClientesNoAdmin = `(SELECT id FROM clients WHERE role <> 'admin')`;
+  await db.query(`DELETE FROM fianzas   WHERE client_id IN ${deClientesNoAdmin}`);
+  await db.query(`DELETE FROM proyectos WHERE client_id IN ${deClientesNoAdmin}`);
+  await db.query(`DELETE FROM clients   WHERE role <> 'admin'`); // el resto cae por CASCADE
+
+  return { ...borrados, admins_conservados: admins };
+}
+
 // Siembra solo si la base está vacía (sin clientes). Devuelve true si sembró.
 export async function seedIfEmpty() {
   await initSchema();

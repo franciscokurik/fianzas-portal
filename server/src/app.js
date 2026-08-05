@@ -13,7 +13,7 @@ import fianzasRoutes from './routes/fianzas.js';
 import documentosRoutes from './routes/documentos.js';
 import adminRoutes from './routes/admin.js';
 import { correrAlertas } from './services/alerts.js';
-import { seed, seedIfEmpty } from './seed.js';
+import { seed, seedIfEmpty, reiniciarVacio } from './seed.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,14 +41,34 @@ app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
 // Crea el esquema y siembra datos demo. Pensado para ejecutarse UNA vez tras
 // desplegar (hosting serverless). Protegido por SETUP_KEY si está definida.
-//   GET /api/setup?key=XYZ            -> siembra solo si la BD está vacía
-//   GET /api/setup?key=XYZ&force=1    -> re-siembra desde cero
+//   GET /api/setup?key=XYZ            -> aplica esquema y migraciones; siembra
+//                                        datos demo SOLO si la BD está vacía
+//   GET /api/setup?key=XYZ&force=1    -> re-siembra desde cero CON datos demo
+//   GET /api/setup?key=XYZ&reiniciar=vacio&confirmar=BORRAR
+//                                     -> deja el portal en blanco para operar:
+//                                        borra todos los datos de clientes y
+//                                        conserva las cuentas admin, las
+//                                        afianzadoras y los catálogos
 app.get('/api/setup', async (req, res) => {
   const required = process.env.SETUP_KEY;
   if (required && req.query.key !== required) {
     return res.status(403).json({ error: 'Clave de setup inválida' });
   }
   try {
+    if (req.query.reiniciar === 'vacio') {
+      // Doble confirmación: la clave sola no basta para borrar producción.
+      if (req.query.confirmar !== 'BORRAR') {
+        return res.status(400).json({
+          error: 'Falta confirmar el borrado',
+          detail: 'Repite la llamada agregando &confirmar=BORRAR. Se eliminarán '
+                + 'todos los clientes con sus proyectos, fianzas, líneas y documentos. '
+                + 'Se conservan las cuentas admin, las afianzadoras y los catálogos.',
+        });
+      }
+      const borrado = await reiniciarVacio();
+      return res.json({ ok: true, reiniciado: true, borrado });
+    }
+
     if (req.query.force === '1') {
       await seed();
       return res.json({ ok: true, seeded: true, forced: true });
