@@ -33,19 +33,26 @@ export default function Admin() {
   const [sel, setSel] = useState(null);
   const [detalle, setDetalle] = useState(null);
   const [msg, setMsg] = useState('');
+  const [errorCarga, setErrorCarga] = useState('');
 
-  const cargarClientes = () => api.get('/admin/clientes').then((d) => setClientes(d.clientes));
-  const cargarAfianzadoras = () => api.get('/admin/afianzadoras').then((d) => setAfianzadoras(d.afianzadoras));
-  const cargarTipos = () => api.get('/admin/tipos-fianza').then((d) => setTipos(d.tipos));
-  const cargarRecordatorios = () => api.get('/admin/recordatorios').then((d) => setRecordatorios(d.recordatorios));
+  // Si una carga falla, hay que DECIRLO. Antes el error se tragaba y la
+  // pantalla mostraba "(0)", que se lee como "no hay nada" en vez de
+  // "no se pudo consultar" — y hace pensar que lo que guardaste se perdió.
+  const cargar = (ruta, aplicar) =>
+    api.get(ruta).then(aplicar).catch((e) => setErrorCarga(e.message));
+
+  const cargarClientes = () => cargar('/admin/clientes', (d) => setClientes(d.clientes));
+  const cargarAfianzadoras = () => cargar('/admin/afianzadoras', (d) => setAfianzadoras(d.afianzadoras));
+  const cargarTipos = () => cargar('/admin/tipos-fianza', (d) => setTipos(d.tipos));
+  const cargarRecordatorios = () => cargar('/admin/recordatorios', (d) => setRecordatorios(d.recordatorios));
 
   useEffect(() => { cargarClientes(); cargarAfianzadoras(); cargarTipos(); cargarRecordatorios(); }, []);
 
   function abrirDetalle(id) {
     setSel(id);
-    api.get(`/admin/clientes/${id}/detalle`).then(setDetalle);
+    cargar(`/admin/clientes/${id}/detalle`, setDetalle);
   }
-  const recargarDetalle = () => sel && api.get(`/admin/clientes/${sel}/detalle`).then(setDetalle);
+  const recargarDetalle = () => sel && cargar(`/admin/clientes/${sel}/detalle`, setDetalle);
   const flash = (t) => { setMsg(t); setTimeout(() => setMsg(''), 3000); };
 
   // Cualquier cambio en fianzas puede mover los recordatorios pendientes.
@@ -80,6 +87,23 @@ export default function Admin() {
         {msg && (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 flex items-center gap-2 mb-4">
             <CheckCircle2 className="w-4 h-4 shrink-0" /> {msg}
+          </div>
+        )}
+
+        {errorCarga && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 flex items-start gap-2 mb-4">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium">No se pudo cargar la información.</p>
+              <p className="text-xs mt-0.5 text-rose-700">{errorCarga}</p>
+              <p className="text-xs mt-1 text-rose-700">
+                Las listas de abajo pueden verse vacías aunque los datos existan.
+                Si es la primera vez tras un despliegue, falta correr <code>/api/setup</code>.
+              </p>
+            </div>
+            <button onClick={() => setErrorCarga('')} className="text-rose-400 hover:text-rose-700 shrink-0">
+              <X className="h-4 w-4" />
+            </button>
           </div>
         )}
 

@@ -17,6 +17,22 @@ import { seed, seedIfEmpty } from './seed.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Express 4 no entiende los handlers async: si uno rechaza, la promesa queda
+// sin atender y la petición se cuelga hasta que la plataforma la corta. El
+// front no recibe ni un error, solo se queda esperando. Esto encadena el
+// rechazo a next() para que llegue al manejador de errores de abajo.
+function capturarAsync(router) {
+  for (const capa of router.stack) {
+    if (!capa.route) continue;
+    for (const sub of capa.route.stack) {
+      const handler = sub.handle;
+      if (handler.length === 4) continue; // ya es un manejador de errores
+      sub.handle = (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+    }
+  }
+  return router;
+}
+
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || true }));
 app.use(express.json());
@@ -44,11 +60,11 @@ app.get('/api/setup', async (req, res) => {
   }
 });
 
-app.use('/api/auth', authRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/fianzas', fianzasRoutes);
-app.use('/api/documentos', documentosRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/auth', capturarAsync(authRoutes));
+app.use('/api/dashboard', capturarAsync(dashboardRoutes));
+app.use('/api/fianzas', capturarAsync(fianzasRoutes));
+app.use('/api/documentos', capturarAsync(documentosRoutes));
+app.use('/api/admin', capturarAsync(adminRoutes));
 
 // Dispara alertas manualmente (útil en MVP/demo)
 app.post('/api/alertas/correr', async (req, res) => {
@@ -68,11 +84,27 @@ if (fs.existsSync(CLIENT_DIST)) {
 
 // Manejo de errores (incluye límite de tamaño de multer)
 app.use((err, req, res, next) => {
+  if (!err) return next();
+
   if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ error: 'El archivo supera 10 MB' });
   }
-  if (err) return res.status(400).json({ error: err.message });
-  next();
+
+  // Los errores de Postgres traen un `code` de 5 caracteres. Casi siempre
+  // significan que falta correr /api/setup tras un despliegue, así que se
+  // dice explícitamente en vez de devolver un 400 genérico.
+  const esErrorDeBase = typeof err.code === 'string' && /^[0-9A-Z]{5}$/.test(err.code);
+  if (esErrorDeBase) {
+    console.error(`[db ${err.code}] ${req.method} ${req.originalUrl}: ${err.message}`);
+    return res.status(500).json({
+      error: 'La base de datos rechazó la consulta. ¿Falta correr /api/setup tras el despliegue?',
+      detail: err.message,
+      code: err.code,
+    });
+  }
+
+  console.error(`[error] ${req.method} ${req.originalUrl}: ${err.message}`);
+  res.status(err.status || 400).json({ error: err.message });
 });
 
 export default app;
