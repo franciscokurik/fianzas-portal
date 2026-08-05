@@ -54,6 +54,21 @@ app.get('/api/setup', async (req, res) => {
   if (required && req.query.key !== required) {
     return res.status(403).json({ error: 'Clave de setup inválida' });
   }
+
+  // Sin SETUP_KEY configurada este endpoint queda abierto a internet. Para el
+  // setup normal se tolera (es idempotente y no borra nada), pero las
+  // operaciones destructivas NO pueden quedar al alcance de cualquiera que
+  // adivine la URL: sin clave, se niegan.
+  const esDestructiva = req.query.reiniciar === 'vacio' || req.query.force === '1';
+  if (esDestructiva && !required) {
+    return res.status(403).json({
+      error: 'Operación destructiva bloqueada: falta configurar SETUP_KEY',
+      detail: 'Sin SETUP_KEY cualquiera podría vaciar la base. Defínela en las '
+            + 'variables de entorno del proyecto, vuelve a desplegar y repite '
+            + 'la llamada incluyendo &key=...',
+    });
+  }
+
   try {
     if (req.query.reiniciar === 'vacio') {
       // Doble confirmación: la clave sola no basta para borrar producción.
