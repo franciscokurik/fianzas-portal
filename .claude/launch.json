@@ -9,6 +9,13 @@
       "port": 4000
     },
     {
+      "name": "api-memoria",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["preview-memoria.mjs"],
+      "cwd": "server",
+      "port": 4000
+    },
+    {
       "name": "client",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
