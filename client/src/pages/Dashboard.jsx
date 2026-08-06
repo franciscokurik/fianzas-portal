@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, LogOut, FileText, AlertTriangle, Wallet, CreditCard } from 'lucide-react';
+import { LogOut, FileText, AlertTriangle, Wallet, CreditCard } from 'lucide-react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { mxn } from '../lib.jsx';
@@ -50,17 +50,15 @@ export default function Dashboard() {
     <div className="portal-shell portal-client min-h-screen">
       {/* Top bar */}
       <header className="portal-topbar bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="portal-topbar-inner max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="portal-brand flex items-center gap-2">
-            <div className="portal-brand-mark w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
-              <ShieldCheck className="w-4 h-4 text-white" />
-            </div>
+        <div className="portal-topbar-inner max-w-7xl mx-auto px-6 py-3">
+          <span className="portal-monogram" aria-hidden="true">F</span>
+          <div className="portal-brand">
             <span className="portal-brand-name text-sm font-semibold text-slate-700">
               <strong>FORTEX</strong>
-              <small>Portal de Fianzas</small>
+              <small>PORTAL DE FIANZAS</small>
             </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="portal-topbar-actions flex items-center gap-3">
             <span className="portal-user-chip text-sm text-slate-500 hidden sm:inline">{data?.razon_social || user?.razon_social}</span>
             <button
               onClick={logout}

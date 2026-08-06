@@ -5,7 +5,6 @@ import {
   ArrowRight,
   Loader2,
   LockKeyhole,
-  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../auth.jsx';
 
@@ -48,7 +47,7 @@ export default function Login() {
 
         <header className="login-brand">
           <span className="login-logo-mark" aria-hidden="true">
-            <ShieldCheck strokeWidth={1.8} />
+            F
           </span>
           <div>
             <p className="login-wordmark">FORTEX</p>
