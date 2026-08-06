@@ -28,8 +28,8 @@ function SubirBtn({ onFile, busy }) {
 
 function SectionCard({ icon: Icon, title, children }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+    <div className="portal-card portal-section-card bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="portal-card-header px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
         <Icon className="w-4 h-4 text-slate-500" />
         <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
       </div>
@@ -62,7 +62,7 @@ export default function Documentos() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="portal-documents-stack space-y-4">
       {error && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />

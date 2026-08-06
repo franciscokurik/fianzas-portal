@@ -65,24 +65,28 @@ export default function Admin() {
   const refrescarTodo = () => { recargarDetalle(); cargarClientes(); cargarRecordatorios(); };
 
   return (
-    <div className="min-h-screen">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-[1400px] mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
+    <div className="portal-shell portal-admin min-h-screen">
+      <header className="portal-topbar bg-white border-b border-slate-200 sticky top-0 z-10">
+        <div className="portal-topbar-inner max-w-[1400px] mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="portal-brand flex items-center gap-2">
+            <div className="portal-brand-mark w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
               <ShieldCheck className="w-4 h-4 text-white" />
             </div>
-            <span className="text-sm font-semibold text-slate-700">Fortex · Administración de Fianzas</span>
+            <span className="portal-brand-name text-sm font-semibold text-slate-700">
+              <strong>FORTEX</strong>
+              <small>Administración de Fianzas</small>
+            </span>
           </div>
-          <button onClick={logout} className={btnSecondary}>
+          <button onClick={logout} className={`${btnSecondary} portal-logout`}>
             <LogOut className="h-3.5 w-3.5" /> Salir
           </button>
         </div>
       </header>
 
-      <main className="max-w-[1400px] mx-auto px-6 py-6">
-        <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
+      <main className="portal-main max-w-[1400px] mx-auto px-6 py-6">
+        <div className="portal-page-heading flex flex-wrap items-end justify-between gap-3 mb-5">
           <div>
+            <p className="portal-eyebrow">Centro de operaciones</p>
             <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
               <Building2 className="w-5 h-5 text-indigo-600" /> Panel de administración
             </h1>

@@ -6,76 +6,655 @@ body {
   @apply bg-slate-50 text-slate-800 antialiased;
 }
 
+/* Portal — sistema visual compartido por cliente y administración. */
+.portal-shell {
+  --portal-ink: #15182b;
+  --portal-muted: #717589;
+  --portal-line: #e4e6ee;
+  --portal-line-strong: #d7d9e4;
+  --portal-paper: #ffffff;
+  --portal-canvas: #f5f6f9;
+  --portal-indigo: #464bd2;
+  --portal-indigo-dark: #3439b8;
+  --portal-indigo-soft: #eff0ff;
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  background:
+    radial-gradient(circle at 7% 3%, rgba(70, 75, 210, 0.055), transparent 24rem),
+    var(--portal-canvas);
+  color: var(--portal-ink);
+}
+
+.portal-shell::before {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image:
+    linear-gradient(rgba(43, 47, 77, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(43, 47, 77, 0.025) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: linear-gradient(to bottom, black, transparent 42%);
+}
+
+.portal-topbar {
+  height: 70px;
+  border-color: rgba(220, 222, 232, 0.82) !important;
+  background: rgba(255, 255, 255, 0.86) !important;
+  box-shadow: 0 1px 0 rgba(25, 28, 49, 0.025);
+  backdrop-filter: blur(18px) saturate(1.25);
+}
+
+.portal-topbar-inner {
+  height: 100%;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.portal-brand {
+  gap: 12px !important;
+}
+
+.portal-brand-mark {
+  width: 39px !important;
+  height: 39px !important;
+  border-radius: 10px !important;
+  background: var(--portal-indigo) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.17),
+    0 8px 22px rgba(70, 75, 210, 0.2);
+}
+
+.portal-brand-mark svg {
+  width: 19px !important;
+  height: 19px !important;
+  stroke-width: 1.8;
+}
+
+.portal-brand-name {
+  display: grid;
+  gap: 4px;
+  line-height: 1 !important;
+}
+
+.portal-brand-name strong {
+  color: #24273a;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.portal-brand-name small {
+  color: #8b8e9d;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.045em;
+}
+
+.portal-user-chip {
+  max-width: 320px;
+  overflow: hidden;
+  padding: 8px 13px;
+  color: #55596d !important;
+  background: #f3f4f7;
+  border: 1px solid #e6e7ec;
+  border-radius: 999px;
+  font-size: 11px !important;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-logout {
+  height: 35px;
+  padding: 0 12px !important;
+  color: #5c6073 !important;
+  background: #fff !important;
+  border-color: #dddfe7 !important;
+  border-radius: 9px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.portal-logout:hover {
+  color: #2f34b3 !important;
+  background: var(--portal-indigo-soft) !important;
+  border-color: #c9ccfb !important;
+  transform: translateY(-1px);
+}
+
+.portal-main {
+  min-width: 0;
+  padding-top: 38px !important;
+  padding-bottom: 64px !important;
+}
+
+.portal-page-heading {
+  position: relative;
+  margin-bottom: 28px !important;
+}
+
+.portal-eyebrow {
+  margin: 0 0 10px;
+  color: var(--portal-indigo);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+}
+
+.portal-page-heading h1 {
+  gap: 10px !important;
+  margin: 0;
+  color: var(--portal-ink) !important;
+  font-size: clamp(25px, 2.6vw, 34px) !important;
+  font-weight: 650 !important;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+}
+
+.portal-page-heading h1 svg {
+  width: 24px !important;
+  height: 24px !important;
+  color: var(--portal-indigo) !important;
+  stroke-width: 1.8;
+}
+
+.portal-page-heading h1 + p {
+  margin-top: 9px !important;
+  color: var(--portal-muted) !important;
+  font-size: 13px !important;
+  line-height: 1.55;
+}
+
+.portal-alert {
+  padding: 14px 16px !important;
+  background: #fff9e9 !important;
+  border-color: #f0dda3 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 5px 18px rgba(115, 82, 12, 0.045);
+}
+
+.portal-card,
+.portal-shell div.bg-white.border.border-slate-200,
+.portal-shell div.bg-white.border.border-slate-300 {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: var(--portal-line) !important;
+  border-radius: 14px !important;
+  box-shadow:
+    0 1px 2px rgba(19, 22, 42, 0.025),
+    0 8px 28px rgba(32, 35, 58, 0.045);
+}
+
+.portal-card {
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.portal-card:hover {
+  border-color: var(--portal-line-strong) !important;
+  box-shadow:
+    0 2px 3px rgba(19, 22, 42, 0.025),
+    0 12px 34px rgba(32, 35, 58, 0.065);
+}
+
+.portal-card-header,
+.portal-shell div.bg-white.border.border-slate-200 > div:first-child.bg-slate-50,
+.portal-shell div.bg-white.border.border-slate-200 > button:first-child.bg-slate-50 {
+  min-height: 45px;
+  padding: 12px 16px !important;
+  background: #fafafd !important;
+  border-color: #e8e9ef !important;
+}
+
+.portal-card-header h3,
+.portal-shell div.bg-white.border.border-slate-200 > div:first-child h3,
+.portal-shell div.bg-white.border.border-slate-200 > button:first-child {
+  color: #34374b !important;
+  font-size: 12px !important;
+  font-weight: 750 !important;
+  letter-spacing: 0.005em;
+}
+
+.portal-card-header > svg,
+.portal-shell div.bg-white.border.border-slate-200 > div:first-child > svg {
+  color: var(--portal-indigo) !important;
+  stroke-width: 1.8;
+}
+
+.portal-kpi {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px !important;
+  background: rgba(255, 255, 255, 0.94) !important;
+  border-color: var(--portal-line) !important;
+  border-radius: 14px !important;
+  box-shadow:
+    0 1px 2px rgba(19, 22, 42, 0.025),
+    0 8px 24px rgba(32, 35, 58, 0.045);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.portal-kpi::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  width: 92px;
+  height: 92px;
+  top: -44px;
+  right: -30px;
+  border-radius: 50%;
+  opacity: 0.11;
+}
+
+.portal-kpi::after {
+  content: '';
+  position: absolute;
+  width: 24px;
+  height: 3px;
+  top: 18px;
+  right: 18px;
+  border-radius: 99px;
+  opacity: 0.8;
+}
+
+.portal-kpi:hover {
+  box-shadow: 0 14px 32px rgba(32, 35, 58, 0.075);
+  transform: translateY(-2px);
+}
+
+.portal-kpi-emerald::before,
+.portal-kpi-emerald::after { background: #16a176; }
+.portal-kpi-sky::before,
+.portal-kpi-sky::after { background: #1686be; }
+.portal-kpi-violet::before,
+.portal-kpi-violet::after { background: #7550d9; }
+.portal-kpi-amber::before,
+.portal-kpi-amber::after { background: #d88b10; }
+
+.portal-kpi-label {
+  max-width: calc(100% - 30px);
+  line-height: 1.35;
+  letter-spacing: 0.1em !important;
+}
+
+.portal-kpi-value {
+  margin-top: 17px !important;
+  color: #24273a !important;
+  font-size: clamp(19px, 1.8vw, 25px) !important;
+  font-weight: 720 !important;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.portal-kpi-sub {
+  margin-top: 7px !important;
+  color: #8a8d9c !important;
+  font-size: 9px !important;
+  line-height: 1.4;
+}
+
+.portal-credit-lines table,
+.portal-policy-card table {
+  min-width: 720px;
+}
+
+.portal-shell table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.portal-shell thead {
+  background: #f8f8fb !important;
+}
+
+.portal-shell th {
+  height: 38px;
+  padding: 9px 13px !important;
+  color: #8a8d9e !important;
+  font-size: 9px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.09em !important;
+}
+
+.portal-shell td {
+  height: 42px;
+  padding: 9px 13px !important;
+  line-height: 1.45;
+}
+
+.portal-shell tbody tr {
+  transition: background 120ms ease;
+}
+
+.portal-shell tbody tr:hover {
+  background: #f8f8fc !important;
+}
+
+.portal-tabs {
+  width: fit-content;
+  gap: 5px !important;
+  margin-bottom: 20px !important;
+  padding: 4px;
+  background: #eaeaf0;
+  border: 0 !important;
+  border-radius: 11px;
+}
+
+.portal-tab {
+  min-height: 34px;
+  margin: 0 !important;
+  padding: 0 14px !important;
+  color: #737687 !important;
+  background: transparent;
+  border: 0 !important;
+  border-radius: 8px;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+}
+
+.portal-tab.border-indigo-600 {
+  color: #3035b5 !important;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(32, 35, 58, 0.09);
+}
+
+.portal-filters {
+  gap: 7px !important;
+  margin-bottom: 18px !important;
+}
+
+.portal-filters button {
+  min-height: 33px;
+  padding: 0 12px !important;
+  border-radius: 999px !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.portal-filters button:hover {
+  transform: translateY(-1px);
+}
+
+.portal-filters button.bg-indigo-600 {
+  background: var(--portal-indigo) !important;
+  border-color: var(--portal-indigo) !important;
+  box-shadow: 0 5px 14px rgba(70, 75, 210, 0.2);
+}
+
+.portal-policy-card {
+  margin-bottom: 2px;
+}
+
+.portal-policy-card .portal-card-header {
+  padding-top: 14px !important;
+  padding-bottom: 14px !important;
+}
+
+.portal-documents-stack {
+  gap: 18px !important;
+}
+
+.portal-section-card > div.divide-y > div,
+.portal-section-card > div > div.divide-y > div {
+  padding-top: 14px !important;
+  padding-bottom: 14px !important;
+  transition: background 140ms ease;
+}
+
+.portal-shell input:not([type='file']),
+.portal-shell select,
+.portal-shell textarea {
+  min-height: 39px;
+  color: #303346 !important;
+  background-color: #fff !important;
+  border-color: #dfe1e8 !important;
+  border-radius: 9px !important;
+  box-shadow: 0 1px 2px rgba(26, 29, 51, 0.02);
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.portal-shell input:not([type='file']):hover,
+.portal-shell select:hover,
+.portal-shell textarea:hover {
+  border-color: #c7cad6 !important;
+}
+
+.portal-shell input:not([type='file']):focus,
+.portal-shell select:focus,
+.portal-shell textarea:focus {
+  background: #fff !important;
+  border-color: var(--portal-indigo) !important;
+  box-shadow: 0 0 0 4px rgba(70, 75, 210, 0.1) !important;
+  outline: none;
+}
+
+.portal-shell label {
+  color: #65697d;
+  font-weight: 650;
+}
+
+.portal-shell button {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
+}
+
+.portal-shell button.bg-indigo-600,
+.portal-shell label.bg-indigo-600 {
+  background: var(--portal-indigo) !important;
+  border-color: var(--portal-indigo) !important;
+  border-radius: 9px !important;
+  box-shadow: 0 7px 18px rgba(70, 75, 210, 0.17);
+}
+
+.portal-shell button.bg-indigo-600:hover {
+  background: var(--portal-indigo-dark) !important;
+  box-shadow: 0 9px 22px rgba(52, 57, 184, 0.22);
+  transform: translateY(-1px);
+}
+
+.portal-shell button:focus-visible,
+.portal-shell a:focus-visible,
+.portal-shell label[role='button']:focus-visible {
+  outline: 3px solid rgba(70, 75, 210, 0.22);
+  outline-offset: 2px;
+}
+
+.portal-admin .grid.grid-cols-1.lg\:grid-cols-3 {
+  gap: 18px !important;
+}
+
+.portal-admin div.bg-white.border.border-slate-200,
+.portal-admin div.bg-white.border.border-amber-200 {
+  border-radius: 14px !important;
+}
+
+.portal-admin div.bg-white.border.border-amber-200 {
+  background: #fffcf3 !important;
+  border-color: #efdda8 !important;
+  box-shadow: 0 8px 28px rgba(92, 67, 14, 0.045);
+}
+
+.portal-admin .max-h-\[65vh\] button {
+  min-height: 58px;
+  padding: 11px 15px !important;
+  border-left: 3px solid transparent;
+}
+
+.portal-admin .max-h-\[65vh\] button.bg-indigo-50\/60 {
+  background: #f1f2ff !important;
+  border-left-color: var(--portal-indigo);
+}
+
+.portal-admin code,
+.portal-admin .font-mono,
+.portal-client code,
+.portal-client .font-mono {
+  font-feature-settings: 'tnum' 1, 'zero' 1;
+}
+
+.portal-shell ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.portal-shell ::-webkit-scrollbar-thumb {
+  background: #c9cbd5;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+@media (max-width: 760px) {
+  .portal-topbar {
+    height: 64px;
+  }
+
+  .portal-topbar-inner,
+  .portal-main {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  .portal-brand-mark {
+    width: 36px !important;
+    height: 36px !important;
+  }
+
+  .portal-brand-name strong {
+    font-size: 11px;
+  }
+
+  .portal-brand-name small {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .portal-main {
+    padding-top: 28px !important;
+    padding-bottom: 44px !important;
+  }
+
+  .portal-page-heading {
+    margin-bottom: 22px !important;
+  }
+
+  .portal-page-heading h1 {
+    font-size: 26px !important;
+  }
+
+  .portal-kpi {
+    min-height: 116px;
+    padding: 15px !important;
+  }
+
+  .portal-kpi-value {
+    font-size: 19px !important;
+  }
+
+  .portal-card,
+  .portal-shell div.bg-white.border.border-slate-200,
+  .portal-shell div.bg-white.border.border-slate-300 {
+    border-radius: 12px !important;
+  }
+
+  .portal-tabs {
+    width: 100%;
+  }
+
+  .portal-tab {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .portal-shell th,
+  .portal-shell td {
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 430px) {
+  .portal-brand-name small {
+    display: none;
+  }
+
+  .portal-logout {
+    width: 35px;
+    padding: 0 !important;
+    justify-content: center;
+    font-size: 0 !important;
+  }
+
+  .portal-logout svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .portal-kpi {
+    min-height: 112px;
+  }
+}
+
 /* Login — una superficie editorial independiente del resto del portal. */
 .login-shell {
   --login-ink: #10162f;
   --login-indigo: #3f45c9;
   --login-indigo-dark: #3035aa;
-  --login-paper: #f7f7f4;
+  /* Es el tono exacto del papel del dibujo (rgb 251,250,248): el panel y la
+     hoja empatan y no se ve dónde termina una y empieza el otro. */
+  --login-paper: #fbfaf8;
   min-height: 100vh;
   min-height: 100svh;
   display: grid;
-  grid-template-columns: minmax(380px, 0.92fr) minmax(520px, 1.08fr);
+  grid-template-columns: minmax(0, 1fr) clamp(456px, 35%, 560px);
   background: var(--login-paper);
   color: var(--login-ink);
 }
 
-.login-brand-panel {
+.login-art-panel {
   position: relative;
-  isolation: isolate;
   overflow: hidden;
   min-height: 100vh;
   min-height: 100svh;
   display: flex;
-  flex-direction: column;
-  padding: clamp(32px, 4vw, 64px);
-  color: #fff;
-  background: #11172f;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(28px, 3.5vw, 56px);
+  background: var(--login-paper);
 }
 
-.login-brand-panel::before {
-  content: '';
+/* El dibujo entra completo, sin recorte: lo que sobra a los lados es del
+   mismo color que su papel, así que se lee como una sola hoja. */
+.login-art {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.login-brand {
   position: absolute;
-  z-index: -2;
-  width: min(48vw, 680px);
-  aspect-ratio: 1;
-  right: min(-19vw, -180px);
-  bottom: min(-15vw, -130px);
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 50%;
-  box-shadow:
-    0 0 0 72px rgba(255, 255, 255, 0.025),
-    0 0 0 144px rgba(255, 255, 255, 0.02);
-}
-
-.login-brand-panel::after {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  width: 220px;
-  height: 220px;
-  right: 8%;
-  bottom: 7%;
-  background: #5259dd;
-  border-radius: 50%;
-  opacity: 0.18;
-  filter: blur(70px);
-}
-
-.login-brand-grid {
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  opacity: 0.24;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: linear-gradient(to bottom, black, transparent 78%);
-}
-
-.login-brand,
-.login-mobile-brand {
+  bottom: clamp(28px, 3.5vw, 56px);
+  left: clamp(28px, 3.5vw, 56px);
   display: flex;
   align-items: center;
   gap: 14px;
@@ -92,7 +671,7 @@ body {
   background: #4d53dc;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 11px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 10px 30px rgba(0, 0, 0, 0.17);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 10px 26px rgba(63, 69, 201, 0.24);
 }
 
 .login-logo-mark svg {
@@ -102,6 +681,7 @@ body {
 
 .login-wordmark {
   margin: 0;
+  color: #24273a;
   font-size: 15px;
   font-weight: 800;
   line-height: 1;
@@ -110,19 +690,12 @@ body {
 
 .login-product-name {
   margin: 6px 0 0;
+  color: #8b8e9d;
   font-size: 11px;
   line-height: 1;
   letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.56);
 }
 
-.login-brand-message {
-  width: min(100%, 570px);
-  margin: auto 0;
-  padding: 64px 0;
-}
-
-.login-eyebrow,
 .login-form-kicker {
   margin: 0 0 18px;
   font-size: 11px;
@@ -132,83 +705,6 @@ body {
   text-transform: uppercase;
 }
 
-.login-eyebrow {
-  color: #9da2ff;
-}
-
-.login-brand-message h1 {
-  margin: 0;
-  max-width: 560px;
-  font-size: clamp(42px, 4.6vw, 72px);
-  font-weight: 500;
-  line-height: 0.99;
-  letter-spacing: -0.048em;
-}
-
-.login-brand-message h1 span {
-  display: block;
-  color: #aeb2ff;
-}
-
-.login-brand-copy {
-  max-width: 470px;
-  margin: 26px 0 0;
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 15px;
-  line-height: 1.75;
-}
-
-.login-benefits {
-  display: grid;
-  gap: 13px;
-  margin: 36px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.login-benefits li {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 13px;
-}
-
-.login-benefits li span {
-  width: 21px;
-  height: 21px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #b7baff;
-  border: 1px solid rgba(183, 186, 255, 0.36);
-  border-radius: 50%;
-}
-
-.login-benefits svg {
-  width: 12px;
-  height: 12px;
-  stroke-width: 2.2;
-}
-
-.login-brand-footer {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  color: rgba(255, 255, 255, 0.37);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.login-brand-separator {
-  width: 3px;
-  height: 3px;
-  background: #7d83ef;
-  border-radius: 50%;
-}
-
 .login-access-panel {
   position: relative;
   min-height: 100vh;
@@ -216,7 +712,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 84px clamp(40px, 7vw, 112px);
+  padding: clamp(40px, 5vh, 72px) clamp(32px, 3vw, 56px);
   background:
     radial-gradient(circle at 96% 4%, rgba(63, 69, 201, 0.075), transparent 27%),
     var(--login-paper);
@@ -248,10 +744,6 @@ body {
 .login-form-wrap {
   width: min(100%, 440px);
   animation: login-enter 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.login-mobile-brand {
-  display: none;
 }
 
 .login-form-heading {
@@ -506,85 +998,59 @@ body {
   to { transform: rotate(360deg); }
 }
 
-@media (max-width: 980px) {
-  .login-shell {
-    grid-template-columns: minmax(300px, 0.75fr) minmax(460px, 1.25fr);
-  }
-
-  .login-brand-panel {
-    padding: 34px;
-  }
-
-  .login-brand-message h1 {
-    font-size: clamp(37px, 5vw, 54px);
-  }
-
-  .login-benefits {
-    display: none;
-  }
-
-  .login-access-panel {
-    padding-inline: 48px;
-  }
-}
-
-@media (max-width: 760px) {
+/* Debajo de 1024px se apila: el dibujo arriba como banda y el formulario
+   debajo. Repartido en dos columnas la hoja se queda sin ancho y la torre
+   acaba flotando diminuta en un panel vacío. La banda recorta arriba y abajo
+   (object-fit: cover) para que la torre siga siendo el centro visual sin
+   comerse la pantalla. */
+@media (max-width: 1023px) {
   .login-shell {
     display: block;
-    background: #11172f;
   }
 
-  .login-brand-panel {
-    min-height: 205px;
-    height: 205px;
-    padding: 27px 24px;
+  .login-art-panel {
+    min-height: 0;
+    height: clamp(200px, 27vh, 300px);
+    padding: 0;
   }
 
-  .login-brand-panel .login-brand,
-  .login-brand-message,
-  .login-brand-footer {
-    display: none;
+  .login-art {
+    object-fit: cover;
+    object-position: center 42%;
   }
 
-  .login-brand-panel::before {
-    width: 350px;
-    right: -180px;
-    bottom: -240px;
+  .login-brand {
+    bottom: 18px;
+    left: 20px;
   }
 
-  .login-access-panel {
-    min-height: calc(100svh - 165px);
-    align-items: flex-start;
-    margin-top: -40px;
-    padding: 0 20px 72px;
-    background: var(--login-paper);
-    border-radius: 28px 28px 0 0;
-  }
-
-  .login-access-status {
-    top: 29px;
-    right: 25px;
-  }
-
-  .login-form-wrap {
-    width: min(100%, 480px);
-    padding-top: 27px;
-  }
-
-  .login-mobile-brand {
-    display: flex;
-    width: max-content;
-    margin: -110px 0 74px;
-    color: #fff;
-  }
-
-  .login-mobile-brand .login-logo-mark {
+  .login-logo-mark {
     width: 40px;
     height: 40px;
   }
 
-  .login-mobile-brand .login-wordmark {
+  .login-wordmark {
     font-size: 14px;
+  }
+
+  /* En columna para que el footer, que aquí deja de ser absoluto, caiga
+     debajo del formulario en vez de competirle el ancho en la misma fila. */
+  .login-access-panel {
+    min-height: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 34px 20px 48px;
+  }
+
+  .login-access-status {
+    top: 14px;
+    right: 20px;
+  }
+
+  .login-form-wrap {
+    width: min(100%, 480px);
+    margin-inline: auto;
   }
 
   .login-form-heading {
@@ -596,7 +1062,11 @@ body {
   }
 
   .login-access-footer {
-    bottom: 24px;
+    position: static;
+    margin-top: 32px;
+    left: auto;
+    transform: none;
+    text-align: center;
   }
 }
 

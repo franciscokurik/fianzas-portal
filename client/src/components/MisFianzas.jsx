@@ -102,7 +102,7 @@ export default function MisFianzas() {
   return (
     <div>
       {/* Filtro por afianzadora */}
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="portal-filters flex flex-wrap gap-2 mb-4">
         <button onClick={() => setSel('todas')} className={chipCls(sel === 'todas')}>
           Todas
         </button>
@@ -116,8 +116,8 @@ export default function MisFianzas() {
       {/* Un bloque por proyecto */}
       <div className="space-y-4">
         {grupos.map((g) => (
-          <div key={g.clave} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <div key={g.clave} className="portal-card portal-policy-card bg-white border border-slate-200 rounded-lg overflow-hidden">
+            <div className="portal-card-header px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center gap-x-3 gap-y-1">
               <Briefcase className="w-4 h-4 text-slate-500 shrink-0" />
               <h3 className="text-sm font-semibold text-slate-700">{g.nombre}</h3>
               {g.numero_contrato && (

@@ -3,18 +3,11 @@ import { useNavigate, Navigate } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
-  Check,
   Loader2,
   LockKeyhole,
   ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../auth.jsx';
-
-const benefits = [
-  'Pólizas y vigencias en un solo lugar',
-  'Documentación siempre disponible',
-  'Visibilidad clara de tus líneas',
-];
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -42,8 +35,16 @@ export default function Login() {
 
   return (
     <main className="login-shell">
-      <section className="login-brand-panel" aria-label="Fortex Portal de Fianzas">
-        <div className="login-brand-grid" aria-hidden="true" />
+      {/* El fondo del panel (#fbfaf8) es el mismo tono que el papel del dibujo,
+          así que la hoja se extiende sin costura hasta los bordes. */}
+      <section className="login-art-panel">
+        <img
+          className="login-art"
+          src="/login-illustration.webp"
+          alt="Torre Fortex en Monterrey, dibujada a lápiz frente al Cerro de la Silla"
+          width="1536"
+          height="1024"
+        />
 
         <header className="login-brand">
           <span className="login-logo-mark" aria-hidden="true">
@@ -54,33 +55,6 @@ export default function Login() {
             <p className="login-product-name">Portal de Fianzas</p>
           </div>
         </header>
-
-        <div className="login-brand-message">
-          <p className="login-eyebrow">Gestión financiera, sin fricción</p>
-          <h1>
-            La certeza detrás
-            <span>de cada proyecto.</span>
-          </h1>
-          <p className="login-brand-copy">
-            Tu operación de fianzas, organizada para que cada decisión empiece
-            con información clara y oportuna.
-          </p>
-
-          <ul className="login-benefits">
-            {benefits.map((benefit) => (
-              <li key={benefit}>
-                <span><Check aria-hidden="true" /></span>
-                {benefit}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <footer className="login-brand-footer">
-          <span>Departamento de Fianzas</span>
-          <span className="login-brand-separator" aria-hidden="true" />
-          <span>Acceso confidencial</span>
-        </footer>
       </section>
 
       <section className="login-access-panel">
@@ -90,16 +64,6 @@ export default function Login() {
         </div>
 
         <div className="login-form-wrap">
-          <div className="login-mobile-brand" aria-hidden="true">
-            <span className="login-logo-mark">
-              <ShieldCheck strokeWidth={1.8} />
-            </span>
-            <div>
-              <p className="login-wordmark">FORTEX</p>
-              <p className="login-product-name">Portal de Fianzas</p>
-            </div>
-          </div>
-
           <div className="login-form-heading">
             <p className="login-form-kicker">Bienvenido de vuelta</p>
             <h2>Inicia sesión</h2>
