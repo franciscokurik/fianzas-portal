@@ -1,7 +1,20 @@
 import { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { ShieldCheck, AlertTriangle, Loader2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  Loader2,
+  LockKeyhole,
+  ShieldCheck,
+} from 'lucide-react';
 import { useAuth } from '../auth.jsx';
+
+const benefits = [
+  'Pólizas y vigencias en un solo lugar',
+  'Documentación siempre disponible',
+  'Visibilidad clara de tus líneas',
+];
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -28,60 +41,140 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-600 mb-3">
-            <ShieldCheck className="w-6 h-6 text-white" />
+    <main className="login-shell">
+      <section className="login-brand-panel" aria-label="Fortex Portal de Fianzas">
+        <div className="login-brand-grid" aria-hidden="true" />
+
+        <header className="login-brand">
+          <span className="login-logo-mark" aria-hidden="true">
+            <ShieldCheck strokeWidth={1.8} />
+          </span>
+          <div>
+            <p className="login-wordmark">FORTEX</p>
+            <p className="login-product-name">Portal de Fianzas</p>
           </div>
-          <h1 className="text-xl font-semibold text-slate-800">Fortex · Portal de Fianzas</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Departamento de Fianzas</p>
+        </header>
+
+        <div className="login-brand-message">
+          <p className="login-eyebrow">Gestión financiera, sin fricción</p>
+          <h1>
+            La certeza detrás
+            <span>de cada proyecto.</span>
+          </h1>
+          <p className="login-brand-copy">
+            Tu operación de fianzas, organizada para que cada decisión empiece
+            con información clara y oportuna.
+          </p>
+
+          <ul className="login-benefits">
+            {benefits.map((benefit) => (
+              <li key={benefit}>
+                <span><Check aria-hidden="true" /></span>
+                {benefit}
+              </li>
+            ))}
+          </ul>
         </div>
 
-        <form onSubmit={onSubmit} className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
-          <h2 className="text-base font-semibold text-slate-700 mb-4">Iniciar sesión</h2>
+        <footer className="login-brand-footer">
+          <span>Departamento de Fianzas</span>
+          <span className="login-brand-separator" aria-hidden="true" />
+          <span>Acceso confidencial</span>
+        </footer>
+      </section>
 
-          <label className="text-xs text-slate-500 mb-1 block">RFC o correo electrónico</label>
-          <input
-            value={identificador}
-            onChange={(e) => setId(e.target.value)}
-            autoFocus
-            placeholder="cliente@demo.mx o RFC"
-            className="w-full mb-4 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
-          />
+      <section className="login-access-panel">
+        <div className="login-access-status">
+          <span className="login-status-dot" aria-hidden="true" />
+          Sistema disponible
+        </div>
 
-          <label className="text-xs text-slate-500 mb-1 block">Contraseña</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            className="w-full mb-5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
-          />
-
-          {error && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 flex items-start gap-2 mb-4">
-              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>{error}</span>
+        <div className="login-form-wrap">
+          <div className="login-mobile-brand" aria-hidden="true">
+            <span className="login-logo-mark">
+              <ShieldCheck strokeWidth={1.8} />
+            </span>
+            <div>
+              <p className="login-wordmark">FORTEX</p>
+              <p className="login-product-name">Portal de Fianzas</p>
             </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-            {busy ? 'Entrando…' : 'Entrar'}
-          </button>
-
-          <div className="mt-5 pt-4 border-t border-slate-100 text-xs text-slate-400 space-y-0.5">
-            <p className="font-medium text-slate-500">Cuentas de prueba</p>
-            <p>Cliente: cliente@demo.mx / demo123</p>
-            <p>Admin: admin@fortex.mx / admin123</p>
           </div>
-        </form>
-      </div>
-    </div>
+
+          <div className="login-form-heading">
+            <p className="login-form-kicker">Bienvenido de vuelta</p>
+            <h2>Inicia sesión</h2>
+            <p>Ingresa tus credenciales para continuar a tu portal.</p>
+          </div>
+
+          <form onSubmit={onSubmit} className="login-form">
+            <div className="login-field">
+              <label htmlFor="identificador">RFC o correo electrónico</label>
+              <input
+                id="identificador"
+                name="identificador"
+                value={identificador}
+                onChange={(e) => setId(e.target.value)}
+                autoFocus
+                autoComplete="username"
+                placeholder="cliente@demo.mx o RFC"
+              />
+            </div>
+
+            <div className="login-field">
+              <label htmlFor="password">Contraseña</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                placeholder="••••••••"
+              />
+            </div>
+
+            {error && (
+              <div className="login-error" role="alert" aria-live="polite">
+                <AlertTriangle aria-hidden="true" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button type="submit" disabled={busy} className="login-submit">
+              <span>{busy ? 'Verificando acceso…' : 'Entrar al portal'}</span>
+              {busy
+                ? <Loader2 className="login-spinner" aria-hidden="true" />
+                : <ArrowRight aria-hidden="true" />}
+            </button>
+          </form>
+
+          <div className="login-demo">
+            <div className="login-demo-title">
+              <span>Cuentas de prueba</span>
+              <span className="login-demo-badge">DEMO</span>
+            </div>
+            <div className="login-demo-grid">
+              <div>
+                <span>Cliente</span>
+                <strong>cliente@demo.mx</strong>
+                <code>demo123</code>
+              </div>
+              <div>
+                <span>Administrador</span>
+                <strong>admin@fortex.mx</strong>
+                <code>admin123</code>
+              </div>
+            </div>
+          </div>
+
+          <p className="login-security-note">
+            <LockKeyhole aria-hidden="true" />
+            Acceso protegido. Tus credenciales se transmiten de forma segura.
+          </p>
+        </div>
+
+        <p className="login-access-footer">Fortex · Portal interno de gestión</p>
+      </section>
+    </main>
   );
 }
