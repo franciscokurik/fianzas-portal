@@ -3,6 +3,7 @@ import {
   ShieldCheck, LogOut, Building2, Plus, Save, Download,
   Users, FileText, Files, CheckCircle2, UserPlus, AlertTriangle,
   CreditCard, Trash2, Briefcase, Pencil, X, Bell, ListChecks, Check,
+  Paperclip, Upload, FileDown,
 } from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
@@ -29,6 +30,7 @@ export default function Admin() {
   const [clientes, setClientes] = useState([]);
   const [afianzadoras, setAfianzadoras] = useState([]);
   const [tipos, setTipos] = useState([]);
+  const [tiposDoc, setTiposDoc] = useState({ proyecto: [], fianza: [] });
   const [recordatorios, setRecordatorios] = useState([]);
   const [sel, setSel] = useState(null);
   const [detalle, setDetalle] = useState(null);
@@ -45,8 +47,12 @@ export default function Admin() {
   const cargarAfianzadoras = () => cargar('/admin/afianzadoras', (d) => setAfianzadoras(d.afianzadoras));
   const cargarTipos = () => cargar('/admin/tipos-fianza', (d) => setTipos(d.tipos));
   const cargarRecordatorios = () => cargar('/admin/recordatorios', (d) => setRecordatorios(d.recordatorios));
+  const cargarTiposDoc = () => cargar('/admin/tipos-documento', (d) => setTiposDoc(d.tipos));
 
-  useEffect(() => { cargarClientes(); cargarAfianzadoras(); cargarTipos(); cargarRecordatorios(); }, []);
+  useEffect(() => {
+    cargarClientes(); cargarAfianzadoras(); cargarTipos();
+    cargarRecordatorios(); cargarTiposDoc();
+  }, []);
 
   function abrirDetalle(id) {
     setSel(id);
@@ -164,6 +170,7 @@ export default function Admin() {
                 detalle={detalle}
                 afianzadoras={afianzadoras}
                 tipos={tipos}
+                tiposDoc={tiposDoc}
                 onChange={refrescarTodo}
                 flash={flash}
               />
@@ -295,7 +302,7 @@ function CatalogoTipos({ tipos, onChange, flash }) {
    Detalle del cliente
    -------------------------------------------------------------------------- */
 
-function DetalleCliente({ detalle, afianzadoras, tipos, onChange, flash }) {
+function DetalleCliente({ detalle, afianzadoras, tipos, tiposDoc, onChange, flash }) {
   const { cliente, lineas = [], proyectos = [], fianzas = [], documentos, papeleria } = detalle;
   const lineaTotal = lineas.reduce((s, l) => s + (l.linea_credito || 0), 0);
   const disponibleTotal = lineas.reduce((s, l) => s + (l.disponible || 0), 0);
@@ -347,6 +354,7 @@ function DetalleCliente({ detalle, afianzadoras, tipos, onChange, flash }) {
         proyectos={proyectos}
         afianzadoras={afianzadoras}
         tipos={tipos}
+        tiposDoc={tiposDoc}
         onChange={onChange}
         flash={flash}
       />
@@ -529,7 +537,7 @@ function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
    Proyectos y sus fianzas
    -------------------------------------------------------------------------- */
 
-function Proyectos({ clienteId, proyectos, afianzadoras, tipos, onChange, flash }) {
+function Proyectos({ clienteId, proyectos, afianzadoras, tipos, tiposDoc, onChange, flash }) {
   const [creando, setCreando] = useState(false);
 
   return (
@@ -563,6 +571,7 @@ function Proyectos({ clienteId, proyectos, afianzadoras, tipos, onChange, flash 
             clienteId={clienteId}
             afianzadoras={afianzadoras}
             tipos={tipos}
+            tiposDoc={tiposDoc}
             onChange={onChange}
             flash={flash}
           />
@@ -577,11 +586,13 @@ function Proyectos({ clienteId, proyectos, afianzadoras, tipos, onChange, flash 
   );
 }
 
-function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, onChange, flash }) {
+function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, tiposDoc, onChange, flash }) {
   const [abierto, setAbierto] = useState(true);
   const [editando, setEditando] = useState(false);
   const [nuevaFianza, setNuevaFianza] = useState(false);
+  const [verDocs, setVerDocs] = useState(false);
   const [error, setError] = useState('');
+  const docs = p.documentos || [];
 
   async function borrar() {
     setError('');
@@ -623,6 +634,14 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, onCh
                 {p.pct_contrato_afianzado}% del contrato
               </span>
             )}
+            <button
+              onClick={() => setVerDocs((v) => !v)}
+              className={`${btnSecondary} ${docs.length ? 'text-indigo-700 border-indigo-200' : ''}`}
+              title="Contrato y documentos del proyecto"
+            >
+              <Paperclip className="h-3.5 w-3.5" />
+              {docs.length > 0 && <span className="tabular-nums">{docs.length}</span>}
+            </button>
             <button onClick={() => setEditando((e) => !e)} className={btnSecondary} title="Editar proyecto">
               <Pencil className="h-3.5 w-3.5" />
             </button>
@@ -638,6 +657,22 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, onCh
           </div>
         )}
       </div>
+
+      {verDocs && (
+        <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
+          <p className="text-xs font-medium text-slate-600 mb-2">
+            Documentos del proyecto <span className="text-slate-400">· contrato, convenios, acta de entrega</span>
+          </p>
+          <DocsEntidad
+            entidad="proyectos"
+            id={p.id}
+            documentos={docs}
+            tipos={tiposDoc.proyecto || []}
+            onChange={onChange}
+            flash={flash}
+          />
+        </div>
+      )}
 
       {editando && (
         <FormProyecto
@@ -659,6 +694,7 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, onCh
             proyectos={proyectos}
             afianzadoras={afianzadoras}
             tipos={tipos}
+            tiposDoc={tiposDoc}
             onChange={onChange}
             flash={flash}
           />
@@ -688,8 +724,9 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, onCh
   );
 }
 
-function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, onChange, flash }) {
+function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, tiposDoc, onChange, flash }) {
   const [editandoId, setEditandoId] = useState(null);
+  const [docsAbiertos, setDocsAbiertos] = useState(null);
 
   if (!fianzas.length) {
     return <div className="px-4 py-5 text-center text-xs text-slate-400">Sin fianzas en este proyecto.</div>;
@@ -714,6 +751,7 @@ function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, onChange, flash
             <th className="text-left px-3 py-2">Vigencia</th>
             <th className="text-left px-3 py-2">Recordatorio</th>
             <th className="text-left px-3 py-2">Estado</th>
+            <th className="text-center px-3 py-2">Docs</th>
             <th className="px-3 py-2"></th>
           </tr>
         </thead>
@@ -721,7 +759,7 @@ function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, onChange, flash
           {fianzas.map((f) => (
             editandoId === f.id ? (
               <tr key={f.id}>
-                <td colSpan={9} className="p-0">
+                <td colSpan={10} className="p-0">
                   <FormFianza
                     inicial={f}
                     proyectos={proyectos}
@@ -761,6 +799,20 @@ function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, onChange, flash
                   ) : <span className="text-slate-300">—</span>}
                 </td>
                 <td className="px-3 py-1.5"><EstadoBadge estado={f.estado} /></td>
+                <td className="px-3 py-1.5 text-center">
+                  <button
+                    onClick={() => setDocsAbiertos((d) => (d === f.id ? null : f.id))}
+                    className={`inline-flex items-center gap-1 px-1.5 py-1 rounded-md border text-[11px] ${
+                      f.documentos?.length
+                        ? 'border-indigo-200 text-indigo-700 bg-indigo-50/60'
+                        : 'border-slate-200 text-slate-400 hover:border-indigo-300'
+                    }`}
+                    title="Carátula y documentos de la fianza"
+                  >
+                    <Paperclip className="h-3.5 w-3.5" />
+                    <span className="tabular-nums">{f.documentos?.length || 0}</span>
+                  </button>
+                </td>
                 <td className="px-3 py-1.5">
                   <div className="flex items-center justify-end gap-1.5">
                     <button onClick={() => setEditandoId(f.id)} className={btnSecondary} title="Editar fianza">
@@ -773,9 +825,130 @@ function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, onChange, flash
                 </td>
               </tr>
             )
-          ))}
+          )).flatMap((fila, i) => {
+            const f = fianzas[i];
+            if (docsAbiertos !== f.id || editandoId === f.id) return [fila];
+            return [fila, (
+              <tr key={`docs-${f.id}`} className="bg-indigo-50/20">
+                <td colSpan={10} className="px-4 py-3">
+                  <p className="text-xs font-medium text-slate-600 mb-2">
+                    Documentos de la fianza <span className="font-mono text-slate-400">{f.numero_poliza}</span>
+                  </p>
+                  <DocsEntidad
+                    entidad="fianzas"
+                    id={f.id}
+                    documentos={f.documentos || []}
+                    tipos={tiposDoc.fianza || []}
+                    onChange={onChange}
+                    flash={flash}
+                  />
+                </td>
+              </tr>
+            )];
+          })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Documentos colgados de un proyecto (contrato) o de una fianza (carátula)
+   -------------------------------------------------------------------------- */
+
+const pesoArchivo = (bytes) =>
+  !bytes ? '' : bytes < 1024 * 1024
+    ? `${Math.round(bytes / 1024)} KB`
+    : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+function DocsEntidad({ entidad, id, documentos = [], tipos = [], onChange, flash }) {
+  const [tipoDoc, setTipoDoc] = useState(tipos[0]?.clave || 'otro');
+  const [subiendo, setSubiendo] = useState(false);
+  const [error, setError] = useState('');
+
+  async function subir(archivo) {
+    if (!archivo) return;
+    setError('');
+    setSubiendo(true);
+    try {
+      const datos = new FormData();
+      datos.append('archivo', archivo);
+      datos.append('tipo_doc', tipoDoc);
+      await api.upload(`/admin/${entidad}/${id}/documentos`, datos);
+      onChange();
+      flash('Documento subido');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSubiendo(false);
+    }
+  }
+
+  async function quitar(docId) {
+    setError('');
+    try {
+      await api.del(`/admin/documentos/${docId}`);
+      onChange();
+      flash('Documento eliminado');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {documentos.length > 0 && (
+        <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg bg-white">
+          {documentos.map((d) => (
+            <div key={d.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+              <Paperclip className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <span className="font-medium text-slate-700 shrink-0">{d.tipo_doc_nombre}</span>
+              <span className="text-slate-500 truncate">{d.nombre_archivo}</span>
+              <span className="text-slate-400 tabular-nums shrink-0">{pesoArchivo(d.size_bytes)}</span>
+              <a
+                href={d.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${btnSecondary} ml-auto shrink-0`}
+              >
+                <FileDown className="h-3.5 w-3.5" /> Ver
+              </a>
+              <button
+                onClick={() => quitar(d.id)}
+                className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600 shrink-0`}
+                title="Eliminar documento"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={tipoDoc} onChange={(e) => setTipoDoc(e.target.value)} className={`${inputCls} w-auto min-w-48`}>
+          {tipos.map((t) => <option key={t.clave} value={t.clave}>{t.nombre}</option>)}
+        </select>
+
+        <label className={`${btnSecondary} cursor-pointer ${subiendo ? 'opacity-50' : ''}`}>
+          <Upload className="h-3.5 w-3.5" />
+          {subiendo ? 'Subiendo…' : 'Elegir archivo'}
+          <input
+            type="file"
+            accept="application/pdf,image/jpeg,image/png"
+            className="sr-only"
+            disabled={subiendo}
+            onChange={(e) => { subir(e.target.files?.[0]); e.target.value = ''; }}
+          />
+        </label>
+        <span className="text-[11px] text-slate-400">PDF, JPG o PNG · máx. 10 MB</span>
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
     </div>
   );
 }

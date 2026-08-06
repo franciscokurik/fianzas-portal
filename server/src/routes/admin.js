@@ -4,6 +4,8 @@ import db from '../db.js';
 import { requireAuth, requireAdmin } from '../auth/middleware.js';
 import { estadoFianza, daysUntil, todayISO } from '../lib/dates.js';
 import { centavos } from '../lib/dinero.js';
+import { upload, subirArchivo, borrarArchivo } from '../lib/upload.js';
+import { TIPOS_DOC, esTipoValido, agruparPorEntidad, deEntidad } from '../lib/documentos.js';
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
@@ -200,6 +202,7 @@ router.delete('/proyectos/:id', async (req, res) => {
       error: `El proyecto tiene ${c} fianza(s). Reasígnalas a otro proyecto antes de eliminarlo.`,
     });
   }
+  await borrarDocumentosDe('proyecto', id);
   await db.prepare('DELETE FROM proyectos WHERE id = ?').run(id);
   res.json({ ok: true });
 });
@@ -321,7 +324,9 @@ router.put('/fianzas/:id/recordatorio', async (req, res) => {
 });
 
 router.delete('/fianzas/:id', async (req, res) => {
-  await db.prepare('DELETE FROM fianzas WHERE id = ?').run(Number(req.params.id));
+  const id = Number(req.params.id);
+  await borrarDocumentosDe('fianza', id);
+  await db.prepare('DELETE FROM fianzas WHERE id = ?').run(id);
   res.json({ ok: true });
 });
 
@@ -348,6 +353,68 @@ router.get('/recordatorios', async (req, res) => {
     .filter((r) => r.dias_restantes !== null && r.dias_restantes <= dias);
 
   res.json({ recordatorios });
+});
+
+// --- Documentos de proyectos y fianzas ---
+
+router.get('/tipos-documento', (req, res) => res.json({ tipos: TIPOS_DOC }));
+
+// La tabla es polimórfica, así que no hay llave foránea que limpie sola:
+// al borrar la entidad hay que llevarse sus archivos a mano.
+async function borrarDocumentosDe(entidadTipo, entidadId) {
+  const docs = await db.prepare(
+    'SELECT url FROM documentos WHERE entidad_tipo = ? AND entidad_id = ?'
+  ).all(entidadTipo, entidadId);
+  if (!docs.length) return;
+
+  await db.prepare('DELETE FROM documentos WHERE entidad_tipo = ? AND entidad_id = ?')
+    .run(entidadTipo, entidadId);
+  for (const d of docs) await borrarArchivo(d.url);
+}
+
+// Devuelve el cliente dueño de la entidad, o null si no existe.
+async function duenoDe(entidadTipo, entidadId) {
+  const tabla = entidadTipo === 'proyecto' ? 'proyectos' : 'fianzas';
+  const fila = await db.prepare(`SELECT client_id FROM ${tabla} WHERE id = ?`).get(entidadId);
+  return fila ? fila.client_id : null;
+}
+
+// POST /api/admin/:entidadTipo/:id/documentos  (multipart: archivo, tipo_doc)
+//   entidadTipo: 'proyectos' | 'fianzas'
+router.post('/:entidadTipo(proyectos|fianzas)/:id/documentos',
+  upload.single('archivo'),
+  async (req, res) => {
+    const entidadTipo = req.params.entidadTipo === 'proyectos' ? 'proyecto' : 'fianza';
+    const entidadId = Number(req.params.id);
+    const tipoDoc = req.body?.tipo_doc || 'otro';
+
+    if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
+    if (!esTipoValido(entidadTipo, tipoDoc)) {
+      return res.status(400).json({ error: `Tipo de documento no válido para ${entidadTipo}` });
+    }
+
+    const clientId = await duenoDe(entidadTipo, entidadId);
+    if (!clientId) return res.status(404).json({ error: `No existe ese ${entidadTipo}` });
+
+    const url = await subirArchivo(req.file, clientId);
+    const row = await db.prepare(
+      `INSERT INTO documentos
+         (client_id, entidad_tipo, entidad_id, tipo_doc, url, nombre_archivo, mime_type, size_bytes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+    ).get(clientId, entidadTipo, entidadId, tipoDoc, url,
+          req.file.originalname, req.file.mimetype, req.file.size);
+
+    res.json({ ok: true, id: row.id, url });
+  });
+
+// DELETE /api/admin/documentos/:id -> quita el registro y el archivo del blob
+router.delete('/documentos/:id', async (req, res) => {
+  const doc = await db.prepare('SELECT url FROM documentos WHERE id = ?').get(Number(req.params.id));
+  if (!doc) return res.status(404).json({ error: 'Documento no encontrado' });
+
+  await db.prepare('DELETE FROM documentos WHERE id = ?').run(Number(req.params.id));
+  await borrarArchivo(doc.url); // si esto falla, ya no hay registro que lo apunte
+  res.json({ ok: true });
 });
 
 // --- Papelería específica (solicitudes que crea Fortex) ---
@@ -381,10 +448,18 @@ router.get('/clientes/:id/detalle', async (req, res) => {
      LEFT JOIN proyectos p ON p.id = f.proyecto_id
      WHERE f.client_id = ? ORDER BY f.fecha_vigencia`
   ).all(id);
+  // Todos los archivos del cliente en una sola consulta; luego se reparten.
+  const archivos = await db.prepare(
+    `SELECT id, entidad_tipo, entidad_id, tipo_doc, url, nombre_archivo, size_bytes, subido_el
+     FROM documentos WHERE client_id = ? ORDER BY subido_el DESC`
+  ).all(id);
+  const porEntidad = agruparPorEntidad(archivos);
+
   const fianzas = fianzasRows.map((f) => ({
     ...f,
     estado: estadoFianza(f.fecha_vigencia),
     dias_para_recordatorio: daysUntil(f.fecha_recordatorio),
+    documentos: deEntidad(porEntidad, 'fianza', f.id),
   }));
 
   // Comprometido por afianzadora (fianzas no vencidas)
@@ -441,6 +516,7 @@ router.get('/clientes/:id/detalle', async (req, res) => {
     return {
       ...p,
       fianzas: suyas,
+      documentos: deEntidad(porEntidad, 'proyecto', p.id),
       total_fianzas: suyas.length,
       monto_afianzado: afianzado,
       prima_total: suyas.reduce((s, f) => s + (f.prima_neta || 0), 0),

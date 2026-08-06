@@ -2,6 +2,7 @@ import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth } from '../auth/middleware.js';
 import { estadoFianza, daysUntil } from '../lib/dates.js';
+import { agruparPorEntidad, deEntidad } from '../lib/documentos.js';
 
 const router = Router();
 
@@ -60,6 +61,13 @@ router.get('/', requireAuth, async (req, res) => {
   sql += ' ORDER BY p.nombre, f.fecha_vigencia';
 
   const rows = await db.prepare(sql).all(...params);
+
+  const archivos = await db.prepare(
+    `SELECT id, entidad_tipo, entidad_id, tipo_doc, nombre_archivo, size_bytes, subido_el
+     FROM documentos WHERE client_id = ?`
+  ).all(req.user.id);
+  const porEntidad = agruparPorEntidad(archivos);
+
   const fianzas = rows.map((row) => {
     // Los recordatorios son de uso interno de Fortex: no se exponen al fiado.
     const { fecha_recordatorio, nota_recordatorio, recordatorio_atendido_el, ...f } = row;
@@ -67,10 +75,30 @@ router.get('/', requireAuth, async (req, res) => {
       ...f,
       estado: estadoFianza(f.fecha_vigencia),
       dias_para_vencer: daysUntil(f.fecha_vigencia),
+      // Sin la URL del blob: se descarga por /api/fianzas/documentos/:id,
+      // que comprueba que el archivo sea de este cliente.
+      documentos: deEntidad(porEntidad, 'fianza', f.id).map(({ url, ...d }) => d),
+      documentos_proyecto: f.proyecto_id
+        ? deEntidad(porEntidad, 'proyecto', f.proyecto_id).map(({ url, ...d }) => d)
+        : [],
     };
   });
 
   res.json({ fianzas });
+});
+
+// GET /api/fianzas/documentos/:id -> descarga un contrato o carátula.
+// La comprobación de dueño es la que importa: sin ella, cambiar el id en la
+// URL dejaría ver los documentos de otro fiado.
+router.get('/documentos/:id', requireAuth, async (req, res) => {
+  const doc = await db
+    .prepare('SELECT url FROM documentos WHERE id = ? AND client_id = ?')
+    .get(Number(req.params.id), req.user.id);
+
+  if (!doc || !/^https:\/\//.test(doc.url || '')) {
+    return res.status(404).json({ error: 'Documento no disponible' });
+  }
+  res.redirect(doc.url);
 });
 
 export default router;

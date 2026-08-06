@@ -1,7 +1,40 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Briefcase } from 'lucide-react';
-import { api } from '../api.js';
+import { Briefcase, Paperclip, FileDown } from 'lucide-react';
+import { api, getToken } from '../api.js';
 import { mxn, mxnCents, fmtDate, EstadoBadge } from '../lib.jsx';
+
+// La descarga pasa por la API (que comprueba que el archivo sea de este
+// cliente), así que hay que mandar el token: un <a href> no lo llevaría.
+async function descargarDocumento(doc) {
+  const res = await fetch(`/api/fianzas/documentos/${doc.id}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) return;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = doc.nombre_archivo;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function Documentos({ documentos = [], vacio = '—' }) {
+  if (!documentos.length) return <span className="text-slate-300">{vacio}</span>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {documentos.map((d) => (
+        <button
+          key={d.id}
+          onClick={() => descargarDocumento(d)}
+          className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-700"
+          title={d.nombre_archivo}
+        >
+          <FileDown className="h-3 w-3" /> {d.tipo_doc_nombre}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // Tinte sutil de fila por estado (sin stripes; solo semántico)
 const filaCls = (estado) =>
@@ -41,6 +74,8 @@ export default function MisFianzas() {
           nombre: f.proyecto_nombre || 'Sin proyecto asignado',
           numero_contrato: f.numero_contrato,
           monto_contrato: f.monto_contrato,
+          // El contrato de la obra viene igual en todas sus fianzas.
+          documentos: f.documentos_proyecto || [],
           fianzas: [],
         });
       }
@@ -104,6 +139,14 @@ export default function MisFianzas() {
               </div>
             </div>
 
+            {g.documentos.length > 0 && (
+              <div className="px-4 py-2 border-b border-slate-100 flex items-center gap-2 flex-wrap">
+                <Paperclip className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="text-[11px] text-slate-500 shrink-0">Documentos de la obra:</span>
+                <Documentos documentos={g.documentos} />
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-slate-50/60 text-slate-500 uppercase tracking-wider text-[10px]">
@@ -115,6 +158,7 @@ export default function MisFianzas() {
                     <th className="text-right px-3 py-2">Prima neta</th>
                     <th className="text-left px-3 py-2">Vigencia</th>
                     <th className="text-left px-3 py-2">Estado</th>
+                    <th className="text-left px-3 py-2">Documentos</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -129,6 +173,7 @@ export default function MisFianzas() {
                       <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{mxnCents(f.prima_neta)}</td>
                       <td className="px-3 py-1.5 text-slate-600">{fmtDate(f.fecha_vigencia)}</td>
                       <td className="px-3 py-1.5"><EstadoBadge estado={f.estado} /></td>
+                      <td className="px-3 py-1.5"><Documentos documentos={f.documentos} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -141,7 +186,7 @@ export default function MisFianzas() {
                       {mxnCents(g.monto_afianzado)}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{mxnCents(g.prima_total)}</td>
-                    <td colSpan={2} />
+                    <td colSpan={3} />
                   </tr>
                 </tfoot>
               </table>

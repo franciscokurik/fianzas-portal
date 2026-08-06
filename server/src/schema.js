@@ -90,6 +90,25 @@ ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS recordatorio_atendido_el TEXT;
 CREATE INDEX IF NOT EXISTS idx_fianzas_proyecto ON fianzas(proyecto_id);
 CREATE INDEX IF NOT EXISTS idx_fianzas_recordatorio ON fianzas(fecha_recordatorio);
 
+-- Archivos colgados de un proyecto (contrato) o de una fianza (carátula).
+-- Polimórfica a propósito: mañana cuelgan de un endoso o una reclamación sin
+-- tocar el esquema. client_id va denormalizado para poder filtrar por dueño
+-- en una sola consulta y para que el borrado en cascada limpie solo.
+CREATE TABLE IF NOT EXISTS documentos (
+  id             SERIAL PRIMARY KEY,
+  client_id      INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  entidad_tipo   TEXT    NOT NULL CHECK (entidad_tipo IN ('proyecto', 'fianza')),
+  entidad_id     INTEGER NOT NULL,
+  tipo_doc       TEXT    NOT NULL,
+  url            TEXT    NOT NULL,
+  nombre_archivo TEXT    NOT NULL,
+  mime_type      TEXT,
+  size_bytes     INTEGER,
+  subido_el      TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
+);
+CREATE INDEX IF NOT EXISTS idx_documentos_entidad ON documentos(entidad_tipo, entidad_id);
+CREATE INDEX IF NOT EXISTS idx_documentos_client ON documentos(client_id);
+
 CREATE TABLE IF NOT EXISTS document_types (
   id                SERIAL PRIMARY KEY,
   nombre            TEXT NOT NULL,
