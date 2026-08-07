@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { inicializar } from '../src/migrations.js';
+import { inicializar, MIGRACIONES } from '../src/migrations.js';
 import { baseEnMemoria, ESQUEMA_VIEJO } from './ayuda/pg-memoria.js';
 
 const CENTAVOS = 100;
@@ -36,13 +36,14 @@ const sumas = (db) => db.prepare(`SELECT
   (SELECT sum(prima_neta)      FROM fianzas)::bigint AS primas,
   (SELECT linea_credito FROM client_credit_lines WHERE id = 1) AS linea`).get();
 
-test('sobre una base existente aplica las tres migraciones', async () => {
+test('sobre una base existente aplica todas las migraciones', async () => {
   const db = await baseVieja();
   const corridas = await inicializar(db);
   assert.deepEqual(corridas, [
     '001_backfill_proyectos_y_tipos',
     '002_dinero_en_centavos',
     '003_quitar_tipo_fianza_legacy',
+    '004_prima_total_desde_prima_neta',
   ]);
 });
 
@@ -129,6 +130,40 @@ test('al tirar la columna de texto no se pierde ningún tipo capturado a mano', 
     'la columna de texto libre debió eliminarse');
 });
 
+test('la prima total arranca desde la neta y luego ya no se pisa', async () => {
+  const db = await baseVieja();
+  await inicializar(db);
+
+  // Las fianzas que ya estaban capturadas no traen prima total: se arranca
+  // desde la neta para que los totales no se lean como "no se paga nada".
+  const { netas, totales } = await db.prepare(`SELECT
+    sum(prima_neta)::bigint  AS netas,
+    sum(prima_total)::bigint AS totales
+    FROM fianzas`).get();
+  assert.equal(totales, netas);
+
+  // El admin captura la prima real del recibo (con derecho de póliza e IVA)…
+  await db.query(`UPDATE fianzas SET prima_total = 2204000 WHERE numero_poliza = 'ASE-0012'`);
+
+  // …y ni perdiendo el registro de migraciones se la vuelven a pisar.
+  await db.query('DELETE FROM schema_migrations');
+  await inicializar(db);
+
+  const f = await db.prepare('SELECT prima_total FROM fianzas WHERE numero_poliza = ?').get('ASE-0012');
+  assert.equal(f.prima_total, 2204000);
+});
+
+test('la prima total queda como BIGINT en centavos, igual que la neta', async () => {
+  const db = await baseVieja();
+  await inicializar(db);
+  const cols = await db.prepare(
+    `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ?`
+  ).all('fianzas');
+  const tipo = Object.fromEntries(cols.map((c) => [c.column_name, c.data_type]));
+
+  assert.equal(tipo.prima_total, 'bigint');
+});
+
 test('un proyecto con fianzas no se puede borrar', async () => {
   const db = await baseVieja();
   await inicializar(db);
@@ -141,7 +176,7 @@ test('en una base nueva no corre ninguna migración y nada se corrompe', async (
   assert.deepEqual(corridas, [], 'una base nueva ya nace en su forma final');
 
   const registro = await db.prepare('SELECT nombre FROM schema_migrations').all();
-  assert.equal(registro.length, 3, 'deben quedar registradas como aplicadas');
+  assert.equal(registro.length, MIGRACIONES.length, 'deben quedar registradas como aplicadas');
 
   await db.exec(`
     INSERT INTO clients (razon_social, email, password_hash) VALUES ('Nueva SA','n@d.mx','x');

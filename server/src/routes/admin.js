@@ -4,8 +4,10 @@ import db from '../db.js';
 import { requireAuth, requireAdmin } from '../auth/middleware.js';
 import { estadoFianza, daysUntil, todayISO } from '../lib/dates.js';
 import { centavos } from '../lib/dinero.js';
+import { slugify } from '../lib/slug.js';
 import { upload, subirArchivo, borrarArchivo } from '../lib/upload.js';
 import { TIPOS_DOC, esTipoValido, agruparPorEntidad, deEntidad } from '../lib/documentos.js';
+import { guardarDocumentoCliente, borrarDocumentoCliente } from '../services/documentos-cliente.js';
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
@@ -120,7 +122,7 @@ router.get('/afianzadoras', async (req, res) => {
 router.post('/afianzadoras', async (req, res) => {
   const { nombre } = req.body || {};
   if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
-  const slug = String(nombre).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const slug = slugify(nombre);
   try {
     const row = await db.prepare('INSERT INTO afianzadoras (nombre, slug) VALUES (?, ?) RETURNING id').get(nombre, slug);
     res.json({ ok: true, id: row.id, slug });
@@ -210,8 +212,12 @@ router.delete('/proyectos/:id', async (req, res) => {
 // --- Fianzas (pólizas) ---
 
 const CAMPOS_FIANZA = ['proyecto_id', 'afianzadora_id', 'numero_poliza', 'tipo_fianza_id',
-                       'prima_neta', 'monto_afianzado', 'fecha_inicio', 'fecha_vigencia',
+                       'prima_neta', 'prima_total', 'monto_afianzado',
+                       'fecha_inicio', 'fecha_vigencia',
                        'fecha_recordatorio', 'nota_recordatorio'];
+
+// Todo lo que es dinero y puede venir en el body de una fianza.
+const MONTOS_FIANZA = ['prima_neta', 'prima_total', 'monto_afianzado'];
 
 // Construye el SET de un UPDATE solo con los campos que vienen en el body.
 // A diferencia de COALESCE, esto sí permite vaciar un campo mandando null.
@@ -248,7 +254,7 @@ async function tipoExiste(tipoId) {
 // POST /api/admin/fianzas -> alta de póliza dentro de un proyecto
 router.post('/fianzas', async (req, res) => {
   const { client_id, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza_id,
-          prima_neta, monto_afianzado, fecha_inicio, fecha_vigencia,
+          prima_neta, prima_total, monto_afianzado, fecha_inicio, fecha_vigencia,
           fecha_recordatorio, nota_recordatorio } = req.body || {};
 
   if (!client_id || !afianzadora_id || !numero_poliza) {
@@ -264,12 +270,12 @@ router.post('/fianzas', async (req, res) => {
   const row = await db.prepare(
     `INSERT INTO fianzas
        (client_id, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza_id,
-        prima_neta, monto_afianzado, fecha_inicio, fecha_vigencia,
+        prima_neta, prima_total, monto_afianzado, fecha_inicio, fecha_vigencia,
         fecha_recordatorio, nota_recordatorio)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
   ).get(Number(client_id), Number(proyecto_id), Number(afianzadora_id), numero_poliza,
         Number(tipo_fianza_id),
-        centavos(prima_neta), centavos(monto_afianzado),
+        centavos(prima_neta), centavos(prima_total), centavos(monto_afianzado),
         fecha_inicio || null, fecha_vigencia || null,
         fecha_recordatorio || null, nota_recordatorio || null);
   res.json({ ok: true, id: row.id });
@@ -299,7 +305,7 @@ router.put('/fianzas/:id', async (req, res) => {
   }
 
   // Los montos llegan en centavos; se normalizan a entero por si acaso.
-  for (const campo of ['prima_neta', 'monto_afianzado']) {
+  for (const campo of MONTOS_FIANZA) {
     if (campo in body) body[campo] = centavos(body[campo]);
   }
 
@@ -417,6 +423,114 @@ router.delete('/documentos/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Expediente del fiado (CSF, estados financieros, acta constitutiva…) ---
+//
+// Estos documentos los sube el propio fiado desde su portal, pero en la
+// práctica muchos llegan por correo a Home Office: Fortex los carga en su
+// nombre y queda registrado que fue Fortex quien lo hizo.
+
+async function clienteExiste(clientId) {
+  const c = await db.prepare(`SELECT id FROM clients WHERE id = ? AND role = 'client'`).get(clientId);
+  return Boolean(c);
+}
+
+// POST /api/admin/clientes/:id/documentos/:typeId  (multipart: archivo)
+router.post('/clientes/:id/documentos/:typeId', upload.single('archivo'), async (req, res) => {
+  const clientId = Number(req.params.id);
+  if (!(await clienteExiste(clientId))) {
+    return res.status(404).json({ error: 'Cliente no encontrado' });
+  }
+
+  const { vencimiento, tipo } = await guardarDocumentoCliente({
+    clientId,
+    typeId: Number(req.params.typeId),
+    file: req.file,
+    subidoPor: 'fortex',
+  });
+  res.json({ ok: true, vencimiento, tipo });
+});
+
+// DELETE /api/admin/clientes/:id/documentos/:typeId
+router.delete('/clientes/:id/documentos/:typeId', async (req, res) => {
+  await borrarDocumentoCliente({
+    clientId: Number(req.params.id),
+    typeId: Number(req.params.typeId),
+  });
+  res.json({ ok: true });
+});
+
+// --- Catálogo de documentos requeridos (tabla document_types) ---
+//
+// Es la lista que le aparece a TODOS los fiados. Se edita desde el panel para
+// no tener que redesplegar cuando una afianzadora empieza a pedir un papel
+// nuevo (un balance parcial, una declaración anual…).
+
+// GET /api/admin/documentos-requeridos -> catálogo con cuántos fiados lo tienen
+router.get('/documentos-requeridos', async (req, res) => {
+  const tipos = await db.prepare(
+    `SELECT dt.*, COUNT(cd.id)::int AS cargados
+     FROM document_types dt
+     LEFT JOIN client_documents cd ON cd.document_type_id = dt.id
+     GROUP BY dt.id
+     ORDER BY dt.orden, dt.id`
+  ).all();
+  res.json({ tipos });
+});
+
+// Meses de vigencia y días de aviso: vacío significa "no vence".
+function periodicidad(valor) {
+  const n = Number(valor);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+router.post('/documentos-requeridos', async (req, res) => {
+  const nombre = String(req.body?.nombre || '').trim();
+  if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
+
+  const alerta = periodicidad(req.body?.alerta_dias) ?? 30;
+  try {
+    const row = await db.prepare(
+      `INSERT INTO document_types (nombre, slug, periodicidad_meses, alerta_dias, orden)
+       VALUES (?, ?, ?, ?, 500) RETURNING id`
+    ).get(nombre, slugify(nombre), periodicidad(req.body?.periodicidad_meses), alerta);
+    res.json({ ok: true, id: row.id });
+  } catch (e) {
+    res.status(400).json({ error: 'Ya existe un documento con ese nombre', detail: e.message });
+  }
+});
+
+router.put('/documentos-requeridos/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const nombre = String(req.body?.nombre || '').trim();
+  if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
+
+  // El slug NO se toca: es la llave con la que se identifica el tipo y hay
+  // documentos ya cargados apuntando a este id.
+  await db.prepare(
+    `UPDATE document_types
+     SET nombre = ?, periodicidad_meses = ?, alerta_dias = ?
+     WHERE id = ?`
+  ).run(nombre, periodicidad(req.body?.periodicidad_meses),
+        periodicidad(req.body?.alerta_dias) ?? 30, id);
+  res.json({ ok: true });
+});
+
+// Solo se puede quitar un tipo que nadie haya usado: si ya hay archivos
+// colgados, borrarlo se los llevaría sin avisar.
+router.delete('/documentos-requeridos/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const { c } = await db.prepare(
+    'SELECT COUNT(*)::int c FROM client_documents WHERE document_type_id = ?'
+  ).get(id);
+  if (c > 0) {
+    return res.status(400).json({
+      error: `${c} cliente(s) ya tienen cargado este documento. Bórralo de sus expedientes antes de quitarlo del catálogo.`,
+    });
+  }
+  await db.prepare('DELETE FROM document_types WHERE id = ?').run(id);
+  res.json({ ok: true });
+});
+
 // --- Papelería específica (solicitudes que crea Fortex) ---
 
 // POST /api/admin/papeleria -> crear solicitud puntual para un cliente
@@ -489,7 +603,9 @@ router.get('/clientes/:id/detalle', async (req, res) => {
   });
 
   const documentos = await db.prepare(
-    `SELECT dt.nombre, dt.id AS document_type_id, cd.uploaded_at, cd.vencimiento, cd.original_name, cd.file_path
+    `SELECT dt.nombre, dt.id AS document_type_id, dt.periodicidad_meses, dt.alerta_dias,
+            cd.uploaded_at, cd.vencimiento, cd.original_name, cd.file_path,
+            cd.size_bytes, cd.subido_por
      FROM document_types dt
      LEFT JOIN client_documents cd ON cd.document_type_id = dt.id AND cd.client_id = ?
      ORDER BY dt.orden, dt.id`
@@ -519,7 +635,10 @@ router.get('/clientes/:id/detalle', async (req, res) => {
       documentos: deEntidad(porEntidad, 'proyecto', p.id),
       total_fianzas: suyas.length,
       monto_afianzado: afianzado,
-      prima_total: suyas.reduce((s, f) => s + (f.prima_neta || 0), 0),
+      // Las dos primas del proyecto. Cuidado al leerlas: 'suma_prima_total' es
+      // la suma de las primas TOTALES de sus fianzas, no el total de las netas.
+      suma_prima_neta: suyas.reduce((s, f) => s + (f.prima_neta || 0), 0),
+      suma_prima_total: suyas.reduce((s, f) => s + (f.prima_total || 0), 0),
       // Qué tanto del contrato está respaldado por fianzas vigentes.
       pct_contrato_afianzado: p.monto_contrato > 0
         ? Math.round((afianzado / p.monto_contrato) * 100)

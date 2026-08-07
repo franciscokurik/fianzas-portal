@@ -15,19 +15,22 @@ router.get('/', requireAuth, async (req, res) => {
   if (!client) return res.status(404).json({ error: 'Cliente no encontrado' });
 
   const fianzas = await db
-    .prepare('SELECT afianzadora_id, prima_neta, monto_afianzado, fecha_vigencia FROM fianzas WHERE client_id = ?')
+    .prepare(`SELECT afianzadora_id, prima_neta, prima_total, monto_afianzado, fecha_vigencia
+              FROM fianzas WHERE client_id = ?`)
     .all(clientId);
 
   let activas = 0;
   let porVencer30 = 0;
-  let primaNetaTotal = 0;      // lo que se PAGA por las fianzas
+  let sumaPrimaNeta = 0;       // la tarifa de la afianzadora
+  let sumaPrimaTotal = 0;      // lo que el fiado PAGA (neta + derecho + IVA)
   let montoAfianzadoTotal = 0; // lo que las fianzas CUBREN (vigentes)
   // Monto comprometido (fianzas no vencidas) acumulado por afianzadora
   const comprometidoPorAfi = new Map();
 
   for (const f of fianzas) {
     const estado = estadoFianza(f.fecha_vigencia);
-    primaNetaTotal += f.prima_neta || 0;
+    sumaPrimaNeta += f.prima_neta || 0;
+    sumaPrimaTotal += f.prima_total || 0;
     if (estado !== 'vencida') {
       activas += 1;
       montoAfianzadoTotal += f.monto_afianzado || 0;
@@ -90,7 +93,8 @@ router.get('/', requireAuth, async (req, res) => {
       lineas,
       fianzas_activas: activas,
       monto_afianzado_total: montoAfianzadoTotal,
-      prima_neta_total: primaNetaTotal,
+      suma_prima_neta: sumaPrimaNeta,
+      suma_prima_total: sumaPrimaTotal,
       fianzas_por_vencer_30: porVencer30,
       proyectos_activos: proyectosActivos,
     },

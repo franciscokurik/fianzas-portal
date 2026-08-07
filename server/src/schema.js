@@ -72,7 +72,12 @@ CREATE TABLE IF NOT EXISTS fianzas (
   afianzadora_id INTEGER NOT NULL REFERENCES afianzadoras(id),
   numero_poliza  TEXT    NOT NULL,
   tipo_fianza_id INTEGER REFERENCES tipos_fianza(id),
+  -- Dos primas y no una: la NETA es la tarifa de la afianzadora y la TOTAL es
+  -- lo que el fiado acaba pagando (neta + derecho de póliza + IVA). El fiado
+  -- reclama por la total y la afianzadora reporta la neta, así que hacen falta
+  -- las dos para que los números cuadren contra el recibo.
   prima_neta     BIGINT  NOT NULL DEFAULT 0,
+  prima_total    BIGINT  NOT NULL DEFAULT 0,
   monto_afianzado BIGINT NOT NULL DEFAULT 0,
   fecha_inicio   TEXT,
   fecha_vigencia TEXT,
@@ -84,6 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_fianzas_client ON fianzas(client_id);
 -- initSchema() corre en cada /api/setup, así que nada aquí puede fallar dos veces.
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS proyecto_id INTEGER REFERENCES proyectos(id) ON DELETE RESTRICT;
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS tipo_fianza_id INTEGER REFERENCES tipos_fianza(id);
+ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS prima_total BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS fecha_recordatorio TEXT;
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS nota_recordatorio TEXT;
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS recordatorio_atendido_el TEXT;
@@ -118,6 +124,8 @@ CREATE TABLE IF NOT EXISTS document_types (
   orden             INTEGER NOT NULL DEFAULT 0
 );
 
+-- Expediente del fiado: un archivo vigente por cada tipo de documento. Cuando
+-- se renueva, se reemplaza (el UNIQUE es lo que fuerza eso).
 CREATE TABLE IF NOT EXISTS client_documents (
   id               SERIAL PRIMARY KEY,
   client_id        INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -128,8 +136,13 @@ CREATE TABLE IF NOT EXISTS client_documents (
   size_bytes       INTEGER,
   uploaded_at      TEXT    NOT NULL DEFAULT ${TS_DEFAULT},
   vencimiento      TEXT,
+  -- 'cliente' o 'fortex': el papel puede llegar por el portal o por correo a
+  -- Home Office, y conviene saber quién lo cargó para no perseguir al fiado
+  -- por algo que ya entregó.
+  subido_por       TEXT    NOT NULL DEFAULT 'cliente',
   UNIQUE(client_id, document_type_id)
 );
+ALTER TABLE client_documents ADD COLUMN IF NOT EXISTS subido_por TEXT NOT NULL DEFAULT 'cliente';
 
 CREATE TABLE IF NOT EXISTS papeleria_requests (
   id             SERIAL PRIMARY KEY,

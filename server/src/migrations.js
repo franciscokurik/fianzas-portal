@@ -99,6 +99,21 @@ export const MIGRACIONES = [
       ALTER TABLE fianzas DROP COLUMN IF EXISTS tipo_fianza;
     `,
   },
+  {
+    // La prima total (lo que el fiado paga de verdad: neta + derecho de póliza
+    // + IVA) es nueva. En las fianzas que ya estaban capturadas no hay de dónde
+    // sacarla, y dejarlas en cero haría que los totales del portal se leyeran
+    // como "aquí no se paga nada". Se arranca desde la neta, que es el piso
+    // real, y el admin la ajusta al editar la póliza.
+    //
+    // Solo toca las que están en cero: si el registro de migraciones se
+    // perdiera y esto volviera a correr, no pisa lo ya capturado.
+    nombre: '004_prima_total_desde_prima_neta',
+    sql: `
+      UPDATE fianzas SET prima_total = prima_neta
+      WHERE prima_total = 0 AND prima_neta > 0;
+    `,
+  },
 ];
 
 // Parte un bloque de SQL en sentencias sueltas: el driver HTTP de Neon corre

@@ -117,13 +117,21 @@ export async function seed() {
   // --- Fianzas (variando vigencias para ver los estados) ---
   const insFianza = db.prepare(
     `INSERT INTO fianzas (client_id, proyecto_id, afianzadora_id, numero_poliza,
-                          tipo_fianza_id, prima_neta, monto_afianzado, fecha_inicio, fecha_vigencia,
+                          tipo_fianza_id, prima_neta, prima_total, monto_afianzado,
+                          fecha_inicio, fecha_vigencia,
                           fecha_recordatorio, nota_recordatorio)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
+  // Lo que el fiado acaba pagando: prima neta + derecho de póliza + IVA. Los
+  // datos de demo lo calculan; en la operación real el admin lo captura del
+  // recibo, que es el único que manda.
+  const DERECHO_POLIZA = 500;
+  const IVA = 1.16;
+  const primaTotalDe = (neta) => Math.round((neta + DERECHO_POLIZA) * IVA);
+
   const fianza = (clientId, proyectoId, afiSlug, poliza, tipo, prima, monto, ini, fin, rec = null, nota = null) =>
     insFianza.run(clientId, proyectoId, afiIds[afiSlug], poliza, tipoIdPorNombre.get(tipo) ?? null,
-                  pesos(prima), pesos(monto), ini, fin, rec, nota);
+                  pesos(prima), pesos(primaTotalDe(prima)), pesos(monto), ini, fin, rec, nota);
 
   await fianza(c1, pAcueducto, 'aserta', 'ASE-2024-0012', 'Cumplimiento', 18500, 1200000,
     addMonths(hoy, -10), addMonths(hoy, 8),
@@ -142,12 +150,14 @@ export async function seed() {
 
   // --- Documentos del cliente 1 (algunos subidos, otros pendientes) ---
   const insDoc = db.prepare(
-    `INSERT INTO client_documents (client_id, document_type_id, file_path, original_name, mime_type, size_bytes, uploaded_at, vencimiento)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO client_documents (client_id, document_type_id, file_path, original_name, mime_type, size_bytes, uploaded_at, vencimiento, subido_por)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
-  await insDoc.run(c1, tipoIds['comprobante_domicilio'], 'demo/comprobante.pdf', 'comprobante.pdf', 'application/pdf', 102400, addMonths(hoy, -3), addMonths(hoy, 0));
-  await insDoc.run(c1, tipoIds['csf'], 'demo/csf.pdf', 'csf.pdf', 'application/pdf', 88000, addMonths(hoy, -1), null);
-  await insDoc.run(c1, tipoIds['estados_financieros'], 'demo/ef.pdf', 'estados_financieros.pdf', 'application/pdf', 250000, addMonths(hoy, -10), addMonths(hoy, 2));
+  await insDoc.run(c1, tipoIds['comprobante_domicilio'], 'demo/comprobante.pdf', 'comprobante.pdf', 'application/pdf', 102400, addMonths(hoy, -3), addMonths(hoy, 0), 'cliente');
+  await insDoc.run(c1, tipoIds['csf'], 'demo/csf.pdf', 'csf.pdf', 'application/pdf', 88000, addMonths(hoy, -1), null, 'cliente');
+  // Los estados financieros suelen llegar por correo al contador de Fortex, no
+  // por el portal: así se ve en la demo cómo queda uno cargado por Home Office.
+  await insDoc.run(c1, tipoIds['estados_financieros'], 'demo/ef.pdf', 'estados_financieros.pdf', 'application/pdf', 250000, addMonths(hoy, -10), addMonths(hoy, 2), 'fortex');
 
   // --- Papelería específica para cliente 1 ---
   await db.prepare(

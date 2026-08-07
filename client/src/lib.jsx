@@ -61,6 +61,23 @@ export function InputPesos({ valor, onChange, className, ...rest }) {
 export const fmtDate = (iso) =>
   iso ? new Date(iso + 'T00:00:00').toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
+// ¿Ya pasó la fecha? Las fechas viajan como 'YYYY-MM-DD', que se compara como
+// texto sin ambigüedad de zona horaria. Sirve para pintar un documento vencido
+// cuando la API manda la fecha y no el estado ya calculado.
+export const yaVencio = (iso) => Boolean(iso) && iso < new Date().toISOString().slice(0, 10);
+
+// Formatos que acepta la API. Tiene que coincidir con PERMITIDOS en
+// server/src/lib/upload.js: si aquí se ofrece algo que allá no, el archivo
+// viaja completo nada más para que lo rechacen.
+export const ACCEPT_ARCHIVOS = '.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.doc';
+export const AYUDA_ARCHIVOS = 'PDF, JPG, PNG, Excel o Word · máx. 10 MB';
+
+// Peso del archivo en texto corto ("340 KB", "1.2 MB").
+export const pesoArchivo = (bytes) =>
+  !bytes ? '' : bytes < 1024 * 1024
+    ? `${Math.round(bytes / 1024)} KB`
+    : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
 // Estado -> chip (paleta: emerald=ok, amber=por vencer, rose=vencido/pendiente)
 const ESTADOS = {
   activa:     { label: 'Activa',     cls: 'bg-emerald-100 text-emerald-700' },

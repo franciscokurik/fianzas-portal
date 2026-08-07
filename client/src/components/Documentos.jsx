@@ -1,29 +1,44 @@
 import { useEffect, useRef, useState } from 'react';
-import { Upload, Loader2, AlertTriangle, FileText, Files } from 'lucide-react';
-import { api } from '../api.js';
-import { fmtDate, EstadoBadge } from '../lib.jsx';
+import { Upload, Loader2, AlertTriangle, FileText, Files, FileDown } from 'lucide-react';
+import { api, getToken } from '../api.js';
+import { fmtDate, EstadoBadge, ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS } from '../lib.jsx';
 
-function SubirBtn({ onFile, busy }) {
+const btnCls =
+  'flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300 disabled:opacity-50';
+
+function SubirBtn({ onFile, busy, etiqueta = 'Subir archivo' }) {
   const ref = useRef();
   return (
     <>
       <input
         ref={ref}
         type="file"
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept={ACCEPT_ARCHIVOS}
         className="hidden"
         onChange={(e) => e.target.files[0] && onFile(e.target.files[0])}
       />
-      <button
-        onClick={() => ref.current.click()}
-        disabled={busy}
-        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300 disabled:opacity-50"
-      >
+      <button onClick={() => ref.current.click()} disabled={busy} className={btnCls}>
         {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-        {busy ? 'Subiendo…' : 'Subir archivo'}
+        {busy ? 'Subiendo…' : etiqueta}
       </button>
     </>
   );
+}
+
+// La descarga pasa por la API, que comprueba que el documento sea de este
+// fiado, así que hay que mandar el token: un <a href> no lo llevaría.
+async function descargar(typeId, nombre) {
+  const res = await fetch(`/api/documentos/descargar/${typeId}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) return false;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre || 'documento';
+  a.click();
+  URL.revokeObjectURL(url);
+  return true;
 }
 
 function SectionCard({ icon: Icon, title, children }) {
@@ -84,15 +99,35 @@ export default function Documentos() {
                   {d.periodicidad_meses ? `Vence cada ${d.periodicidad_meses} meses` : 'Sin vencimiento'}
                   {d.uploaded_at && ` · Último: ${fmtDate(d.uploaded_at)}`}
                   {d.vencimiento && ` · Vence: ${fmtDate(d.vencimiento)}`}
+                  {/* Si Fortex ya lo cargó, que no lo vuelva a buscar. */}
+                  {d.subido_por === 'fortex' && (
+                    <span className="text-indigo-600"> · lo cargó Fortex por ti</span>
+                  )}
                 </p>
               </div>
               <EstadoBadge estado={d.estado} />
-              <SubirBtn busy={busyId === `doc-${d.document_type_id}`} onFile={(f) => subir(`/documentos/${d.document_type_id}`, `doc-${d.document_type_id}`, f)} />
+              {d.has_file && (
+                <button
+                  onClick={async () => {
+                    if (!(await descargar(d.document_type_id, d.original_name))) {
+                      setError('No se pudo descargar el archivo.');
+                    }
+                  }}
+                  className={btnCls}
+                >
+                  <FileDown className="h-3.5 w-3.5" /> Ver
+                </button>
+              )}
+              <SubirBtn
+                busy={busyId === `doc-${d.document_type_id}`}
+                etiqueta={d.has_file ? 'Reemplazar' : 'Subir archivo'}
+                onFile={(f) => subir(`/documentos/${d.document_type_id}`, `doc-${d.document_type_id}`, f)}
+              />
             </div>
           ))}
         </div>
         <div className="px-4 py-2.5 border-t border-slate-100 text-[11px] text-slate-400">
-          Formatos: PDF, JPG, PNG · máximo 10 MB
+          Formatos: {AYUDA_ARCHIVOS}
         </div>
       </SectionCard>
 

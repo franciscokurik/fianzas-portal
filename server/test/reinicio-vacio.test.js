@@ -16,7 +16,7 @@ db.query = memoria.query;
 db.prepare = memoria.prepare;
 
 const { reiniciarVacio } = await import('../src/seed.js');
-const { inicializar } = await import('../src/migrations.js');
+const { inicializar, MIGRACIONES } = await import('../src/migrations.js');
 
 const contar = async (tabla) =>
   (await memoria.prepare(`SELECT COUNT(*)::int AS total FROM ${tabla}`).get()).total;
@@ -69,7 +69,8 @@ test('conserva intacta la cuenta admin, con su contraseña', async () => {
 test('conserva afianzadoras y catálogos', async () => {
   assert.equal(await contar('afianzadoras'), 2);
   assert.ok(await contar('tipos_fianza') >= 10, 'el catálogo del ramo debe seguir ahí');
-  assert.equal(await contar('schema_migrations'), 3, 'no debe perderse el registro de migraciones');
+  assert.equal(await contar('schema_migrations'), MIGRACIONES.length,
+    'no debe perderse el registro de migraciones');
 });
 
 test('correrlo dos veces no falla ni borra de más', async () => {

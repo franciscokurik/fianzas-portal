@@ -6,14 +6,54 @@ con panel de administración para Home Office.
 ## Stack (MVP)
 
 - **Frontend:** React + Vite + Tailwind CSS
-- **Backend:** Node.js + Express
-- **Base de datos:** SQLite integrado de Node 24 (`node:sqlite`) — sin instalación ni compilación
+- **Backend:** Node.js + Express (función serverless en Vercel)
+- **Base de datos:** PostgreSQL (Neon / Vercel Postgres)
 - **Auth:** JWT + bcryptjs
-- **Archivos:** disco local (`server/uploads/`)
+- **Archivos:** Cloudinary (`server/src/lib/upload.js`)
 - **Email:** Nodemailer (modo consola en MVP; listo para SendGrid)
 
 > Diseñado para escalar: la base de datos, el almacenamiento de archivos y el email
-> están aislados en módulos para migrar a PostgreSQL / S3 / SendGrid sin reescribir.
+> están aislados en módulos para poder cambiar de proveedor sin reescribir.
+
+## Almacenamiento de archivos (Cloudinary)
+
+Todo lo que se sube —carátulas de fianzas, contratos de obra, expediente del
+fiado— va a Cloudinary. Para habilitarlo basta una variable de entorno:
+
+1. Crea una cuenta en [cloudinary.com](https://cloudinary.com) (el plan gratuito
+   alcanza de sobra: 25 GB de almacenamiento).
+2. En **Settings → API Keys** copia el valor de *API environment variable*.
+3. Ponlo como `CLOUDINARY_URL` en Vercel (*Project Settings → Environment
+   Variables*) y en tu `.env` local. Vuelve a desplegar.
+
+Si prefieres no armar la URL, funcionan igual las tres variables sueltas
+(`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`); con
+`CLOUDINARY_URL` definida, esas tres se ignoran.
+
+### Compartir la cuenta con otro proyecto
+
+Se puede, y no hace falta configurar nada extra: todo lo del portal cae bajo
+`fortex-fianzas/client_<id>/<timestamp>_<archivo>`, así que no se revuelve ni
+puede pisar archivos ajenos, y el borrado va por el `public_id` exacto que se
+deduce de la URL guardada en la base (lo que no está en la base, el portal no lo
+puede tocar). Lo que sí se comparte es la cuota del plan y **la credencial**: si
+un día hay que rotar el secret, se rompen los dos proyectos a la vez. Si el otro
+proyecto lo administra alguien más, mejor una cuenta aparte solo para el portal.
+Para separar entornos (pruebas vs. producción) en una misma cuenta, usa
+`CLOUDINARY_FOLDER`.
+
+Detalles que conviene saber:
+
+- Los archivos se suben como `resource_type: raw` **a propósito**: el portal no
+  transforma imágenes, y con `image` los PDF dependen del interruptor
+  *PDF and ZIP files delivery*, que Cloudinary trae apagado en las cuentas
+  nuevas (el archivo sube bien y al abrirlo devuelve 401).
+- Formatos aceptados: PDF, JPG, PNG, Excel y Word. Máximo 10 MB por archivo.
+- Los documentos que se subieron antes de esta migración siguen en Vercel Blob y
+  se sirven igual. Si quieres que al reemplazarlos se borre también el archivo
+  viejo, deja `BLOB_READ_WRITE_TOKEN` configurada.
+- El fiado nunca recibe la URL del archivo: la descarga pasa por la API, que
+  comprueba que el documento sea suyo.
 
 ## Estructura
 
@@ -81,8 +121,9 @@ Para automatizar diariamente, programa un cron que llame a ese endpoint o a `cor
 
 ## Próximos pasos sugeridos
 
-- Migrar a PostgreSQL (reemplazar `db.js` + `schema.sql`).
-- Mover archivos a S3 / Cloudflare R2 (reemplazar `lib/upload.js`).
 - Activar SendGrid y WhatsApp (Twilio) en `services/`.
-- Cron diario para alertas.
-- Cambio de contraseña / recuperación.
+- Cron diario para alertas (hoy hay que llamar `POST /api/alertas/correr`).
+- Cambio de contraseña / recuperación por correo.
+- Histórico de documentos: hoy cada tipo guarda **un** archivo vigente y al
+  renovarlo se reemplaza (no queda el del año pasado).
+- Estado de pago de la prima (pagada / pendiente, fecha y recibo).

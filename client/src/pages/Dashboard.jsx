@@ -103,8 +103,10 @@ export default function Dashboard() {
           {/* Monto afianzado = lo que CUBREN las fianzas. Prima = lo que se PAGA por ellas. */}
           <Kpi tone="sky" label="Monto afianzado" value={mxn(m?.monto_afianzado_total)}
                sub={m ? `cubierto por ${m.fianzas_activas} fianza(s) vigente(s)` : null} />
-          <Kpi tone="violet" label="Prima neta total" value={mxn(m?.prima_neta_total)}
-               sub="lo que pagas por tus fianzas" />
+          {/* El KPI es la prima TOTAL porque es la cifra que el fiado reconoce
+              de su recibo; la neta va abajo para cuadrar con la afianzadora. */}
+          <Kpi tone="violet" label="Prima total pagada" value={mxn(m?.suma_prima_total)}
+               sub={m ? `prima neta ${mxn(m.suma_prima_neta)}` : 'lo que pagas por tus fianzas'} />
           <Kpi tone="amber" label="Por vencer (< 30 días)" value={m?.fianzas_por_vencer_30 ?? '—'} />
         </div>
 

@@ -2,7 +2,8 @@ import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth } from '../auth/middleware.js';
 import { upload, subirArchivo, borrarArchivo } from '../lib/upload.js';
-import { estadoDocumento, todayISO, addMonths, daysUntil } from '../lib/dates.js';
+import { guardarDocumentoCliente } from '../services/documentos-cliente.js';
+import { estadoDocumento, todayISO, daysUntil } from '../lib/dates.js';
 
 const router = Router();
 
@@ -38,6 +39,8 @@ router.get('/', requireAuth, async (req, res) => {
       vencimiento: subido?.vencimiento || null,
       dias_para_vencer: subido?.vencimiento ? daysUntil(subido.vencimiento) : null,
       original_name: subido?.original_name || null,
+      // Para que el fiado no vuelva a subir algo que Fortex ya cargó por él.
+      subido_por: subido?.subido_por || null,
       has_file: !!subido,
     };
   }));
@@ -46,43 +49,15 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // POST /api/documentos/:typeId  (multipart: archivo)
+// El mismo trabajo lo hace el admin desde /api/admin/clientes/:id/documentos/:typeId,
+// así que la lógica vive en el servicio y aquí solo se fija de quién es el archivo.
 router.post('/:typeId', requireAuth, upload.single('archivo'), async (req, res) => {
-  const clientId = req.user.id;
-  const typeId = Number(req.params.typeId);
-
-  const tipo = await db.prepare('SELECT * FROM document_types WHERE id = ?').get(typeId);
-  if (!tipo) return res.status(404).json({ error: 'Tipo de documento no válido' });
-  if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
-
-  const hoy = todayISO();
-  const vencimiento = tipo.periodicidad_meses
-    ? addMonths(hoy, tipo.periodicidad_meses)
-    : null;
-
-  // Borra el archivo anterior si existía (reemplazo)
-  const prev = await db
-    .prepare('SELECT file_path FROM client_documents WHERE client_id = ? AND document_type_id = ?')
-    .get(clientId, typeId);
-  if (prev?.file_path) await borrarArchivo(prev.file_path);
-
-  const url = await subirArchivo(req.file, clientId);
-
-  await db.prepare(
-    `INSERT INTO client_documents
-       (client_id, document_type_id, file_path, original_name, mime_type, size_bytes, uploaded_at, vencimiento)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(client_id, document_type_id) DO UPDATE SET
-       file_path = excluded.file_path,
-       original_name = excluded.original_name,
-       mime_type = excluded.mime_type,
-       size_bytes = excluded.size_bytes,
-       uploaded_at = excluded.uploaded_at,
-       vencimiento = excluded.vencimiento`
-  ).run(
-    clientId, typeId, url, req.file.originalname,
-    req.file.mimetype, req.file.size, hoy, vencimiento
-  );
-
+  const { vencimiento } = await guardarDocumentoCliente({
+    clientId: req.user.id,
+    typeId: Number(req.params.typeId),
+    file: req.file,
+    subidoPor: 'cliente',
+  });
   res.json({ ok: true, vencimiento });
 });
 
@@ -112,7 +87,8 @@ router.post('/papeleria/:id', requireAuth, upload.single('archivo'), async (req,
   if (!sol) return res.status(404).json({ error: 'Solicitud no encontrada' });
   if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
 
-  if (sol.file_path) await borrarArchivo(sol.file_path);
+  // Se sube primero y se borra el anterior al final: si la subida falla, la
+  // solicitud conserva el archivo que ya tenía.
   const url = await subirArchivo(req.file, req.user.id);
 
   await db.prepare(
@@ -120,6 +96,8 @@ router.post('/papeleria/:id', requireAuth, upload.single('archivo'), async (req,
      SET estado = 'entregado', file_path = ?, original_name = ?, uploaded_at = ?
      WHERE id = ?`
   ).run(url, req.file.originalname, todayISO(), id);
+
+  if (sol.file_path && sol.file_path !== url) await borrarArchivo(sol.file_path);
 
   res.json({ ok: true });
 });

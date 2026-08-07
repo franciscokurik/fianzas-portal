@@ -7,7 +7,10 @@ import {
 } from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { mxn, mxnCents, fmtDate, EstadoBadge, InputPesos } from '../lib.jsx';
+import {
+  mxn, mxnCents, fmtDate, yaVencio, EstadoBadge, InputPesos,
+  ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, pesoArchivo,
+} from '../lib.jsx';
 
 const inputCls =
   'w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100';
@@ -31,6 +34,7 @@ export default function Admin() {
   const [afianzadoras, setAfianzadoras] = useState([]);
   const [tipos, setTipos] = useState([]);
   const [tiposDoc, setTiposDoc] = useState({ proyecto: [], fianza: [] });
+  const [docsRequeridos, setDocsRequeridos] = useState([]);
   const [recordatorios, setRecordatorios] = useState([]);
   const [sel, setSel] = useState(null);
   const [detalle, setDetalle] = useState(null);
@@ -48,10 +52,11 @@ export default function Admin() {
   const cargarTipos = () => cargar('/admin/tipos-fianza', (d) => setTipos(d.tipos));
   const cargarRecordatorios = () => cargar('/admin/recordatorios', (d) => setRecordatorios(d.recordatorios));
   const cargarTiposDoc = () => cargar('/admin/tipos-documento', (d) => setTiposDoc(d.tipos));
+  const cargarDocsRequeridos = () => cargar('/admin/documentos-requeridos', (d) => setDocsRequeridos(d.tipos));
 
   useEffect(() => {
     cargarClientes(); cargarAfianzadoras(); cargarTipos();
-    cargarRecordatorios(); cargarTiposDoc();
+    cargarRecordatorios(); cargarTiposDoc(); cargarDocsRequeridos();
   }, []);
 
   function abrirDetalle(id) {
@@ -134,6 +139,13 @@ export default function Admin() {
             <NuevoCliente onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }} />
             <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
             <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
+            {/* Cambiar el catálogo mueve la lista de pendientes de todos los
+                fiados, así que también se refresca el detalle abierto. */}
+            <CatalogoDocumentos
+              tipos={docsRequeridos}
+              onChange={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
+              flash={flash}
+            />
 
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
               <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
@@ -308,6 +320,169 @@ function CatalogoTipos({ tipos, onChange, flash }) {
 }
 
 /* --------------------------------------------------------------------------
+   Catálogo de documentos requeridos (los que se le piden a TODOS los fiados)
+   -------------------------------------------------------------------------- */
+
+function CatalogoDocumentos({ tipos, onChange, flash }) {
+  const vacio = { nombre: '', periodicidad_meses: '', alerta_dias: 30 };
+  const [open, setOpen] = useState(false);
+  const [nuevo, setNuevo] = useState(vacio);
+  const [editandoId, setEditandoId] = useState(null);
+  const [edit, setEdit] = useState(vacio);
+  const [error, setError] = useState('');
+
+  const conError = (accion) => async () => {
+    setError('');
+    try { await accion(); } catch (e) { setError(e.message); }
+  };
+
+  const agregar = conError(async () => {
+    if (!nuevo.nombre.trim()) return setError('Ponle nombre al documento.');
+    await api.post('/admin/documentos-requeridos', nuevo);
+    setNuevo(vacio);
+    onChange();
+    flash('Documento agregado al catálogo');
+  });
+
+  const guardar = conError(async () => {
+    await api.put(`/admin/documentos-requeridos/${editandoId}`, edit);
+    setEditandoId(null);
+    onChange();
+    flash('Documento actualizado');
+  });
+
+  const quitar = (id) => conError(async () => {
+    await api.del(`/admin/documentos-requeridos/${id}`);
+    onChange();
+    flash('Documento quitado del catálogo');
+  })();
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
+      >
+        <FileText className="w-4 h-4 text-indigo-600" /> Documentos requeridos ({tipos.length})
+        <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
+      </button>
+      {open && (
+        <div className="p-4 space-y-2.5">
+          <p className="text-[11px] text-slate-400">
+            Lo que se le pide a todos los fiados. Los meses de vigencia hacen que el
+            documento se marque por vencer y se avise por correo.
+          </p>
+
+          <div className="space-y-2 border border-slate-100 rounded-lg p-2.5 bg-slate-50/60">
+            <input
+              value={nuevo.nombre}
+              onChange={(e) => setNuevo({ ...nuevo, nombre: e.target.value })}
+              placeholder="Nombre del documento…"
+              className={inputCls}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-slate-500 mb-1 block">Vigencia (meses)</label>
+                <input
+                  type="number" min="0"
+                  value={nuevo.periodicidad_meses}
+                  onChange={(e) => setNuevo({ ...nuevo, periodicidad_meses: e.target.value })}
+                  placeholder="no vence"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-500 mb-1 block">Avisar (días antes)</label>
+                <input
+                  type="number" min="1"
+                  value={nuevo.alerta_dias}
+                  onChange={(e) => setNuevo({ ...nuevo, alerta_dias: e.target.value })}
+                  className={inputCls}
+                />
+              </div>
+            </div>
+            <button onClick={agregar} className={`${btnPrimary} w-full justify-center`}>
+              <Plus className="w-4 h-4" /> Agregar al catálogo
+            </button>
+          </div>
+
+          <div className="divide-y divide-slate-100 border border-slate-100 rounded-lg max-h-72 overflow-y-auto">
+            {tipos.map((t) => (
+              editandoId === t.id ? (
+                <div key={t.id} className="p-2.5 space-y-2 bg-indigo-50/30">
+                  <input value={edit.nombre} onChange={(e) => setEdit({ ...edit, nombre: e.target.value })} className={inputCls} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="number" min="0" placeholder="no vence"
+                      value={edit.periodicidad_meses}
+                      onChange={(e) => setEdit({ ...edit, periodicidad_meses: e.target.value })}
+                      className={inputCls}
+                    />
+                    <input
+                      type="number" min="1"
+                      value={edit.alerta_dias}
+                      onChange={(e) => setEdit({ ...edit, alerta_dias: e.target.value })}
+                      className={inputCls}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={guardar} className={btnSecondary}><Save className="h-3.5 w-3.5" /> Guardar</button>
+                    <button onClick={() => setEditandoId(null)} className={btnSecondary}><X className="h-3.5 w-3.5" /> Cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <div key={t.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-slate-700 truncate">{t.nombre}</p>
+                    <p className="text-[10px] text-slate-400">
+                      {t.periodicidad_meses ? `cada ${t.periodicidad_meses} meses` : 'sin vencimiento'}
+                      {' · '}aviso {t.alerta_dias} días
+                      {t.cargados > 0 && ` · ${t.cargados} cargado(s)`}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setEditandoId(t.id);
+                      setEdit({
+                        nombre: t.nombre,
+                        periodicidad_meses: t.periodicidad_meses ?? '',
+                        alerta_dias: t.alerta_dias,
+                      });
+                    }}
+                    className="text-slate-300 hover:text-indigo-600 shrink-0"
+                    title="Editar"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => quitar(t.id)}
+                    className="text-slate-300 hover:text-rose-600 shrink-0"
+                    title="Quitar del catálogo"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )
+            ))}
+            {!tipos.length && (
+              <p className="px-3 py-3 text-xs text-slate-400">
+                No hay documentos en el catálogo: a los fiados no se les pedirá nada.
+              </p>
+            )}
+          </div>
+
+          {error && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
    Detalle del cliente
    -------------------------------------------------------------------------- */
 
@@ -318,19 +493,23 @@ function DetalleCliente({ detalle, afianzadoras, tipos, tiposDoc, onChange, flas
   const afianzadoTotal = fianzas
     .filter((f) => f.estado !== 'vencida')
     .reduce((s, f) => s + (f.monto_afianzado || 0), 0);
-  const primaTotal = fianzas.reduce((s, f) => s + (f.prima_neta || 0), 0);
+  const sumaPrimaNeta = fianzas.reduce((s, f) => s + (f.prima_neta || 0), 0);
+  const sumaPrimaTotal = fianzas.reduce((s, f) => s + (f.prima_total || 0), 0);
 
-  function descargar(rel) {
-    fetch(`/api/admin/descargar?path=${encodeURIComponent(rel)}`, {
+  async function descargar(rel) {
+    const res = await fetch(`/api/admin/descargar?path=${encodeURIComponent(rel)}`, {
       headers: { Authorization: `Bearer ${getToken()}` },
-    })
-      .then((r) => r.blob())
-      .then((b) => {
-        const url = URL.createObjectURL(b);
-        const a = document.createElement('a');
-        a.href = url; a.download = rel.split('/').pop(); a.click();
-        URL.revokeObjectURL(url);
-      });
+    });
+    // Antes se hacía blob() a ciegas: cuando el archivo no estaba, se bajaba un
+    // archivo con el JSON del error dentro y parecía que sí había descargado.
+    if (!res.ok) {
+      flash('No se pudo descargar el archivo.');
+      return;
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url; a.download = rel.split('/').pop(); a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -344,8 +523,10 @@ function DetalleCliente({ detalle, afianzadoras, tipos, tiposDoc, onChange, flas
           <Pill label="Disponible" valor={mxn(disponibleTotal)} tono="emerald" />
           <Pill label="Monto afianzado" valor={mxn(afianzadoTotal)} tono="sky"
                 ayuda="Suma de lo que cubren las fianzas vigentes" />
-          <Pill label="Prima" valor={mxn(primaTotal)} tono="violet"
-                ayuda="Lo que se paga por las fianzas" />
+          <Pill label="Prima total" valor={mxn(sumaPrimaTotal)} tono="violet"
+                ayuda="Lo que el fiado paga: prima neta + derecho de póliza + IVA" />
+          <Pill label="Prima neta" valor={mxn(sumaPrimaNeta)}
+                ayuda="La tarifa de la afianzadora, sin derecho de póliza ni IVA" />
         </div>
       </div>
 
@@ -368,32 +549,14 @@ function DetalleCliente({ detalle, afianzadoras, tipos, tiposDoc, onChange, flas
         flash={flash}
       />
 
-      {/* Documentos */}
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-          <FileText className="w-4 h-4 text-slate-500" />
-          <h3 className="text-sm font-semibold text-slate-700">Documentos del cliente</h3>
-        </div>
-        <div className="divide-y divide-slate-100">
-          {documentos.map((d) => (
-            <div key={d.document_type_id} className="flex items-center justify-between px-4 py-2 text-sm hover:bg-slate-50/40">
-              <span className="text-slate-700">{d.nombre}</span>
-              <span className="flex items-center gap-3">
-                {d.uploaded_at ? (
-                  <>
-                    <span className="text-[11px] text-slate-500">{fmtDate(d.uploaded_at)}</span>
-                    {d.file_path && (
-                      <button onClick={() => descargar(d.file_path)} className={btnSecondary}>
-                        <Download className="h-3.5 w-3.5" /> Descargar
-                      </button>
-                    )}
-                  </>
-                ) : <EstadoBadge estado="pendiente" />}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Expediente del fiado */}
+      <ExpedienteCliente
+        clienteId={cliente.id}
+        documentos={documentos}
+        descargar={descargar}
+        onChange={onChange}
+        flash={flash}
+      />
 
       {/* Papelería específica */}
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -421,6 +584,135 @@ function DetalleCliente({ detalle, afianzadoras, tipos, tiposDoc, onChange, flas
         <NuevaPapeleria clienteId={cliente.id} afianzadoras={afianzadoras} onDone={() => { onChange(); flash('Solicitud creada'); }} />
       </div>
     </>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Expediente del fiado: Fortex carga los papeles en nombre del cliente
+   -------------------------------------------------------------------------- */
+
+function ExpedienteCliente({ clienteId, documentos = [], descargar, onChange, flash }) {
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState('');
+
+  const pendientes = documentos.filter((d) => !d.uploaded_at).length;
+
+  async function subir(typeId, archivo) {
+    if (!archivo) return;
+    setError('');
+    setBusyId(typeId);
+    try {
+      const datos = new FormData();
+      datos.append('archivo', archivo);
+      await api.upload(`/admin/clientes/${clienteId}/documentos/${typeId}`, datos);
+      onChange();
+      flash('Documento cargado al expediente');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function quitar(typeId) {
+    setError('');
+    try {
+      await api.del(`/admin/clientes/${clienteId}/documentos/${typeId}`);
+      onChange();
+      flash('Documento eliminado');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <FileText className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Expediente del fiado</h3>
+        <span className="text-[11px] text-slate-500 ml-auto">
+          {pendientes > 0 ? `${pendientes} pendiente(s)` : 'completo'}
+        </span>
+      </div>
+
+      {error && (
+        <div className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+
+      <div className="divide-y divide-slate-100">
+        {documentos.map((d) => {
+          const cargado = Boolean(d.uploaded_at);
+          const subiendo = busyId === d.document_type_id;
+          return (
+            <div key={d.document_type_id} className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50/40">
+              <div className="flex-1 min-w-[240px]">
+                <p className="text-slate-700 font-medium">{d.nombre}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {cargado ? (
+                    <>
+                      {d.original_name} {pesoArchivo(d.size_bytes) && `· ${pesoArchivo(d.size_bytes)}`}
+                      {' · '}{fmtDate(d.uploaded_at)}
+                      {d.vencimiento && ` · vence ${fmtDate(d.vencimiento)}`}
+                      {' · '}
+                      <span className={d.subido_por === 'fortex' ? 'text-indigo-600' : ''}>
+                        {d.subido_por === 'fortex' ? 'cargado por Fortex' : 'cargado por el cliente'}
+                      </span>
+                    </>
+                  ) : (
+                    d.periodicidad_meses ? `Se renueva cada ${d.periodicidad_meses} meses` : 'Sin vencimiento'
+                  )}
+                </p>
+              </div>
+
+              <EstadoBadge
+                estado={!cargado ? 'pendiente' : yaVencio(d.vencimiento) ? 'vencido' : 'al_dia'}
+              />
+
+              {cargado && d.file_path && (
+                <button onClick={() => descargar(d.file_path)} className={btnSecondary}>
+                  <Download className="h-3.5 w-3.5" /> Descargar
+                </button>
+              )}
+
+              {/* Fortex carga el papel cuando le llega por correo, sin esperar
+                  a que el fiado entre al portal a subirlo. */}
+              <label className={`${btnSecondary} cursor-pointer ${subiendo ? 'opacity-50' : ''}`}>
+                <Upload className="h-3.5 w-3.5" />
+                {subiendo ? 'Subiendo…' : cargado ? 'Reemplazar' : 'Cargar'}
+                <input
+                  type="file"
+                  accept={ACCEPT_ARCHIVOS}
+                  className="sr-only"
+                  disabled={subiendo}
+                  onChange={(e) => { subir(d.document_type_id, e.target.files?.[0]); e.target.value = ''; }}
+                />
+              </label>
+
+              {cargado && (
+                <button
+                  onClick={() => quitar(d.document_type_id)}
+                  className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
+                  title="Quitar del expediente"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          );
+        })}
+        {!documentos.length && (
+          <div className="px-4 py-6 text-center text-xs text-slate-400">
+            No hay documentos en el catálogo. Agrégalos desde "Documentos requeridos".
+          </div>
+        )}
+      </div>
+
+      <div className="px-4 py-2 border-t border-slate-100 text-[11px] text-slate-400">
+        {AYUDA_ARCHIVOS}
+      </div>
+    </div>
   );
 }
 
@@ -756,7 +1048,10 @@ function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, tiposDoc, onCha
             <th className="text-left px-3 py-2">Afianzadora</th>
             <th className="text-left px-3 py-2">Tipo</th>
             <th className="text-right px-3 py-2">Monto afianzado</th>
-            <th className="text-right px-3 py-2">Prima</th>
+            {/* Una sola columna con las dos primas: la total arriba (lo que se
+                paga) y la neta debajo. Separarlas en dos columnas volvía a
+                sacar scroll horizontal en la tabla. */}
+            <th className="text-right px-3 py-2">Prima total</th>
             <th className="text-left px-3 py-2">Vigencia</th>
             <th className="text-left px-3 py-2">Recordatorio</th>
             <th className="text-left px-3 py-2">Estado</th>
@@ -791,7 +1086,10 @@ function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, tiposDoc, onCha
                 <td className="px-3 py-1.5 text-slate-600">{f.afianzadora_nombre}</td>
                 <td className="px-3 py-1.5 text-slate-700 font-medium">{f.tipo_fianza}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-slate-800">{mxnCents(f.monto_afianzado)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{mxnCents(f.prima_neta)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">
+                  {mxnCents(f.prima_total)}
+                  <span className="block text-[10px] text-slate-400">neta {mxnCents(f.prima_neta)}</span>
+                </td>
                 <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{fmtDate(f.fecha_vigencia)}</td>
                 <td className="px-3 py-1.5">
                   {f.fecha_recordatorio ? (
@@ -864,11 +1162,6 @@ function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, tiposDoc, onCha
 /* --------------------------------------------------------------------------
    Documentos colgados de un proyecto (contrato) o de una fianza (carátula)
    -------------------------------------------------------------------------- */
-
-const pesoArchivo = (bytes) =>
-  !bytes ? '' : bytes < 1024 * 1024
-    ? `${Math.round(bytes / 1024)} KB`
-    : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 function DocsEntidad({ entidad, id, documentos = [], tipos = [], onChange, flash }) {
   const [tipoDoc, setTipoDoc] = useState(tipos[0]?.clave || 'otro');
@@ -944,13 +1237,13 @@ function DocsEntidad({ entidad, id, documentos = [], tipos = [], onChange, flash
           {subiendo ? 'Subiendo…' : 'Elegir archivo'}
           <input
             type="file"
-            accept="application/pdf,image/jpeg,image/png"
+            accept={ACCEPT_ARCHIVOS}
             className="sr-only"
             disabled={subiendo}
             onChange={(e) => { subir(e.target.files?.[0]); e.target.value = ''; }}
           />
         </label>
-        <span className="text-[11px] text-slate-400">PDF, JPG o PNG · máx. 10 MB</span>
+        <span className="text-[11px] text-slate-400">{AYUDA_ARCHIVOS}</span>
       </div>
 
       {error && (
@@ -1100,6 +1393,7 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
     tipo_fianza_id: inicial?.tipo_fianza_id ?? '',
     monto_afianzado: inicial?.monto_afianzado ?? 0, // centavos
     prima_neta: inicial?.prima_neta ?? 0,           // centavos
+    prima_total: inicial?.prima_total ?? 0,         // centavos
     fecha_inicio: inicial?.fecha_inicio || '',
     fecha_vigencia: inicial?.fecha_vigencia || '',
     fecha_recordatorio: inicial?.fecha_recordatorio || '',
@@ -1115,9 +1409,14 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
     if (!f.afianzadora_id) return setError('Selecciona la afianzadora.');
     if (!f.numero_poliza.trim()) return setError('Captura el número de póliza.');
     if (!f.tipo_fianza_id) return setError('Marca el tipo de fianza.');
+    // La total incluye a la neta más el derecho de póliza y el IVA, así que no
+    // puede quedar por debajo. Casi siempre es que se invirtieron los campos.
+    if (f.prima_total > 0 && f.prima_total < f.prima_neta) {
+      return setError('La prima total no puede ser menor que la neta: incluye el derecho de póliza y el IVA.');
+    }
     setBusy(true);
     try {
-      // monto_afianzado y prima_neta ya van en centavos.
+      // Los montos ya van en centavos.
       await onSubmit({
         ...f,
         proyecto_id: Number(f.proyecto_id),
@@ -1158,7 +1457,6 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
             <label className="text-[11px] text-slate-500 mb-1 block">N° de póliza<Req /></label>
             <input value={f.numero_poliza} onChange={set('numero_poliza')} className={inputCls} />
           </div>
-          <div className="hidden sm:block" />
           <div>
             <label className="text-[11px] text-slate-500 mb-1 block">
               Monto afianzado
@@ -1173,11 +1471,22 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
           <div>
             <label className="text-[11px] text-slate-500 mb-1 block">
               Prima neta
-              <span className="text-slate-400 font-normal"> · lo que se paga</span>
+              <span className="text-slate-400 font-normal"> · tarifa de la afianzadora</span>
             </label>
             <InputPesos
               valor={f.prima_neta}
               onChange={(centavos) => setF((s) => ({ ...s, prima_neta: centavos }))}
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">
+              Prima total
+              <span className="text-slate-400 font-normal"> · con derecho de póliza e IVA</span>
+            </label>
+            <InputPesos
+              valor={f.prima_total}
+              onChange={(centavos) => setF((s) => ({ ...s, prima_total: centavos }))}
               className={inputCls}
             />
           </div>
