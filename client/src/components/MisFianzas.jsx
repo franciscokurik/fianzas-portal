@@ -171,7 +171,7 @@ export default function MisFianzas() {
                         {mxnCents(f.monto_afianzado)}
                       </td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{mxnCents(f.prima_neta)}</td>
-                      <td className="px-3 py-1.5 text-slate-600">{fmtDate(f.fecha_vigencia)}</td>
+                      <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{fmtDate(f.fecha_vigencia)}</td>
                       <td className="px-3 py-1.5"><EstadoBadge estado={f.estado} /></td>
                       <td className="px-3 py-1.5"><Documentos documentos={f.documentos} /></td>
                     </tr>

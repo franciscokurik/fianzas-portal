@@ -28,8 +28,10 @@ body {
   --line-soft: #ececec;
   --paper: #ffffff;
   --paper-warm: #fbfaf8;
-  --signal: #ef1b1b;
-  --signal-dark: #cc1212;
+  /* El acento de marca es negro. El rojo queda reservado para los estados que
+     de verdad avisan de algo (una fianza vencida), no para el cromo. */
+  --signal: #111111;
+  --signal-dark: #000000;
   min-width: 0;
   background: var(--paper);
   color: var(--ink);
@@ -167,8 +169,8 @@ body {
 .portal-alert {
   margin-bottom: 24px !important;
   padding: 14px 16px !important;
-  color: #4b2929 !important;
-  background: #fffafa !important;
+  color: #3f3f3f !important;
+  background: #fafafa !important;
   border: 1px solid var(--line) !important;
   border-left: 3px solid var(--signal) !important;
   border-radius: 0 !important;
@@ -278,21 +280,62 @@ body {
   background: #fafafa !important;
 }
 
+/* Las tablas del portal tienen hasta diez columnas y viven dentro de una
+   tarjeta que ocupa dos tercios del ancho. Con 13px de aire a cada lado el
+   espaciado solo sumaba 260px y obligaba a scroll horizontal, así que el
+   padding es ajustado y el encabezado puede partirse en dos renglones: así
+   el ancho de cada columna lo marcan los datos y no la palabra del título
+   ("RECORDATORIO" pedía 115px para celdas que dicen "—"). */
 .portal-shell th {
-  height: 40px;
-  padding: 10px 13px !important;
+  padding: 9px 6px !important;
   color: #7b7b7b !important;
   border-bottom: 1px solid var(--line) !important;
   font-size: 9px !important;
   font-weight: 800 !important;
-  letter-spacing: 0.09em !important;
+  line-height: 1.25;
+  letter-spacing: 0.02em !important;
+  white-space: normal;
+}
+
+/* Los botones de icono de las tablas van más ajustados que los del resto del
+   portal: cada pixel de más en esta columna se lo quita a los datos. */
+.portal-shell td button {
+  padding-left: 7px !important;
+  padding-right: 7px !important;
 }
 
 .portal-shell td {
   height: 43px;
-  padding: 10px 13px !important;
+  padding: 10px 6px !important;
   border-bottom-color: var(--line-soft) !important;
+  font-size: 11px !important;
   line-height: 1.4;
+}
+
+/* Un número de póliza partido en tres renglones ("ASE-·2024-·0048") o una
+   cantidad cortada a la mitad son ilegibles, así que esas dos columnas no se
+   parten nunca. El resto del texto sí puede acomodarse en dos renglones: es
+   lo que le deja a la tabla el juego para caber sin scroll horizontal. */
+.portal-shell td.font-mono,
+.portal-shell td.tabular-nums {
+  white-space: nowrap;
+}
+
+/* El número de póliza es lo más ancho de la fila por ir en monoespaciada. */
+.portal-shell td.font-mono {
+  font-size: 10px !important;
+}
+
+/* La primera y la última columna se pegan al borde de la tarjeta sin este
+   respiro extra. */
+.portal-shell th:first-child,
+.portal-shell td:first-child {
+  padding-left: 13px !important;
+}
+
+.portal-shell th:last-child,
+.portal-shell td:last-child {
+  padding-right: 13px !important;
 }
 
 .portal-shell tbody tr {
@@ -469,7 +512,7 @@ body {
 }
 
 .portal-admin div.bg-white.border.border-amber-200 {
-  background: #fffafa !important;
+  background: #fafafa !important;
   border-color: var(--line) !important;
   border-left: 3px solid var(--signal) !important;
   border-radius: 0 !important;
@@ -501,8 +544,8 @@ body {
   --login-ink: #202020;
   --login-muted: #777777;
   --login-line: #dddddd;
-  --login-signal: #ef1b1b;
-  --login-signal-dark: #cc1212;
+  --login-signal: #111111;
+  --login-signal-dark: #000000;
   --login-paper: #fbfaf8;
   min-height: 100vh;
   min-height: 100svh;

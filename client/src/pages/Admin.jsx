@@ -123,7 +123,12 @@ export default function Admin() {
           onAtendido={() => { cargarRecordatorios(); recargarDetalle(); flash('Recordatorio marcado como atendido'); }}
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Cuatro columnas y a partir de xl, no tres desde lg: el detalle lleva
+            la tabla de fianzas, que son diez columnas y pide ~805px. Con un
+            tercio del ancho, o con un cuarto por debajo de 1280px, no cabía y
+            aparecía scroll horizontal. Más angosto que eso se apila y el
+            detalle se queda con el ancho completo. */}
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
           {/* Columna izquierda */}
           <div className="space-y-4">
             <NuevoCliente onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }} />
@@ -164,7 +169,7 @@ export default function Admin() {
           </div>
 
           {/* Columna derecha: detalle */}
-          <div className="lg:col-span-2 space-y-4">
+          <div className="xl:col-span-3 space-y-4">
             {!detalle ? (
               <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-400">
                 Selecciona un cliente para ver y gestionar su información.
@@ -787,7 +792,7 @@ function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, tiposDoc, onCha
                 <td className="px-3 py-1.5 text-slate-700 font-medium">{f.tipo_fianza}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-slate-800">{mxnCents(f.monto_afianzado)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{mxnCents(f.prima_neta)}</td>
-                <td className="px-3 py-1.5 text-slate-600">{fmtDate(f.fecha_vigencia)}</td>
+                <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{fmtDate(f.fecha_vigencia)}</td>
                 <td className="px-3 py-1.5">
                   {f.fecha_recordatorio ? (
                     <span

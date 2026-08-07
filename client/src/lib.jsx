@@ -75,7 +75,7 @@ const ESTADOS = {
 export function EstadoBadge({ estado }) {
   const e = ESTADOS[estado] || { label: estado, cls: 'bg-slate-100 text-slate-600' };
   return (
-    <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium ${e.cls}`}>
+    <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${e.cls}`}>
       {e.label}
     </span>
   );
