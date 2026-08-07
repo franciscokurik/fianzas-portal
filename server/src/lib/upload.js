@@ -5,9 +5,13 @@
 // Los archivos que se subieron antes de esta migración siguen en Vercel Blob:
 // su URL sigue en la base y se sirve igual, así que aquí solo hay que saber
 // borrarlos cuando se reemplazan.
+// Los SDK de almacenamiento se cargan con import() PEREZOSO, no arriba. En
+// serverless, un import de arriba que falle (versión de Node incompatible,
+// paquete que no quedó en el bundle, interop CommonJS) tumba TODA la función:
+// deja de responder hasta /api/health y el portal completo se cae por algo que
+// solo hacía falta para subir un archivo. Así, en el peor caso, lo único que
+// falla es subir o borrar, y con un mensaje que dice qué pasó.
 import multer from 'multer';
-import { v2 as cloudinary } from 'cloudinary';
-import { del as borrarBlobVercel } from '@vercel/blob';
 
 // Qué se acepta. La carátula de una fianza siempre es PDF o imagen, pero los
 // estados financieros suelen llegar en Excel y las actas en Word: si no se
@@ -42,33 +46,38 @@ const carpeta = () => process.env.CLOUDINARY_FOLDER || 'fortex-fianzas';
 // sueltas son la alternativa cuando la plataforma no permite pegar la URL
 // completa. Sin credenciales se avisa en claro: el error del SDK ("Must supply
 // api_key") no dice qué falta configurar ni dónde.
-let configurado = false;
-function configurar() {
-  if (configurado) return;
+let sdk = null;
+async function configurar() {
+  if (sdk) return sdk;
 
   const { CLOUDINARY_URL, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = process.env;
-  if (CLOUDINARY_URL) {
-    cloudinary.config({ secure: true });
-  } else if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET) {
-    cloudinary.config({
-      cloud_name: CLOUDINARY_CLOUD_NAME,
-      api_key: CLOUDINARY_API_KEY,
-      api_secret: CLOUDINARY_API_SECRET,
-      secure: true,
-    });
-  } else {
+  if (!CLOUDINARY_URL && !(CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET)) {
     throw new Error(
       'Falta configurar Cloudinary: define CLOUDINARY_URL (o CLOUDINARY_CLOUD_NAME, '
       + 'CLOUDINARY_API_KEY y CLOUDINARY_API_SECRET) en las variables de entorno del proyecto.'
     );
   }
 
-  configurado = true;
+  // Import por omisión y luego .v2, en vez de `import { v2 }`: el paquete es
+  // CommonJS y la detección de exportaciones con nombre depende del analizador
+  // de cada versión de Node. Esta forma funciona en todas.
+  const modulo = await import('cloudinary');
+  const cloudinary = (modulo.default ?? modulo).v2;
+
+  cloudinary.config(CLOUDINARY_URL ? { secure: true } : {
+    cloud_name: CLOUDINARY_CLOUD_NAME,
+    api_key: CLOUDINARY_API_KEY,
+    api_secret: CLOUDINARY_API_SECRET,
+    secure: true,
+  });
+
+  sdk = cloudinary;
+  return sdk;
 }
 
 // Sube el buffer de multer y devuelve la URL https del archivo.
 export async function subirArchivo(file, clientId) {
-  configurar();
+  const cloudinary = await configurar();
 
   // resource_type 'raw' y no 'auto': el portal solo guarda y devuelve archivos,
   // no los transforma. Con 'auto' un PDF entra como imagen y su entrega depende
@@ -115,7 +124,7 @@ export async function borrarArchivo(url) {
   try {
     const ref = referenciaCloudinary(url);
     if (ref) {
-      configurar();
+      const cloudinary = await configurar();
       await cloudinary.uploader.destroy(ref.public_id, {
         resource_type: ref.resource_type,
         invalidate: true,
@@ -124,7 +133,8 @@ export async function borrarArchivo(url) {
     }
     // Archivo de antes de la migración: sigue viviendo en Vercel Blob.
     if (process.env.BLOB_READ_WRITE_TOKEN) {
-      await borrarBlobVercel(url, { token: process.env.BLOB_READ_WRITE_TOKEN });
+      const { del } = await import('@vercel/blob');
+      await del(url, { token: process.env.BLOB_READ_WRITE_TOKEN });
     }
   } catch { /* noop */ }
 }
