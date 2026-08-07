@@ -5,7 +5,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { referenciaCloudinary, subirArchivo, limpiarUrlCloudinary } from '../src/lib/upload.js';
+import {
+  referenciaCloudinary, subirArchivo, limpiarUrlCloudinary, traducirErrorCloudinary,
+} from '../src/lib/upload.js';
+
+test('un 403 de Cloudinary dice que hay que revisar el rol de la API key', () => {
+  // El SDK manda "Server returned unexpected status code - 403", que no le
+  // sirve de nada a quien está capturando una póliza.
+  const traducido = traducirErrorCloudinary(
+    Object.assign(new Error('Server returned unexpected status code - 403'), { http_code: 403 })
+  );
+  assert.match(traducido.message, /rol de la API key|Master Admin/i);
+
+  const credenciales = traducirErrorCloudinary({ http_code: 401 });
+  assert.match(credenciales.message, /credenciales/i);
+
+  // Lo que no sepamos traducir se deja pasar tal cual, sin disfrazarlo.
+  const raro = new Error('se cayó la red');
+  assert.equal(traducirErrorCloudinary(raro), raro);
+});
 
 test('de una URL de Cloudinary saca qué borrar', () => {
   const ref = referenciaCloudinary(

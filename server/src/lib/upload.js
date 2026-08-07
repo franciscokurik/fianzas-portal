@@ -105,6 +105,22 @@ async function configurar() {
   return sdk;
 }
 
+// El SDK reporta los fallos como "Server returned unexpected status code - 403",
+// que no le dice nada a quien está capturando una póliza a las 11 de la noche.
+// Se traducen a la acción concreta que hay que hacer para destrabarlo.
+export function traducirErrorCloudinary(err) {
+  const codigo = err?.http_code ?? err?.error?.http_code;
+  const porCodigo = {
+    401: 'Cloudinary rechazó las credenciales (401). Revisa CLOUDINARY_URL, o '
+       + 'CLOUDINARY_API_KEY y CLOUDINARY_API_SECRET, en las variables del proyecto.',
+    403: 'Cloudinary no permitió la operación (403). Casi siempre es el ROL de la API key: '
+       + 'en Settings → API Keys, cámbialo a Master Admin.',
+    420: 'Cloudinary está limitando las peticiones (420). Espera un momento y reintenta.',
+    429: 'Se alcanzó el límite de peticiones de Cloudinary (429). Espera un momento y reintenta.',
+  };
+  return porCodigo[codigo] ? new Error(porCodigo[codigo]) : err;
+}
+
 // Sube el buffer de multer y devuelve la URL https del archivo.
 export async function subirArchivo(file, clientId) {
   const cloudinary = await configurar();
@@ -119,7 +135,7 @@ export async function subirArchivo(file, clientId) {
   const subida = await new Promise((resolve, reject) => {
     const flujo = cloudinary.uploader.upload_stream(
       { public_id: publicId, resource_type: 'raw', overwrite: false },
-      (err, resultado) => (err ? reject(err) : resolve(resultado)),
+      (err, resultado) => (err ? reject(traducirErrorCloudinary(err)) : resolve(resultado)),
     );
     flujo.end(file.buffer);
   });
@@ -166,5 +182,12 @@ export async function borrarArchivo(url) {
       const { del } = await import('@vercel/blob');
       await del(url, { token: process.env.BLOB_READ_WRITE_TOKEN });
     }
-  } catch { /* noop */ }
+  } catch (err) {
+    // No se relanza: quien llama ya quitó el registro que apuntaba al archivo.
+    // Pero sí se deja rastro, porque si la API key no tiene permiso de borrar,
+    // cada documento reemplazado deja basura y en silencio nadie se entera
+    // hasta que se acaba la cuota.
+    console.error('[cloudinary] no se pudo borrar el archivo:',
+      traducirErrorCloudinary(err).message);
+  }
 }
