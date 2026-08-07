@@ -46,11 +46,34 @@ const carpeta = () => process.env.CLOUDINARY_FOLDER || 'fortex-fianzas';
 // sueltas son la alternativa cuando la plataforma no permite pegar la URL
 // completa. Sin credenciales se avisa en claro: el error del SDK ("Must supply
 // api_key") no dice qué falta configurar ni dónde.
+// El dashboard de Cloudinary da la credencial ya con el prefijo
+// ("CLOUDINARY_URL=cloudinary://..."), y al pegarla en el campo de valor de
+// Vercel el prefijo se queda DENTRO del valor. El SDK entonces responde
+// "Invalid CLOUDINARY_URL protocol", que no le dice a nadie qué corregir.
+// Se limpian el prefijo, los espacios y las comillas de sobra.
+export function limpiarUrlCloudinary(valor) {
+  return String(valor || '')
+    .trim()
+    .replace(/^CLOUDINARY_URL\s*=\s*/i, '')
+    .replace(/^["']|["']$/g, '')
+    .trim();
+}
+
 let sdk = null;
 async function configurar() {
   if (sdk) return sdk;
 
-  const { CLOUDINARY_URL, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = process.env;
+  const { CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = process.env;
+  const CLOUDINARY_URL = limpiarUrlCloudinary(process.env.CLOUDINARY_URL);
+
+  if (CLOUDINARY_URL && !CLOUDINARY_URL.startsWith('cloudinary://')) {
+    throw new Error(
+      'CLOUDINARY_URL mal formada: el valor debe ser solo '
+      + '"cloudinary://<api_key>:<api_secret>@<cloud_name>", sin el prefijo '
+      + '"CLOUDINARY_URL=", sin comillas y sin los signos < >.'
+    );
+  }
+
   if (!CLOUDINARY_URL && !(CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET)) {
     throw new Error(
       'Falta configurar Cloudinary: define CLOUDINARY_URL (o CLOUDINARY_CLOUD_NAME, '
@@ -64,12 +87,19 @@ async function configurar() {
   const modulo = await import('cloudinary');
   const cloudinary = (modulo.default ?? modulo).v2;
 
-  cloudinary.config(CLOUDINARY_URL ? { secure: true } : {
-    cloud_name: CLOUDINARY_CLOUD_NAME,
-    api_key: CLOUDINARY_API_KEY,
-    api_secret: CLOUDINARY_API_SECRET,
-    secure: true,
-  });
+  if (CLOUDINARY_URL) {
+    // El SDK lee la variable del entorno él solo, así que se le deja ya limpia
+    // en vez de parsearla aquí: él sabe de casos raros que nosotros no.
+    process.env.CLOUDINARY_URL = CLOUDINARY_URL;
+    cloudinary.config({ secure: true });
+  } else {
+    cloudinary.config({
+      cloud_name: CLOUDINARY_CLOUD_NAME,
+      api_key: CLOUDINARY_API_KEY,
+      api_secret: CLOUDINARY_API_SECRET,
+      secure: true,
+    });
+  }
 
   sdk = cloudinary;
   return sdk;

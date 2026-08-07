@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { referenciaCloudinary, subirArchivo } from '../src/lib/upload.js';
+import { referenciaCloudinary, subirArchivo, limpiarUrlCloudinary } from '../src/lib/upload.js';
 
 test('de una URL de Cloudinary saca qué borrar', () => {
   const ref = referenciaCloudinary(
@@ -47,6 +47,31 @@ test('un archivo que quedó en Vercel Blob no se confunde con uno de Cloudinary'
   );
   assert.equal(referenciaCloudinary('demo/comprobante.pdf'), null);
   assert.equal(referenciaCloudinary(null), null);
+});
+
+test('aguanta la credencial pegada con el prefijo que da el dashboard', async () => {
+  // Cloudinary te da la línea completa para copiar, y al pegarla en el campo
+  // "Value" de Vercel el prefijo se queda dentro del valor.
+  const buena = 'cloudinary://123456789012345:elSecreto@djowdzxpg';
+
+  assert.equal(limpiarUrlCloudinary('CLOUDINARY_URL=' + buena), buena);
+  assert.equal(limpiarUrlCloudinary('  ' + buena + '  '), buena);
+  assert.equal(limpiarUrlCloudinary(`"${buena}"`), buena);
+  assert.equal(limpiarUrlCloudinary(buena), buena, 'lo que ya venía bien no se toca');
+  assert.equal(limpiarUrlCloudinary(undefined), '');
+});
+
+test('una credencial que no se puede rescatar dice qué corregir', async () => {
+  for (const v of ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET']) {
+    delete process.env[v];
+  }
+  // Con los marcadores sin sustituir, que es el otro error de dedo típico.
+  process.env.CLOUDINARY_URL = 'cloudinary//<api_key>:<api_secret>@djowdzxpg';
+
+  const archivo = { originalname: 'x.pdf', mimetype: 'application/pdf', size: 8, buffer: Buffer.from('%PDF-1.4') };
+  await assert.rejects(() => subirArchivo(archivo, 1), /mal formada/);
+
+  delete process.env.CLOUDINARY_URL;
 });
 
 test('sin credenciales, subir dice exactamente qué falta configurar', async () => {
