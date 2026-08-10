@@ -2,8 +2,18 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db.js';
 import { signToken, requireAuth } from '../auth/middleware.js';
+import { pedirRecuperacion, restablecer } from '../services/recuperacion.js';
 
 const router = Router();
+
+// De dónde sale el enlace que se manda por correo. Se prefiere APP_URL porque
+// es lo único que no depende de por dónde entró la petición; si no está, se
+// arma con la cabecera que puso el proxy de la plataforma.
+function urlDelPortal(req) {
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/+$/, '');
+  const protocolo = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  return `${protocolo}://${req.get('host')}`;
+}
 
 // Los datos que el front necesita del usuario. La razón social viene de la
 // empresa, no de la persona: el admin y los vendedores no tienen.
@@ -56,6 +66,35 @@ router.post('/login', async (req, res) => {
   }
 
   res.json({ token: signToken(usuario), user: paraElFront(usuario) });
+});
+
+// POST /api/auth/recuperar  { email } -> manda el enlace para reponer la clave
+//
+// Responde lo MISMO exista o no la cuenta. Si contestara distinto, cualquiera
+// podría ir probando correos para averiguar quiénes son clientes de Fortex.
+router.post('/recuperar', async (req, res) => {
+  const email = String(req.body?.email || '').trim();
+
+  if (email) {
+    try {
+      await pedirRecuperacion(email, urlDelPortal(req));
+    } catch (e) {
+      // Si el correo saliente está mal configurado, el usuario no tiene cómo
+      // saberlo ni cómo arreglarlo; queda en el log para quien sí puede.
+      console.error('[recuperacion] no se pudo mandar el correo:', e.message);
+    }
+  }
+
+  res.json({
+    ok: true,
+    mensaje: 'Si ese correo tiene una cuenta activa, te llegará un enlace en unos minutos.',
+  });
+});
+
+// POST /api/auth/restablecer  { token, password }
+router.post('/restablecer', async (req, res) => {
+  await restablecer(req.body?.token, req.body?.password);
+  res.json({ ok: true, mensaje: 'Contraseña actualizada. Ya puedes entrar con ella.' });
 });
 
 // GET /api/auth/me  -> datos del usuario autenticado

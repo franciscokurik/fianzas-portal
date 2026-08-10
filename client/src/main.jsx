@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth.jsx';
 import Login from './pages/Login.jsx';
+import Recuperar from './pages/Recuperar.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Admin from './pages/Admin.jsx';
 import './index.css';
@@ -33,6 +34,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          {/* Las dos mitades del trámite: pedir el enlace y usarlo. Van sin
+              sesión a propósito — quien llega aquí no puede entrar. */}
+          <Route path="/recuperar" element={<Recuperar />} />
+          <Route path="/restablecer" element={<Recuperar />} />
           <Route path="/" element={<Home />} />
           <Route path="/admin" element={<Protected internoOnly><Admin /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />

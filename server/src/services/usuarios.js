@@ -76,10 +76,11 @@ async function exigirQueQuedeUnAdmin(usuario) {
   }
 }
 
-// Cambia el nombre, repone la contraseña o reactiva la cuenta. El rol y la
-// empresa NO se tocan: mover a alguien de un fiado a otro (o volverlo vendedor)
-// cambiaría de golpe todo lo que ve, y es más claro darlo de baja y crearlo.
-export async function actualizarUsuario(id, { nombre, password, activo }) {
+// Cambia el nombre, el correo, repone la contraseña o reactiva la cuenta. El
+// rol y la empresa NO se tocan: mover a alguien de un fiado a otro (o volverlo
+// vendedor) cambiaría de golpe todo lo que ve, y es más claro darlo de baja y
+// crearlo de nuevo que arriesgarse a dejarlo viendo lo que no le toca.
+export async function actualizarUsuario(id, { nombre, email, password, activo }) {
   const usuario = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(Number(id));
   if (!usuario) throw fallo('Usuario no encontrado', 404);
 
@@ -90,6 +91,12 @@ export async function actualizarUsuario(id, { nombre, password, activo }) {
     if (!String(nombre).trim()) throw fallo('El nombre es obligatorio');
     sets.push('nombre = ?');
     valores.push(String(nombre).trim());
+  }
+  if (email !== undefined) {
+    // Se valida contra el rol que YA tiene: una cuenta de Fortex no puede
+    // mudarse a un correo de fuera cambiándole la dirección.
+    sets.push('email = ?');
+    valores.push(validarCorreo(email, usuario.role));
   }
   if (password !== undefined) {
     sets.push('password_hash = ?');
@@ -102,7 +109,11 @@ export async function actualizarUsuario(id, { nombre, password, activo }) {
   }
 
   if (!sets.length) throw fallo('Nada que actualizar');
-  await db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...valores, Number(id));
+  try {
+    await db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...valores, Number(id));
+  } catch {
+    throw fallo('Ya hay otra cuenta con ese correo', 409);
+  }
 }
 
 // Baja lógica: el usuario deja de entrar pero no se borra. Si se borrara, se

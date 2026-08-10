@@ -883,6 +883,19 @@ function UsuariosCliente({ clienteId, usuarios = [], esAdmin, onChange, flash })
     }
   }
 
+  async function cambiarCorreo(u) {
+    const correo = prompt(`Nuevo correo para ${u.nombre}:`, u.email);
+    if (!correo || correo.trim() === u.email) return;
+    setError('');
+    try {
+      await api.put(`/admin/usuarios/${u.id}`, { email: correo.trim() });
+      onChange();
+      flash('Correo actualizado');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   return (
     <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
@@ -955,6 +968,9 @@ function UsuariosCliente({ clienteId, usuarios = [], esAdmin, onChange, flash })
             <EstadoBadge estado={u.activo ? 'al_dia' : 'vencido'} />
             {esAdmin && (
               <>
+                <button onClick={() => cambiarCorreo(u)} className={btnSecondary} title="Cambiar correo">
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
                 <button onClick={() => reponerClave(u)} className={btnSecondary} title="Reponer contraseña">
                   <KeyRound className="h-3.5 w-3.5" />
                 </button>
@@ -1009,6 +1025,21 @@ function PersonalFortex({ internos = [], onChange, flash }) {
       await api.put(`/admin/usuarios/${u.id}`, { activo: !u.activo });
       onChange();
       flash(u.activo ? 'Cuenta desactivada' : 'Cuenta reactivada');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  // Aquí es donde se corrige el correo de la propia cuenta de Home Office
+  // cuando la que quedó sembrada no es la que se usa de verdad.
+  async function editar(u, campo, etiqueta) {
+    const valor = prompt(`${etiqueta} de ${u.nombre}:`, campo === 'email' ? u.email : '');
+    if (!valor) return;
+    setError('');
+    try {
+      await api.put(`/admin/usuarios/${u.id}`, { [campo]: valor.trim() });
+      onChange();
+      flash(campo === 'email' ? 'Correo actualizado' : 'Contraseña actualizada');
     } catch (e) {
       setError(e.message);
     }
@@ -1076,6 +1107,20 @@ function PersonalFortex({ internos = [], onChange, flash }) {
                     {u.email} · {u.role === 'admin' ? 'administrador' : `${u.clientes_asignados} cliente(s)`}
                   </p>
                 </div>
+                <button
+                  onClick={() => editar(u, 'email', 'Nuevo correo')}
+                  className="text-slate-300 hover:text-indigo-600 shrink-0"
+                  title="Cambiar correo"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => editar(u, 'password', 'Nueva contraseña (mínimo 8 caracteres)')}
+                  className="text-slate-300 hover:text-indigo-600 shrink-0"
+                  title="Reponer contraseña"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                </button>
                 <button
                   onClick={() => cambiarActivo(u)}
                   className="text-slate-300 hover:text-rose-600 shrink-0"

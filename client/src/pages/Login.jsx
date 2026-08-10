@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
+import { useNavigate, Navigate, Link } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
@@ -109,6 +109,10 @@ export default function Login() {
                 ? <Loader2 className="login-spinner" aria-hidden="true" />
                 : <ArrowRight aria-hidden="true" />}
             </button>
+
+            <p className="login-forgot">
+              <Link to="/recuperar">¿Olvidaste tu contraseña?</Link>
+            </p>
           </form>
 
           <div className="login-demo">

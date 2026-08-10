@@ -13,6 +13,7 @@ import fianzasRoutes from './routes/fianzas.js';
 import documentosRoutes from './routes/documentos.js';
 import adminRoutes from './routes/admin.js';
 import { correrAlertas } from './services/alerts.js';
+import { probarCorreo } from './services/email.js';
 import { seed, seedIfEmpty, reiniciarVacio } from './seed.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -84,12 +85,17 @@ app.get('/api/setup', async (req, res) => {
       return res.json({ ok: true, reiniciado: true, borrado });
     }
 
+    // De paso se comprueba el correo saliente. Sin esto, que las credenciales
+    // SMTP estén mal se descubre el día que alguien olvida su contraseña y el
+    // enlace no le llega nunca.
+    const correo = await probarCorreo();
+
     if (req.query.force === '1') {
       await seed();
-      return res.json({ ok: true, seeded: true, forced: true });
+      return res.json({ ok: true, seeded: true, forced: true, correo });
     }
     const seeded = await seedIfEmpty();
-    res.json({ ok: true, seeded });
+    res.json({ ok: true, seeded, correo });
   } catch (e) {
     res.status(500).json({ error: 'Fallo en setup', detail: e.message });
   }

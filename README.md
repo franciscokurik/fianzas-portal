@@ -132,11 +132,52 @@ no identifica a nadie en particular.
 | Cliente  | contabilidad@bajio.mx   | demo123      |
 | Cliente  | norte@demo.mx           | demo123      |
 | Vendedor | mariana@fortex.mx       | vendedor123  |
-| Admin    | admin@fortex.mx         | admin123     |
+| Admin    | francisco@fortex.mx     | admin123     |
 
 Las dos primeras son de la **misma** empresa: sirven para ver que varias
 personas comparten la información del fiado. `norte@demo.mx` entra también con
 su RFC (`IAN980720XYZ`) porque su empresa tiene una sola cuenta.
+
+## Correo saliente y recuperación de contraseña
+
+Quien olvida su contraseña la repone solo: en el login hay un
+**"¿Olvidaste tu contraseña?"** que manda un enlace al correo de la cuenta. El
+enlace vence en **una hora**, es de **un solo uso**, y pedir uno nuevo invalida
+el anterior. En la base se guarda solo el *hash* del token: quien pueda leer esa
+tabla —o un respaldo— no puede entrar a ninguna cuenta con lo que vea ahí.
+
+Pedir el enlace responde **lo mismo exista o no la cuenta**. Es a propósito: si
+contestara distinto, cualquiera podría ir probando correos para averiguar
+quiénes son clientes de Fortex.
+
+Para que los correos salgan de verdad hay que configurar el buzón de no-reply:
+
+1. Crea el buzón `no-reply@fortex.mx` (en Google Workspace: *Usuarios → Añadir*).
+2. Activa la verificación en dos pasos de esa cuenta y genera una
+   **contraseña de aplicación** (*Seguridad → Contraseñas de aplicaciones*).
+   La contraseña normal del correo **no** sirve para SMTP.
+3. En Vercel (*Settings → Environment Variables*) pon:
+
+   | Name | Value |
+   |---|---|
+   | `EMAIL_MODE` | `smtp` |
+   | `SMTP_HOST` | `smtp.gmail.com` |
+   | `SMTP_PORT` | `587` |
+   | `SMTP_USER` | `no-reply@fortex.mx` |
+   | `SMTP_PASS` | la contraseña de aplicación |
+   | `EMAIL_FROM` | `no-reply@fortex.mx` |
+   | `EMAIL_FROM_NAME` | `Portal de Fianzas Fortex` |
+
+4. Redespliega y llama `/api/setup?key=...`: la respuesta trae un campo
+   `correo` que dice si las credenciales sirven, **sin mandarle nada a nadie**.
+   Así no se descubre que el SMTP está mal el día que alguien de verdad olvidó
+   su contraseña.
+
+> Con Google Workspace, `EMAIL_FROM` tiene que ser el mismo buzón que
+> `SMTP_USER` (o un alias suyo); si no, Gmail reescribe el remitente.
+> Si algún día el volumen crece o la entrega se vuelve un problema, se cambia a
+> un proveedor transaccional (Resend, SendGrid, Brevo) tocando solo estas
+> variables.
 
 ## Alertas por email
 
@@ -154,7 +195,8 @@ Para automatizar diariamente, programa un cron que llame a ese endpoint o a `cor
 
 - Activar SendGrid y WhatsApp (Twilio) en `services/`.
 - Cron diario para alertas (hoy hay que llamar `POST /api/alertas/correr`).
-- Cambio de contraseña / recuperación por correo.
+- Que cada quien pueda cambiar su propia contraseña estando dentro (hoy se
+  repone olvidándola, o pidiéndoselo a Home Office).
 - Histórico de documentos: hoy cada tipo guarda **un** archivo vigente y al
   renovarlo se reemplaza (no queda el del año pasado).
 - Estado de pago de la prima (pagada / pendiente, fecha y recibo).

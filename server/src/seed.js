@@ -69,7 +69,7 @@ export async function seed() {
   );
 
   // Personal de Fortex: no cuelgan de ninguna empresa.
-  await insUsuario.get(null, 'Home Office', 'admin@fortex.mx', hash('admin123'), 'admin');
+  await insUsuario.get(null, 'Francisco Kuri', 'francisco@fortex.mx', hash('admin123'), 'admin');
   const vendedor = (await insUsuario.get(
     null, 'Mariana Ruiz', 'mariana@fortex.mx', hash('vendedor123'), 'vendedor'
   )).id;
@@ -232,7 +232,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   seed()
     .then((r) => {
       console.log(`✅ Listo (${r.clientes} empresas, ${r.usuarios} usuarios, ${r.afianzadoras} afianzadoras).`);
-      console.log('   Admin    -> admin@fortex.mx / admin123');
+      console.log('   Admin    -> francisco@fortex.mx / admin123');
       console.log('   Vendedor -> mariana@fortex.mx / vendedor123');
       console.log('   Cliente  -> cliente@demo.mx (RFC CBA120315ABC) / demo123');
       console.log('   Cliente  -> contabilidad@bajio.mx / demo123  (misma empresa)');

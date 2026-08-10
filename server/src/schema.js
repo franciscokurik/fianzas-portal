@@ -46,6 +46,21 @@ CREATE INDEX IF NOT EXISTS idx_users_client ON users(client_id);
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS vendedor_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_clients_vendedor ON clients(vendedor_id);
 
+-- Enlaces para reponer la contraseña olvidada.
+--
+-- Se guarda el HASH del token, no el token: quien pueda leer esta tabla (un
+-- respaldo, un log de consultas) no debe poder entrar a ninguna cuenta con lo
+-- que vea aquí. El token en claro solo existe dentro del correo que se manda.
+CREATE TABLE IF NOT EXISTS password_resets (
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT    NOT NULL UNIQUE,
+  expira_el  TEXT    NOT NULL,
+  usado_el   TEXT,
+  created_at TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
+);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+
 CREATE TABLE IF NOT EXISTS afianzadoras (
   id      SERIAL PRIMARY KEY,
   nombre  TEXT NOT NULL,

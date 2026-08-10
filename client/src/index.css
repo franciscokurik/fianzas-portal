@@ -792,6 +792,24 @@ body {
   animation: spin 0.8s linear infinite;
 }
 
+/* Enlace discreto bajo el botón: recuperar la contraseña y volver al login. */
+.login-forgot {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.login-forgot a {
+  color: var(--login-muted, #6b7280);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.login-forgot a:hover {
+  color: inherit;
+  border-bottom-color: currentColor;
+}
+
 .login-demo {
   margin-top: 30px;
   padding: 17px 0;
