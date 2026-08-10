@@ -24,20 +24,26 @@ const contar = async (tabla) =>
 before(async () => {
   await inicializar(memoria);
   await memoria.exec(`
-    INSERT INTO clients (razon_social, email, password_hash, role)
-      VALUES ('Fortex', 'admin@fortex.mx', 'hash-del-admin', 'admin');
-    INSERT INTO clients (razon_social, rfc, email, password_hash)
-      VALUES ('GASPE', 'KUKF010115BV6', 'isidro@fortex.mx', 'x'),
-             ('Otra SA', 'OTR010101AAA', 'otra@demo.mx', 'x');
+    INSERT INTO clients (razon_social, rfc)
+      VALUES ('GASPE', 'KUKF010115BV6'), ('Otra SA', 'OTR010101AAA');
+    -- Personal de Fortex (sin empresa) y gente de los fiados. Al reiniciar se
+    -- conservan los primeros y se van los segundos con su empresa.
+    INSERT INTO users (client_id, nombre, email, password_hash, role) VALUES
+      (NULL, 'Home Office', 'admin@fortex.mx', 'hash-del-admin', 'admin'),
+      (NULL, 'Mariana',     'mariana@fortex.mx', 'hash-vendedora', 'vendedor'),
+      (1, 'Isidro', 'isidro@gaspe.mx', 'x', 'client'),
+      (2, 'Otra',   'otra@demo.mx',    'x', 'client');
+    UPDATE clients SET vendedor_id = 2 WHERE id = 1;
+
     INSERT INTO afianzadoras (nombre, slug) VALUES ('Aserta','aserta'), ('Chubb','chubb');
-    INSERT INTO proyectos (client_id, nombre, monto_contrato) VALUES (2,'Obra A',100000000);
-    INSERT INTO client_credit_lines (client_id, afianzadora_id, linea_credito) VALUES (2,1,300000000);
+    INSERT INTO proyectos (client_id, nombre, monto_contrato) VALUES (1,'Obra A',100000000);
+    INSERT INTO client_credit_lines (client_id, afianzadora_id, linea_credito) VALUES (1,1,300000000);
     INSERT INTO fianzas (client_id, proyecto_id, afianzadora_id, numero_poliza,
                          tipo_fianza_id, prima_neta, monto_afianzado)
-      VALUES (2, 1, 1, 'ASE-1',
+      VALUES (1, 1, 1, 'ASE-1',
               (SELECT id FROM tipos_fianza WHERE nombre='Cumplimiento'), 1850000, 120000000);
-    INSERT INTO papeleria_requests (client_id, descripcion) VALUES (2, 'Carta de no adeudo');
-    INSERT INTO notifications (client_id, tipo, ref_key) VALUES (2, 'fianza_30', 'fianza:1');
+    INSERT INTO papeleria_requests (client_id, descripcion) VALUES (1, 'Carta de no adeudo');
+    INSERT INTO notifications (client_id, tipo, ref_key) VALUES (1, 'fianza_30', 'fianza:1');
   `);
 });
 
@@ -53,17 +59,24 @@ test('borra los clientes y todo lo que cuelga de ellos', async () => {
   assert.equal(await contar('client_credit_lines'), 0, 'quedaron líneas huérfanas');
   assert.equal(await contar('papeleria_requests'), 0, 'quedó papelería huérfana');
   assert.equal(await contar('notifications'), 0, 'quedaron notificaciones huérfanas');
+  assert.equal(await contar('clients'), 0, 'las empresas fiadas debieron irse todas');
 });
 
-test('conserva intacta la cuenta admin, con su contraseña', async () => {
-  const admins = await memoria.prepare(
-    `SELECT email, password_hash, role FROM clients`).all();
+test('conserva al personal de Fortex, con su contraseña', async () => {
+  const internos = await memoria.prepare(
+    `SELECT email, password_hash, role FROM users ORDER BY role`).all();
 
-  assert.equal(admins.length, 1, 'debe quedar exactamente la cuenta admin');
-  assert.equal(admins[0].email, 'admin@fortex.mx');
-  assert.equal(admins[0].role, 'admin');
-  assert.equal(admins[0].password_hash, 'hash-del-admin',
+  assert.deepEqual(internos.map((u) => u.role), ['admin', 'vendedor'],
+    'deben quedar el admin y el vendedor, y ningún usuario de fiado');
+  assert.equal(internos[0].password_hash, 'hash-del-admin',
     'no debe reescribirse la contraseña del admin');
+  assert.equal(internos[1].email, 'mariana@fortex.mx');
+});
+
+test('los usuarios de los fiados se van con su empresa', async () => {
+  const { total } = await memoria
+    .prepare(`SELECT COUNT(*)::int AS total FROM users WHERE role = 'client'`).get();
+  assert.equal(total, 0, 'quedaron cuentas apuntando a empresas borradas');
 });
 
 test('conserva afianzadoras y catálogos', async () => {
@@ -78,7 +91,7 @@ test('correrlo dos veces no falla ni borra de más', async () => {
   assert.deepEqual(resumen, {
     clientes: 0, proyectos: 0, fianzas: 0, admins_conservados: 1,
   });
-  assert.equal(await contar('clients'), 1);
+  assert.equal(await contar('clients'), 0);
 });
 
 test('se niega a reiniciar si no hay ninguna cuenta admin', async () => {
@@ -86,8 +99,11 @@ test('se niega a reiniciar si no hay ninguna cuenta admin', async () => {
   await inicializar(sinAdmin);
   db.query = sinAdmin.query;
   db.prepare = sinAdmin.prepare;
-  await sinAdmin.exec(
-    `INSERT INTO clients (razon_social, email, password_hash) VALUES ('Solo cliente','c@d.mx','x')`);
+  await sinAdmin.exec(`
+    INSERT INTO clients (razon_social) VALUES ('Solo cliente');
+    INSERT INTO users (client_id, nombre, email, password_hash, role)
+      VALUES (1, 'Alguien', 'c@d.mx', 'x', 'client');
+  `);
 
   await assert.rejects(() => reiniciarVacio(), /sin acceso/);
 

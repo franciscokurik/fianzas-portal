@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireAuth } from '../auth/middleware.js';
+import { requireAuth, requireCliente } from '../auth/middleware.js';
 import { upload, subirArchivo, borrarArchivo } from '../lib/upload.js';
 import { guardarDocumentoCliente } from '../services/documentos-cliente.js';
 import { estadoDocumento, todayISO, daysUntil } from '../lib/dates.js';
@@ -8,8 +8,8 @@ import { estadoDocumento, todayISO, daysUntil } from '../lib/dates.js';
 const router = Router();
 
 // GET /api/documentos -> lista de documentos estándar + estatus del cliente
-router.get('/', requireAuth, async (req, res) => {
-  const clientId = req.user.id;
+router.get('/', requireAuth, requireCliente, async (req, res) => {
+  const clientId = req.user.client_id;
 
   const tipos = await db
     .prepare('SELECT * FROM document_types ORDER BY orden, id')
@@ -51,9 +51,9 @@ router.get('/', requireAuth, async (req, res) => {
 // POST /api/documentos/:typeId  (multipart: archivo)
 // El mismo trabajo lo hace el admin desde /api/admin/clientes/:id/documentos/:typeId,
 // así que la lógica vive en el servicio y aquí solo se fija de quién es el archivo.
-router.post('/:typeId', requireAuth, upload.single('archivo'), async (req, res) => {
+router.post('/:typeId', requireAuth, requireCliente, upload.single('archivo'), async (req, res) => {
   const { vencimiento } = await guardarDocumentoCliente({
-    clientId: req.user.id,
+    clientId: req.user.client_id,
     typeId: Number(req.params.typeId),
     file: req.file,
     subidoPor: 'cliente',
@@ -64,7 +64,7 @@ router.post('/:typeId', requireAuth, upload.single('archivo'), async (req, res) 
 // --- Papelería específica por afianzadora/póliza ---
 
 // GET /api/documentos/papeleria -> solicitudes para el cliente
-router.get('/papeleria', requireAuth, async (req, res) => {
+router.get('/papeleria', requireAuth, requireCliente, async (req, res) => {
   const rows = await db
     .prepare(
       `SELECT p.*, a.nombre AS afianzadora_nombre, f.numero_poliza
@@ -74,22 +74,22 @@ router.get('/papeleria', requireAuth, async (req, res) => {
        WHERE p.client_id = ?
        ORDER BY (p.estado = 'entregado'), p.created_at DESC`
     )
-    .all(req.user.id);
+    .all(req.user.client_id);
   res.json({ papeleria: rows });
 });
 
 // POST /api/documentos/papeleria/:id  (multipart: archivo) -> cliente responde
-router.post('/papeleria/:id', requireAuth, upload.single('archivo'), async (req, res) => {
+router.post('/papeleria/:id', requireAuth, requireCliente, upload.single('archivo'), async (req, res) => {
   const id = Number(req.params.id);
   const sol = await db
     .prepare('SELECT * FROM papeleria_requests WHERE id = ? AND client_id = ?')
-    .get(id, req.user.id);
+    .get(id, req.user.client_id);
   if (!sol) return res.status(404).json({ error: 'Solicitud no encontrada' });
   if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
 
   // Se sube primero y se borra el anterior al final: si la subida falla, la
   // solicitud conserva el archivo que ya tenía.
-  const url = await subirArchivo(req.file, req.user.id);
+  const url = await subirArchivo(req.file, req.user.client_id);
 
   await db.prepare(
     `UPDATE papeleria_requests
@@ -103,10 +103,10 @@ router.post('/papeleria/:id', requireAuth, upload.single('archivo'), async (req,
 });
 
 // GET /api/documentos/descargar/:typeId -> redirige al archivo público del cliente
-router.get('/descargar/:typeId', requireAuth, async (req, res) => {
+router.get('/descargar/:typeId', requireAuth, requireCliente, async (req, res) => {
   const doc = await db
     .prepare('SELECT * FROM client_documents WHERE client_id = ? AND document_type_id = ?')
-    .get(req.user.id, Number(req.params.typeId));
+    .get(req.user.client_id, Number(req.params.typeId));
   if (!doc || !/^https:\/\//.test(doc.file_path || '')) {
     return res.status(404).json({ error: 'Sin archivo' });
   }

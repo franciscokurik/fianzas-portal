@@ -114,6 +114,39 @@ export const MIGRACIONES = [
       WHERE prima_total = 0 AND prima_neta > 0;
     `,
   },
+  {
+    // Saca las cuentas de acceso de la tabla de empresas. Mientras 'clients'
+    // fue las dos cosas, una constructora solo podía tener UN login: el
+    // director, el contador y el residente de obra compartían contraseña.
+    // Ahora la empresa es una fila y cada persona la suya.
+    nombre: '005_usuarios_aparte_de_clientes',
+    // Si ya no está la columna de correo en clients, esto ya corrió (o la base
+    // nació con el esquema nuevo) y consultarla reventaría.
+    omitirSi: async (db) => (await tipoDeColumna(db, 'clients', 'email')) === null,
+    sql: `
+      -- Cada cuenta que existía se vuelve un usuario, con su MISMA contraseña:
+      -- nadie tiene que volver a darse de alta ni recuperar nada.
+      INSERT INTO users (client_id, nombre, email, password_hash, role)
+      SELECT CASE WHEN c.role = 'admin' THEN NULL ELSE c.id END,
+             c.razon_social, c.email, c.password_hash,
+             CASE WHEN c.role = 'admin' THEN 'admin' ELSE 'client' END
+      FROM clients c
+      WHERE NOT EXISTS (SELECT 1 FROM users u WHERE lower(u.email) = lower(c.email));
+
+      -- Las filas con rol admin nunca fueron empresas: eran cuentas de Fortex
+      -- viviendo en la tabla de fiados. Ya copiadas a users, aquí sobran.
+      -- Se respeta cualquiera que tuviera obras colgando (no debería haberlas):
+      -- vale más dejar una fila huérfana que tumbar la migración en producción.
+      DELETE FROM clients c
+      WHERE c.role = 'admin'
+        AND NOT EXISTS (SELECT 1 FROM proyectos p WHERE p.client_id = c.id)
+        AND NOT EXISTS (SELECT 1 FROM fianzas  f WHERE f.client_id = c.id);
+
+      ALTER TABLE clients DROP COLUMN IF EXISTS email;
+      ALTER TABLE clients DROP COLUMN IF EXISTS password_hash;
+      ALTER TABLE clients DROP COLUMN IF EXISTS role;
+    `,
+  },
 ];
 
 // Parte un bloque de SQL en sentencias sueltas: el driver HTTP de Neon corre

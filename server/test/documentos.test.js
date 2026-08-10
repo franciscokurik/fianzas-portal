@@ -27,9 +27,11 @@ let tokenB;
 before(async () => {
   await inicializar(memoria);
   await memoria.exec(`
-    INSERT INTO clients (razon_social, email, password_hash) VALUES
-      ('Empresa A', 'a@demo.mx', 'x'),
-      ('Empresa B', 'b@demo.mx', 'x');
+    INSERT INTO clients (razon_social) VALUES ('Empresa A'), ('Empresa B');
+    INSERT INTO users (client_id, nombre, email, password_hash, role) VALUES
+      (1, 'Ana',  'a@demo.mx', 'x', 'client'),
+      (2, 'Beto', 'b@demo.mx', 'x', 'client'),
+      (NULL, 'Fortex', 'admin@fortex.mx', 'x', 'admin');
     INSERT INTO afianzadoras (nombre, slug) VALUES ('Aserta','aserta');
     INSERT INTO proyectos (client_id, nombre, monto_contrato) VALUES
       (1, 'Obra de A', 100000000),
@@ -45,8 +47,8 @@ before(async () => {
              (2, 'fianza',   2, 'caratula', 'https://blob.test/caratula-B.pdf', 'caratula-B.pdf');
   `);
 
-  tokenA = signToken({ id: 1, role: 'client', razon_social: 'Empresa A' });
-  tokenB = signToken({ id: 2, role: 'client', razon_social: 'Empresa B' });
+  tokenA = signToken({ id: 1, role: 'client', client_id: 1, nombre: 'Ana' });
+  tokenB = signToken({ id: 2, role: 'client', client_id: 2, nombre: 'Beto' });
 
   servidor = createServer(app);
   await new Promise((r) => servidor.listen(0, r));

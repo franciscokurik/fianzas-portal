@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireAuth } from '../auth/middleware.js';
+import { requireAuth, requireCliente } from '../auth/middleware.js';
 import { estadoFianza } from '../lib/dates.js';
 
 const router = Router();
 
 // GET /api/dashboard -> métricas del cliente autenticado
-router.get('/', requireAuth, async (req, res) => {
-  const clientId = req.user.id;
+router.get('/', requireAuth, requireCliente, async (req, res) => {
+  const clientId = req.user.client_id;
 
   const client = await db
     .prepare('SELECT id, razon_social FROM clients WHERE id = ?')

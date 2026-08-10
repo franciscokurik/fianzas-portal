@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireAuth } from '../auth/middleware.js';
+import { requireAuth, requireCliente } from '../auth/middleware.js';
 import { estadoFianza, daysUntil } from '../lib/dates.js';
 import { agruparPorEntidad, deEntidad } from '../lib/documentos.js';
 
 const router = Router();
 
 // GET /api/fianzas/afianzadoras -> afianzadoras que tienen fianzas del cliente
-router.get('/afianzadoras', requireAuth, async (req, res) => {
+router.get('/afianzadoras', requireAuth, requireCliente, async (req, res) => {
   const rows = await db
     .prepare(
       `SELECT a.id, a.nombre, a.slug, COUNT(f.id) AS total
@@ -17,12 +17,12 @@ router.get('/afianzadoras', requireAuth, async (req, res) => {
        GROUP BY a.id
        ORDER BY a.nombre`
     )
-    .all(req.user.id);
+    .all(req.user.client_id);
   res.json({ afianzadoras: rows });
 });
 
 // GET /api/fianzas/proyectos -> proyectos del cliente con su total afianzado
-router.get('/proyectos', requireAuth, async (req, res) => {
+router.get('/proyectos', requireAuth, requireCliente, async (req, res) => {
   const proyectos = await db
     .prepare(
       `SELECT p.id, p.nombre, p.numero_contrato, p.beneficiario, p.monto_contrato,
@@ -34,12 +34,12 @@ router.get('/proyectos', requireAuth, async (req, res) => {
        GROUP BY p.id
        ORDER BY p.estatus, p.nombre`
     )
-    .all(req.user.id);
+    .all(req.user.client_id);
   res.json({ proyectos });
 });
 
 // GET /api/fianzas?afianzadora_id=#&proyecto_id=#  -> fianzas del cliente
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, requireCliente, async (req, res) => {
   const { afianzadora_id, proyecto_id } = req.query;
   let sql = `SELECT f.*, a.nombre AS afianzadora_nombre, a.slug AS afianzadora_slug,
                     t.nombre AS tipo_fianza,
@@ -49,7 +49,7 @@ router.get('/', requireAuth, async (req, res) => {
              LEFT JOIN tipos_fianza t ON t.id = f.tipo_fianza_id
              LEFT JOIN proyectos p ON p.id = f.proyecto_id
              WHERE f.client_id = ?`;
-  const params = [req.user.id];
+  const params = [req.user.client_id];
   if (afianzadora_id) {
     sql += ' AND f.afianzadora_id = ?';
     params.push(afianzadora_id);
@@ -65,7 +65,7 @@ router.get('/', requireAuth, async (req, res) => {
   const archivos = await db.prepare(
     `SELECT id, entidad_tipo, entidad_id, tipo_doc, nombre_archivo, size_bytes, subido_el
      FROM documentos WHERE client_id = ?`
-  ).all(req.user.id);
+  ).all(req.user.client_id);
   const porEntidad = agruparPorEntidad(archivos);
 
   const fianzas = rows.map((row) => {
@@ -90,10 +90,10 @@ router.get('/', requireAuth, async (req, res) => {
 // GET /api/fianzas/documentos/:id -> descarga un contrato o carátula.
 // La comprobación de dueño es la que importa: sin ella, cambiar el id en la
 // URL dejaría ver los documentos de otro fiado.
-router.get('/documentos/:id', requireAuth, async (req, res) => {
+router.get('/documentos/:id', requireAuth, requireCliente, async (req, res) => {
   const doc = await db
     .prepare('SELECT url FROM documentos WHERE id = ? AND client_id = ?')
-    .get(Number(req.params.id), req.user.id);
+    .get(Number(req.params.id), req.user.client_id);
 
   if (!doc || !/^https:\/\//.test(doc.url || '')) {
     return res.status(404).json({ error: 'Documento no disponible' });

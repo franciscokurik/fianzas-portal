@@ -44,7 +44,52 @@ test('sobre una base existente aplica todas las migraciones', async () => {
     '002_dinero_en_centavos',
     '003_quitar_tipo_fianza_legacy',
     '004_prima_total_desde_prima_neta',
+    '005_usuarios_aparte_de_clientes',
   ]);
+});
+
+test('las cuentas que existían se vuelven usuarios sin perder la contraseña', async () => {
+  const db = await baseVieja();
+  await inicializar(db);
+
+  // La constructora era a la vez empresa y login. Ahora es una empresa con una
+  // persona dada de alta, que entra con el MISMO correo y la MISMA contraseña.
+  const u = await db.prepare(
+    `SELECT u.email, u.password_hash, u.role, u.client_id, c.razon_social
+     FROM users u JOIN clients c ON c.id = u.client_id WHERE u.email = ?`
+  ).get('a@d.mx');
+
+  assert.equal(u.role, 'client');
+  assert.equal(u.password_hash, 'x', 'la contraseña no debe cambiar: nadie tendría que recuperarla');
+  assert.equal(u.razon_social, 'Constructora');
+
+  // Y las columnas de login ya no viven en la tabla de empresas.
+  const cols = await db.prepare(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = ?`).all('clients');
+  const nombres = cols.map((c) => c.column_name);
+  for (const muerta of ['email', 'password_hash', 'role']) {
+    assert.ok(!nombres.includes(muerta), `clients no debería seguir con la columna ${muerta}`);
+  }
+});
+
+test('la cuenta de admin deja de ser una empresa fiada', async () => {
+  const db = baseEnMemoria();
+  await db.exec(ESQUEMA_VIEJO);
+  await db.exec(`
+    INSERT INTO clients (razon_social, email, password_hash, role)
+      VALUES ('Fortex', 'admin@fortex.mx', 'hash', 'admin'),
+             ('Constructora', 'c@d.mx', 'x', 'client');
+  `);
+  await inicializar(db);
+
+  // El admin vivía en la tabla de fiados solo porque ahí estaba el login.
+  // Migrado a users, no tiene por qué seguir apareciendo como cliente.
+  const empresas = await db.prepare('SELECT razon_social FROM clients').all();
+  assert.deepEqual(empresas.map((e) => e.razon_social), ['Constructora']);
+
+  const admin = await db.prepare('SELECT client_id, role FROM users WHERE email = ?').get('admin@fortex.mx');
+  assert.equal(admin.role, 'admin');
+  assert.equal(admin.client_id, null, 'el admin no pertenece a ninguna empresa');
 });
 
 test('convierte los montos a centavos sin perder los centavos', async () => {
@@ -179,7 +224,9 @@ test('en una base nueva no corre ninguna migración y nada se corrompe', async (
   assert.equal(registro.length, MIGRACIONES.length, 'deben quedar registradas como aplicadas');
 
   await db.exec(`
-    INSERT INTO clients (razon_social, email, password_hash) VALUES ('Nueva SA','n@d.mx','x');
+    INSERT INTO clients (razon_social) VALUES ('Nueva SA');
+    INSERT INTO users (client_id, nombre, email, password_hash, role)
+      VALUES (1, 'Contacto', 'n@d.mx', 'x', 'client');
     INSERT INTO afianzadoras (nombre, slug) VALUES ('Chubb','chubb');
     INSERT INTO proyectos (client_id, nombre, monto_contrato) VALUES (1,'Obra',2400000000);
     INSERT INTO fianzas (client_id, proyecto_id, afianzadora_id, numero_poliza,

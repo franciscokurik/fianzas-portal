@@ -10,17 +10,41 @@
 const TS_DEFAULT = "to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')";
 
 export const SCHEMA_SQL = `
+-- La EMPRESA fiada. No tiene con qué entrar al portal: para eso están los
+-- usuarios. Antes esta tabla era las dos cosas a la vez, y por eso una
+-- constructora solo podía tener un acceso (ver migración 005).
 CREATE TABLE IF NOT EXISTS clients (
   id            SERIAL PRIMARY KEY,
   razon_social  TEXT    NOT NULL,
   rfc           TEXT    UNIQUE,
-  email         TEXT    UNIQUE NOT NULL,
-  password_hash TEXT    NOT NULL,
-  role          TEXT    NOT NULL DEFAULT 'client',
   linea_credito BIGINT  NOT NULL DEFAULT 0,
   telefono      TEXT,
   created_at    TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
 );
+
+-- Las PERSONAS que entran al portal.
+--   client_id lleno  -> gente del fiado; ve solo lo de su empresa.
+--   client_id NULL   -> personal de Fortex (admin o vendedor).
+-- El vendedor no se acota con una columna aquí sino con clients.vendedor_id:
+-- la cartera es del cliente, no del usuario, y así reasignar una cuenta es
+-- cambiar un solo campo.
+CREATE TABLE IF NOT EXISTS users (
+  id            SERIAL PRIMARY KEY,
+  client_id     INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  nombre        TEXT    NOT NULL,
+  email         TEXT    UNIQUE NOT NULL,
+  password_hash TEXT    NOT NULL,
+  role          TEXT    NOT NULL DEFAULT 'client'
+                CHECK (role IN ('client', 'vendedor', 'admin')),
+  activo        INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
+);
+CREATE INDEX IF NOT EXISTS idx_users_client ON users(client_id);
+
+-- Quién atiende a este fiado. ON DELETE SET NULL: si se da de baja al vendedor,
+-- sus clientes quedan sin asignar (visibles para Home Office), nunca se borran.
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS vendedor_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_clients_vendedor ON clients(vendedor_id);
 
 CREATE TABLE IF NOT EXISTS afianzadoras (
   id      SERIAL PRIMARY KEY,

@@ -1,24 +1,43 @@
 import { Router } from 'express';
-import bcrypt from 'bcryptjs';
 import db from '../db.js';
-import { requireAuth, requireAdmin } from '../auth/middleware.js';
+import { requireAuth, requireAdmin, requireInterno } from '../auth/middleware.js';
 import { estadoFianza, daysUntil, todayISO } from '../lib/dates.js';
 import { centavos } from '../lib/dinero.js';
 import { slugify } from '../lib/slug.js';
 import { upload, subirArchivo, borrarArchivo } from '../lib/upload.js';
 import { TIPOS_DOC, esTipoValido, agruparPorEntidad, deEntidad } from '../lib/documentos.js';
 import { guardarDocumentoCliente, borrarDocumentoCliente } from '../services/documentos-cliente.js';
+import { esAdmin, exigirCliente, exigirEntidad, filtroCartera } from '../lib/cartera.js';
+import {
+  crearUsuario, actualizarUsuario, desactivarUsuario, DOMINIO_INTERNO,
+} from '../services/usuarios.js';
 
 const router = Router();
-router.use(requireAuth, requireAdmin);
+
+// Al panel entra todo el personal de Fortex, pero el vendedor solo alcanza los
+// clientes de su cartera. Cada ruta que toca un fiado lo comprueba de nuevo
+// contra la base: la lista que se le mandó a la pantalla no es una autorización.
+router.use(requireAuth, requireInterno);
+
+// Lo que solo puede Home Office: dar de alta clientes y usuarios, mover líneas
+// de crédito y cambiar los catálogos que ven todos los fiados.
+const soloAdmin = requireAdmin;
 
 // --- Clientes ---
 
-// GET /api/admin/clientes -> todos los clientes con estatus general
+// GET /api/admin/clientes -> los clientes que puede ver quien pregunta
 router.get('/clientes', async (req, res) => {
+  const cartera = filtroCartera(req.user);
   const clientes = await db
-    .prepare(`SELECT id, razon_social, rfc, email FROM clients WHERE role = 'client' ORDER BY razon_social`)
-    .all();
+    .prepare(
+      `SELECT c.id, c.razon_social, c.rfc, c.vendedor_id, v.nombre AS vendedor_nombre,
+              (SELECT COUNT(*)::int FROM users u WHERE u.client_id = c.id AND u.activo = 1) AS total_usuarios
+       FROM clients c
+       LEFT JOIN users v ON v.id = c.vendedor_id
+       WHERE 1 = 1${cartera.sql.replace('vendedor_id', 'c.vendedor_id')}
+       ORDER BY c.razon_social`
+    )
+    .all(...cartera.params);
 
   const enriquecidos = await Promise.all(clientes.map(async (c) => {
     const fianzas = await db.prepare(
@@ -62,25 +81,46 @@ router.get('/clientes', async (req, res) => {
   res.json({ clientes: enriquecidos });
 });
 
-// POST /api/admin/clientes -> alta de cliente
-router.post('/clientes', async (req, res) => {
-  const { razon_social, rfc, email, password, telefono } = req.body || {};
+// POST /api/admin/clientes -> alta de la empresa y, de una vez, su primer acceso
+router.post('/clientes', soloAdmin, async (req, res) => {
+  const { razon_social, rfc, telefono, vendedor_id, email, password, nombre_contacto } = req.body || {};
   if (!razon_social || !email || !password) {
-    return res.status(400).json({ error: 'razon_social, email y password son obligatorios' });
+    return res.status(400).json({ error: 'Razón social, correo y contraseña son obligatorios' });
   }
+
+  let clienteId;
   try {
     const row = await db.prepare(
-      `INSERT INTO clients (razon_social, rfc, email, password_hash, telefono)
-       VALUES (?, ?, ?, ?, ?) RETURNING id`
-    ).get(razon_social, rfc || null, email, bcrypt.hashSync(password, 10), telefono || null);
-    res.json({ ok: true, id: row.id });
+      `INSERT INTO clients (razon_social, rfc, telefono, vendedor_id)
+       VALUES (?, ?, ?, ?) RETURNING id`
+    ).get(razon_social, rfc || null, telefono || null, vendedor_id ? Number(vendedor_id) : null);
+    clienteId = row.id;
   } catch (e) {
-    res.status(400).json({ error: 'No se pudo crear (¿RFC o email duplicado?)', detail: e.message });
+    return res.status(400).json({ error: 'No se pudo crear (¿RFC duplicado?)', detail: e.message });
   }
+
+  // El alta son dos inserciones y el driver HTTP no da transacciones. Si la
+  // segunda falla (correo repetido, casi siempre), se deshace la primera: una
+  // empresa sin ninguna cuenta con la que entrar no le sirve a nadie y encima
+  // le bloquea el RFC al siguiente intento.
+  try {
+    await crearUsuario({
+      nombre: nombre_contacto || razon_social,
+      email,
+      password,
+      role: 'client',
+      clientId: clienteId,
+    });
+  } catch (e) {
+    await db.prepare('DELETE FROM clients WHERE id = ?').run(clienteId);
+    return res.status(e.status || 400).json({ error: e.message });
+  }
+
+  res.json({ ok: true, id: clienteId });
 });
 
 // PUT /api/admin/clientes/:id -> actualizar datos básicos
-router.put('/clientes/:id', async (req, res) => {
+router.put('/clientes/:id', soloAdmin, async (req, res) => {
   const { razon_social, telefono } = req.body || {};
   await db.prepare(
     `UPDATE clients SET razon_social = COALESCE(?, razon_social),
@@ -90,8 +130,25 @@ router.put('/clientes/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// PUT /api/admin/clientes/:id/vendedor -> mover el cliente de cartera
+// (vendedor_id null = sin asignar, lo ve solo Home Office)
+router.put('/clientes/:id/vendedor', soloAdmin, async (req, res) => {
+  const vendedorId = req.body?.vendedor_id ? Number(req.body.vendedor_id) : null;
+
+  if (vendedorId) {
+    const v = await db
+      .prepare(`SELECT id FROM users WHERE id = ? AND role = 'vendedor' AND activo = 1`)
+      .get(vendedorId);
+    if (!v) return res.status(400).json({ error: 'Ese vendedor no existe o está dado de baja' });
+  }
+
+  await db.prepare('UPDATE clients SET vendedor_id = ? WHERE id = ?')
+    .run(vendedorId, Number(req.params.id));
+  res.json({ ok: true });
+});
+
 // PUT /api/admin/clientes/:id/lineas -> fijar/actualizar la línea de una afianzadora (upsert)
-router.put('/clientes/:id/lineas', async (req, res) => {
+router.put('/clientes/:id/lineas', soloAdmin, async (req, res) => {
   const clientId = Number(req.params.id);
   const { afianzadora_id, linea_credito } = req.body || {};
   if (!afianzadora_id) return res.status(400).json({ error: 'afianzadora_id requerido' });
@@ -105,7 +162,7 @@ router.put('/clientes/:id/lineas', async (req, res) => {
 });
 
 // DELETE /api/admin/clientes/:id/lineas/:afianzadoraId -> quitar línea de una afianzadora
-router.delete('/clientes/:id/lineas/:afianzadoraId', async (req, res) => {
+router.delete('/clientes/:id/lineas/:afianzadoraId', soloAdmin, async (req, res) => {
   await db.prepare(
     'DELETE FROM client_credit_lines WHERE client_id = ? AND afianzadora_id = ?'
   ).run(Number(req.params.id), Number(req.params.afianzadoraId));
@@ -119,7 +176,7 @@ router.get('/afianzadoras', async (req, res) => {
 });
 
 // POST /api/admin/afianzadoras -> agregar nueva afianzadora (escalable)
-router.post('/afianzadoras', async (req, res) => {
+router.post('/afianzadoras', soloAdmin, async (req, res) => {
   const { nombre } = req.body || {};
   if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
   const slug = slugify(nombre);
@@ -140,7 +197,7 @@ router.get('/tipos-fianza', async (req, res) => {
   res.json({ tipos });
 });
 
-router.post('/tipos-fianza', async (req, res) => {
+router.post('/tipos-fianza', soloAdmin, async (req, res) => {
   const nombre = String(req.body?.nombre || '').trim();
   if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
   try {
@@ -157,7 +214,7 @@ router.post('/tipos-fianza', async (req, res) => {
 });
 
 // Baja lógica: las fianzas que ya lo usan conservan su tipo.
-router.delete('/tipos-fianza/:id', async (req, res) => {
+router.delete('/tipos-fianza/:id', soloAdmin, async (req, res) => {
   await db.prepare('UPDATE tipos_fianza SET activo = 0 WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
 });
@@ -173,6 +230,8 @@ router.post('/proyectos', async (req, res) => {
   if (!client_id || !nombre) {
     return res.status(400).json({ error: 'client_id y nombre son obligatorios' });
   }
+  await exigirCliente(req.user, client_id);
+
   const row = await db.prepare(
     `INSERT INTO proyectos (client_id, nombre, numero_contrato, beneficiario, monto_contrato,
                             fecha_inicio, fecha_termino, estatus, notas)
@@ -186,6 +245,8 @@ router.post('/proyectos', async (req, res) => {
 });
 
 router.put('/proyectos/:id', async (req, res) => {
+  await exigirEntidad(req.user, 'proyecto', req.params.id);
+
   const body = { ...(req.body || {}) };
   if ('monto_contrato' in body) body.monto_contrato = centavos(body.monto_contrato);
   const { sets, valores } = camposAActualizar(body, CAMPOS_PROYECTO);
@@ -198,6 +259,8 @@ router.put('/proyectos/:id', async (req, res) => {
 // Solo se permite borrar proyectos sin fianzas: si tiene, hay que moverlas antes.
 router.delete('/proyectos/:id', async (req, res) => {
   const id = Number(req.params.id);
+  await exigirEntidad(req.user, 'proyecto', id);
+
   const { c } = await db.prepare('SELECT COUNT(*)::int c FROM fianzas WHERE proyecto_id = ?').get(id);
   if (c > 0) {
     return res.status(400).json({
@@ -260,6 +323,8 @@ router.post('/fianzas', async (req, res) => {
   if (!client_id || !afianzadora_id || !numero_poliza) {
     return res.status(400).json({ error: 'Cliente, afianzadora y número de póliza son obligatorios' });
   }
+  await exigirCliente(req.user, client_id);
+
   const errProyecto = await validarProyecto(proyecto_id, client_id);
   if (errProyecto) return res.status(400).json({ error: errProyecto });
 
@@ -284,6 +349,8 @@ router.post('/fianzas', async (req, res) => {
 // PUT /api/admin/fianzas/:id -> edición completa de la póliza
 router.put('/fianzas/:id', async (req, res) => {
   const id = Number(req.params.id);
+  await exigirEntidad(req.user, 'fianza', id);
+
   const actual = await db
     .prepare('SELECT client_id, fecha_recordatorio FROM fianzas WHERE id = ?')
     .get(id);
@@ -323,6 +390,8 @@ router.put('/fianzas/:id', async (req, res) => {
 
 // Marca el recordatorio como atendido sin borrar la fecha (queda el histórico).
 router.put('/fianzas/:id/recordatorio', async (req, res) => {
+  await exigirEntidad(req.user, 'fianza', req.params.id);
+
   const atendido = req.body?.atendido !== false;
   await db.prepare('UPDATE fianzas SET recordatorio_atendido_el = ? WHERE id = ?')
     .run(atendido ? todayISO() : null, Number(req.params.id));
@@ -331,6 +400,8 @@ router.put('/fianzas/:id/recordatorio', async (req, res) => {
 
 router.delete('/fianzas/:id', async (req, res) => {
   const id = Number(req.params.id);
+  await exigirEntidad(req.user, 'fianza', id);
+
   await borrarDocumentosDe('fianza', id);
   await db.prepare('DELETE FROM fianzas WHERE id = ?').run(id);
   res.json({ ok: true });
@@ -339,6 +410,7 @@ router.delete('/fianzas/:id', async (req, res) => {
 // GET /api/admin/recordatorios -> avisos internos vencidos o próximos (7 días)
 router.get('/recordatorios', async (req, res) => {
   const dias = Number(req.query.dias) || 7;
+  const cartera = filtroCartera(req.user, 'c.vendedor_id');
   const rows = await db.prepare(
     `SELECT f.id, f.numero_poliza, t.nombre AS tipo_fianza,
             f.fecha_recordatorio, f.nota_recordatorio,
@@ -350,9 +422,9 @@ router.get('/recordatorios', async (req, res) => {
      LEFT JOIN tipos_fianza t ON t.id = f.tipo_fianza_id
      LEFT JOIN proyectos p ON p.id = f.proyecto_id
      WHERE f.fecha_recordatorio IS NOT NULL
-       AND f.recordatorio_atendido_el IS NULL
+       AND f.recordatorio_atendido_el IS NULL${cartera.sql}
      ORDER BY f.fecha_recordatorio`
-  ).all();
+  ).all(...cartera.params);
 
   const recordatorios = rows
     .map((r) => ({ ...r, dias_restantes: daysUntil(r.fecha_recordatorio) }))
@@ -401,6 +473,7 @@ router.post('/:entidadTipo(proyectos|fianzas)/:id/documentos',
 
     const clientId = await duenoDe(entidadTipo, entidadId);
     if (!clientId) return res.status(404).json({ error: `No existe ese ${entidadTipo}` });
+    await exigirCliente(req.user, clientId);
 
     const url = await subirArchivo(req.file, clientId);
     const row = await db.prepare(
@@ -415,6 +488,8 @@ router.post('/:entidadTipo(proyectos|fianzas)/:id/documentos',
 
 // DELETE /api/admin/documentos/:id -> quita el registro y el archivo del blob
 router.delete('/documentos/:id', async (req, res) => {
+  await exigirEntidad(req.user, 'documento', req.params.id);
+
   const doc = await db.prepare('SELECT url FROM documentos WHERE id = ?').get(Number(req.params.id));
   if (!doc) return res.status(404).json({ error: 'Documento no encontrado' });
 
@@ -429,17 +504,11 @@ router.delete('/documentos/:id', async (req, res) => {
 // práctica muchos llegan por correo a Home Office: Fortex los carga en su
 // nombre y queda registrado que fue Fortex quien lo hizo.
 
-async function clienteExiste(clientId) {
-  const c = await db.prepare(`SELECT id FROM clients WHERE id = ? AND role = 'client'`).get(clientId);
-  return Boolean(c);
-}
-
 // POST /api/admin/clientes/:id/documentos/:typeId  (multipart: archivo)
 router.post('/clientes/:id/documentos/:typeId', upload.single('archivo'), async (req, res) => {
   const clientId = Number(req.params.id);
-  if (!(await clienteExiste(clientId))) {
-    return res.status(404).json({ error: 'Cliente no encontrado' });
-  }
+  // Comprueba de una vez que el cliente existe y que quien sube lo alcanza.
+  await exigirCliente(req.user, clientId);
 
   const { vencimiento, tipo } = await guardarDocumentoCliente({
     clientId,
@@ -452,6 +521,8 @@ router.post('/clientes/:id/documentos/:typeId', upload.single('archivo'), async 
 
 // DELETE /api/admin/clientes/:id/documentos/:typeId
 router.delete('/clientes/:id/documentos/:typeId', async (req, res) => {
+  await exigirCliente(req.user, req.params.id);
+
   await borrarDocumentoCliente({
     clientId: Number(req.params.id),
     typeId: Number(req.params.typeId),
@@ -483,7 +554,7 @@ function periodicidad(valor) {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
-router.post('/documentos-requeridos', async (req, res) => {
+router.post('/documentos-requeridos', soloAdmin, async (req, res) => {
   const nombre = String(req.body?.nombre || '').trim();
   if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
 
@@ -499,7 +570,7 @@ router.post('/documentos-requeridos', async (req, res) => {
   }
 });
 
-router.put('/documentos-requeridos/:id', async (req, res) => {
+router.put('/documentos-requeridos/:id', soloAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const nombre = String(req.body?.nombre || '').trim();
   if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
@@ -517,7 +588,7 @@ router.put('/documentos-requeridos/:id', async (req, res) => {
 
 // Solo se puede quitar un tipo que nadie haya usado: si ya hay archivos
 // colgados, borrarlo se los llevaría sin avisar.
-router.delete('/documentos-requeridos/:id', async (req, res) => {
+router.delete('/documentos-requeridos/:id', soloAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const { c } = await db.prepare(
     'SELECT COUNT(*)::int c FROM client_documents WHERE document_type_id = ?'
@@ -539,6 +610,8 @@ router.post('/papeleria', async (req, res) => {
   if (!client_id || !descripcion) {
     return res.status(400).json({ error: 'client_id y descripcion requeridos' });
   }
+  await exigirCliente(req.user, client_id);
+
   const row = await db.prepare(
     `INSERT INTO papeleria_requests (client_id, afianzadora_id, fianza_id, descripcion)
      VALUES (?, ?, ?, ?) RETURNING id`
@@ -549,8 +622,21 @@ router.post('/papeleria', async (req, res) => {
 // GET /api/admin/clientes/:id/detalle -> fianzas, documentos y papelería de un cliente
 router.get('/clientes/:id/detalle', async (req, res) => {
   const id = Number(req.params.id);
-  const cliente = await db.prepare('SELECT id, razon_social, rfc, email, telefono FROM clients WHERE id = ?').get(id);
+  await exigirCliente(req.user, id);
+
+  const cliente = await db.prepare(
+    `SELECT c.id, c.razon_social, c.rfc, c.telefono, c.vendedor_id, v.nombre AS vendedor_nombre
+     FROM clients c
+     LEFT JOIN users v ON v.id = c.vendedor_id
+     WHERE c.id = ?`
+  ).get(id);
   if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+  // Las personas que pueden entrar por este fiado. El hash NUNCA sale de aquí.
+  const usuarios = await db.prepare(
+    `SELECT id, nombre, email, activo, created_at
+     FROM users WHERE client_id = ? ORDER BY activo DESC, nombre`
+  ).all(id);
 
   const fianzasRows = await db.prepare(
     `SELECT f.*, a.nombre AS afianzadora_nombre,
@@ -646,16 +732,76 @@ router.get('/clientes/:id/detalle', async (req, res) => {
     };
   });
 
-  res.json({ cliente, lineas, proyectos, fianzas, documentos, papeleria });
+  res.json({ cliente, usuarios, lineas, proyectos, fianzas, documentos, papeleria });
 });
 
-// GET /api/admin/descargar?path=<url-del-blob> -> redirige al archivo público (Vercel Blob)
-router.get('/descargar', (req, res) => {
+// GET /api/admin/descargar?path=<url> -> redirige al archivo
+//
+// Antes redirigía a CUALQUIER https que le pasaran. Con un solo admin eso era
+// nada más feo; con vendedores en el sistema sería la puerta para bajarse el
+// expediente de un fiado ajeno con solo tener su URL. Ahora el archivo tiene
+// que estar registrado y quien lo pide, alcanzar a su dueño.
+router.get('/descargar', async (req, res) => {
   const url = String(req.query.path || '');
   if (!/^https:\/\//.test(url)) {
     return res.status(404).json({ error: 'Archivo no disponible' });
   }
+
+  const dueno = await db.prepare(
+    `SELECT client_id FROM documentos          WHERE url = ?
+     UNION ALL
+     SELECT client_id FROM client_documents    WHERE file_path = ?
+     UNION ALL
+     SELECT client_id FROM papeleria_requests  WHERE file_path = ?
+     LIMIT 1`
+  ).get(url, url, url);
+  if (!dueno) return res.status(404).json({ error: 'Archivo no disponible' });
+
+  await exigirCliente(req.user, dueno.client_id);
   res.redirect(url);
+});
+
+// --- Usuarios ---
+//
+// Una empresa puede tener varias personas entrando (el director, el contador,
+// el residente de obra), y todas ven lo mismo de su fiado. Las cuentas de
+// Fortex (admin y vendedor) no cuelgan de ninguna empresa.
+
+// GET /api/admin/usuarios/internos -> el personal de Fortex
+router.get('/usuarios/internos', soloAdmin, async (req, res) => {
+  const usuarios = await db.prepare(
+    `SELECT u.id, u.nombre, u.email, u.role, u.activo,
+            (SELECT COUNT(*)::int FROM clients c WHERE c.vendedor_id = u.id) AS clientes_asignados
+     FROM users u
+     WHERE u.client_id IS NULL
+     ORDER BY u.role, u.nombre`
+  ).all();
+  res.json({ usuarios, dominio: DOMINIO_INTERNO });
+});
+
+// POST /api/admin/usuarios -> alta de una persona (de un fiado o de Fortex)
+router.post('/usuarios', soloAdmin, async (req, res) => {
+  const { nombre, email, password, role, client_id } = req.body || {};
+  const fila = await crearUsuario({
+    nombre,
+    email,
+    password,
+    role: role || 'client',
+    clientId: client_id ? Number(client_id) : null,
+  });
+  res.json({ ok: true, id: fila.id });
+});
+
+// PUT /api/admin/usuarios/:id -> cambiar nombre, reactivar o reponer contraseña
+router.put('/usuarios/:id', soloAdmin, async (req, res) => {
+  await actualizarUsuario(Number(req.params.id), req.body || {});
+  res.json({ ok: true });
+});
+
+// DELETE /api/admin/usuarios/:id -> baja lógica (deja de entrar, no se borra)
+router.delete('/usuarios/:id', soloAdmin, async (req, res) => {
+  await desactivarUsuario(Number(req.params.id));
+  res.json({ ok: true });
 });
 
 export default router;

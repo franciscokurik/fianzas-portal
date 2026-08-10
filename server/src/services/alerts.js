@@ -16,11 +16,32 @@ async function marcarNotificado(clientId, tipo, refKey, mensaje) {
   }
 }
 
+// A quién le llega el aviso. Ya no es "el correo del cliente": una empresa
+// tiene varias personas dadas de alta y el papel se lo puede resolver
+// cualquiera de ellas, así que el aviso va a todas las cuentas activas.
+async function destinatarios(clientId) {
+  const filas = await db
+    .prepare('SELECT email FROM users WHERE client_id = ? AND activo = 1')
+    .all(clientId);
+  return filas.map((f) => f.email);
+}
+
 export async function correrAlertas() {
-  const clientes = await db.prepare(`SELECT id, email, razon_social FROM clients WHERE role = 'client'`).all();
+  const clientes = await db.prepare('SELECT id, razon_social FROM clients').all();
   let enviadas = 0;
 
   for (const c of clientes) {
+    const correos = await destinatarios(c.id);
+    // Sin nadie a quién avisarle no se marca la notificación como enviada: si
+    // mañana le dan de alta un usuario, el aviso todavía le puede llegar.
+    if (!correos.length) continue;
+
+    const avisar = async (tipo, refKey, mensaje, asunto) => {
+      if (!(await marcarNotificado(c.id, tipo, refKey, mensaje))) return;
+      for (const to of correos) await sendEmail({ to, subject: asunto, text: mensaje });
+      enviadas++;
+    };
+
     // 1) Fianzas que vencen en <= 30 días
     const fianzas = await db.prepare(
       'SELECT id, numero_poliza, fecha_vigencia FROM fianzas WHERE client_id = ?'
@@ -28,11 +49,11 @@ export async function correrAlertas() {
     for (const f of fianzas) {
       const d = daysUntil(f.fecha_vigencia);
       if (d !== null && d >= 0 && d <= 30) {
-        const msg = `La fianza ${f.numero_poliza} vence en ${d} días (${f.fecha_vigencia}).`;
-        if (await marcarNotificado(c.id, 'fianza_30', `fianza:${f.id}`, msg)) {
-          await sendEmail({ to: c.email, subject: 'Fortex · Fianza por vencer', text: msg });
-          enviadas++;
-        }
+        await avisar(
+          'fianza_30', `fianza:${f.id}`,
+          `La fianza ${f.numero_poliza} vence en ${d} días (${f.fecha_vigencia}).`,
+          'Fortex · Fianza por vencer',
+        );
       }
     }
 
@@ -47,11 +68,11 @@ export async function correrAlertas() {
       if (d !== null && d >= 0 && d <= doc.alerta_dias) {
         const tipo = doc.slug === 'estados_financieros' ? 'ef_60'
                    : doc.slug === 'comprobante_domicilio' ? 'domicilio_30' : 'doc_alerta';
-        const msg = `Tu documento "${doc.nombre}" vence en ${d} días (${doc.vencimiento}). Súbelo actualizado.`;
-        if (await marcarNotificado(c.id, tipo, `doc:${doc.id}:${doc.vencimiento}`, msg)) {
-          await sendEmail({ to: c.email, subject: 'Fortex · Documento por vencer', text: msg });
-          enviadas++;
-        }
+        await avisar(
+          tipo, `doc:${doc.id}:${doc.vencimiento}`,
+          `Tu documento "${doc.nombre}" vence en ${d} días (${doc.vencimiento}). Súbelo actualizado.`,
+          'Fortex · Documento por vencer',
+        );
       }
     }
 
@@ -60,11 +81,11 @@ export async function correrAlertas() {
       `SELECT id, descripcion FROM papeleria_requests WHERE client_id = ? AND estado = 'pendiente'`
     ).all(c.id);
     for (const p of papeleria) {
-      const msg = `Fortex solicita documentación: ${p.descripcion}`;
-      if (await marcarNotificado(c.id, 'papeleria', `papeleria:${p.id}`, msg)) {
-        await sendEmail({ to: c.email, subject: 'Fortex · Documentación solicitada', text: msg });
-        enviadas++;
-      }
+      await avisar(
+        'papeleria', `papeleria:${p.id}`,
+        `Fortex solicita documentación: ${p.descripcion}`,
+        'Fortex · Documentación solicitada',
+      );
     }
   }
 

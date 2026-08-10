@@ -19,7 +19,7 @@ export async function seed() {
   // tipos_fianza NO se limpia: es un catálogo que siembra el propio esquema y
   // que el admin va ampliando, no datos de demostración.
   await db.query(`TRUNCATE notifications, papeleria_requests, client_documents,
-    client_credit_lines, fianzas, proyectos, clients, document_types, afianzadoras
+    client_credit_lines, fianzas, proyectos, users, clients, document_types, afianzadoras
     RESTART IDENTITY CASCADE`);
 
   // --- Afianzadoras ---
@@ -55,26 +55,38 @@ export async function seed() {
     tipoIds[t[1]] = row.id;
   }
 
-  // --- Usuarios ---
+  // --- Empresas fiadas y las personas que entran por ellas ---
+  //
+  // Son dos cosas distintas: la empresa no tiene contraseña, y cada persona
+  // de la empresa entra con su propio correo viendo lo mismo.
+  const insUsuario = db.prepare(
+    `INSERT INTO users (client_id, nombre, email, password_hash, role)
+     VALUES (?, ?, ?, ?, ?) RETURNING id`
+  );
   const insClient = db.prepare(
-    `INSERT INTO clients (razon_social, rfc, email, password_hash, role, linea_credito, telefono)
-     VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`
+    `INSERT INTO clients (razon_social, rfc, telefono, vendedor_id)
+     VALUES (?, ?, ?, ?) RETURNING id`
   );
 
-  // Admin Fortex
-  await insClient.get('Fortex (Administrador)', 'FOR000000XXX', 'admin@fortex.mx', hash('admin123'), 'admin', 0, null);
+  // Personal de Fortex: no cuelgan de ninguna empresa.
+  await insUsuario.get(null, 'Home Office', 'admin@fortex.mx', hash('admin123'), 'admin');
+  const vendedor = (await insUsuario.get(
+    null, 'Mariana Ruiz', 'mariana@fortex.mx', hash('vendedor123'), 'vendedor'
+  )).id;
 
-  // Cliente demo 1
+  // Cliente demo 1, con tres accesos: así se ve para qué sirve tener varios.
   const c1 = (await insClient.get(
-    'Constructora del Bajío SA de CV', 'CBA120315ABC', 'cliente@demo.mx', hash('demo123'),
-    'client', 0, '5551234567'
+    'Constructora del Bajío SA de CV', 'CBA120315ABC', '5551234567', vendedor
   )).id;
+  await insUsuario.get(c1, 'Dirección', 'cliente@demo.mx', hash('demo123'), 'client');
+  await insUsuario.get(c1, 'Contabilidad', 'contabilidad@bajio.mx', hash('demo123'), 'client');
+  await insUsuario.get(c1, 'Residencia de obra', 'obra@bajio.mx', hash('demo123'), 'client');
 
-  // Cliente demo 2
+  // Cliente demo 2, todavía sin vendedor asignado: lo ve solo Home Office.
   const c2 = (await insClient.get(
-    'Ingeniería Aplicada del Norte SA', 'IAN980720XYZ', 'norte@demo.mx', hash('demo123'),
-    'client', 0, '5559876543'
+    'Ingeniería Aplicada del Norte SA', 'IAN980720XYZ', '5559876543', null
   )).id;
+  await insUsuario.get(c2, 'Dirección', 'norte@demo.mx', hash('demo123'), 'client');
 
   // --- Líneas de crédito por afianzadora ---
   const insLinea = db.prepare(
@@ -164,21 +176,21 @@ export async function seed() {
     `INSERT INTO papeleria_requests (client_id, afianzadora_id, fianza_id, descripcion) VALUES (?, ?, ?, ?)`
   ).run(c1, afiIds['aserta'], null, 'Aserta requiere carta de no adeudo del SAT (formato 32-D) para renovar la línea.');
 
-  return { clientes: 3, afianzadoras: afianzadoras.length };
+  return { clientes: 2, usuarios: 6, afianzadoras: afianzadoras.length };
 }
 
 // Deja el portal listo para operar de verdad: borra TODOS los datos de
 // clientes y no siembra nada de demostración.
 //
-// Conserva: las cuentas admin (con su contraseña actual), las afianzadoras y
-// los catálogos. Borra: clientes, proyectos, fianzas, líneas, documentos,
-// papelería y notificaciones.
+// Conserva: las cuentas de Fortex (admin y vendedores, con su contraseña
+// actual), las afianzadoras y los catálogos. Borra: empresas fiadas con sus
+// usuarios, proyectos, fianzas, líneas, documentos, papelería y avisos.
 export async function reiniciarVacio() {
   await initSchema();
 
   // Sin cuenta admin nadie podría volver a entrar: mejor no tocar nada.
   const { total: admins } = await db
-    .prepare(`SELECT COUNT(*)::int AS total FROM clients WHERE role = 'admin'`)
+    .prepare(`SELECT COUNT(*)::int AS total FROM users WHERE role = 'admin'`)
     .get();
   if (admins === 0) {
     throw new Error(
@@ -189,18 +201,18 @@ export async function reiniciarVacio() {
   const contar = async (tabla) =>
     (await db.prepare(`SELECT COUNT(*)::int AS total FROM ${tabla}`).get()).total;
   const borrados = {
-    clientes: (await contar('clients')) - admins,
+    clientes: await contar('clients'),
     proyectos: await contar('proyectos'),
     fianzas: await contar('fianzas'),
   };
 
-  // El orden importa: fianzas.proyecto_id es ON DELETE RESTRICT, así que si
-  // se dejara al CASCADE de clients podría intentar borrar el proyecto antes
-  // que sus fianzas y abortar. Se van de abajo hacia arriba.
-  const deClientesNoAdmin = `(SELECT id FROM clients WHERE role <> 'admin')`;
-  await db.query(`DELETE FROM fianzas   WHERE client_id IN ${deClientesNoAdmin}`);
-  await db.query(`DELETE FROM proyectos WHERE client_id IN ${deClientesNoAdmin}`);
-  await db.query(`DELETE FROM clients   WHERE role <> 'admin'`); // el resto cae por CASCADE
+  // El orden importa: fianzas.proyecto_id es ON DELETE RESTRICT, así que si se
+  // dejara al CASCADE de clients podría intentar borrar el proyecto antes que
+  // sus fianzas y abortar. Se van de abajo hacia arriba. Los usuarios del fiado
+  // caen por CASCADE al irse su empresa; los de Fortex no cuelgan de ninguna.
+  await db.query('DELETE FROM fianzas');
+  await db.query('DELETE FROM proyectos');
+  await db.query('DELETE FROM clients');
 
   return { ...borrados, admins_conservados: admins };
 }
@@ -219,10 +231,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log('🌱 Sembrando datos en Postgres...');
   seed()
     .then((r) => {
-      console.log(`✅ Listo (${r.clientes} usuarios, ${r.afianzadoras} afianzadoras).`);
-      console.log('   Admin   -> admin@fortex.mx / admin123');
-      console.log('   Cliente -> cliente@demo.mx (RFC CBA120315ABC) / demo123');
-      console.log('   Cliente -> norte@demo.mx / demo123');
+      console.log(`✅ Listo (${r.clientes} empresas, ${r.usuarios} usuarios, ${r.afianzadoras} afianzadoras).`);
+      console.log('   Admin    -> admin@fortex.mx / admin123');
+      console.log('   Vendedor -> mariana@fortex.mx / vendedor123');
+      console.log('   Cliente  -> cliente@demo.mx (RFC CBA120315ABC) / demo123');
+      console.log('   Cliente  -> contabilidad@bajio.mx / demo123  (misma empresa)');
+      console.log('   Cliente  -> norte@demo.mx / demo123');
       process.exit(0);
     })
     .catch((e) => {

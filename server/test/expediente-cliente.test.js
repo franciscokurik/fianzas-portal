@@ -25,13 +25,17 @@ let base;
 let admin;
 let cliente;
 
+// Empresa A = 1, Empresa B = 2. Usuarios: admin = 1, Ana (de A) = 2, Beto (de B) = 3.
+const EMPRESA_A = 1;
+
 before(async () => {
   await inicializar(memoria);
   await memoria.exec(`
-    INSERT INTO clients (razon_social, email, password_hash, role) VALUES
-      ('Fortex', 'admin@fortex.mx', 'x', 'admin'),
-      ('Empresa A', 'a@demo.mx', 'x', 'client'),
-      ('Empresa B', 'b@demo.mx', 'x', 'client');
+    INSERT INTO clients (razon_social) VALUES ('Empresa A'), ('Empresa B');
+    INSERT INTO users (client_id, nombre, email, password_hash, role) VALUES
+      (NULL, 'Home Office', 'admin@fortex.mx', 'x', 'admin'),
+      (1, 'Ana',  'a@demo.mx', 'x', 'client'),
+      (2, 'Beto', 'b@demo.mx', 'x', 'client');
 
     INSERT INTO document_types (nombre, slug, periodicidad_meses, alerta_dias, orden) VALUES
       ('Constancia de Situación Fiscal', 'csf', NULL, 30, 1),
@@ -41,12 +45,12 @@ before(async () => {
     INSERT INTO client_documents
       (client_id, document_type_id, file_path, original_name, mime_type, size_bytes,
        uploaded_at, vencimiento, subido_por)
-      VALUES (2, 2, 'https://res.cloudinary.com/fortex/raw/upload/v1/ef.pdf',
+      VALUES (1, 2, 'https://res.cloudinary.com/fortex/raw/upload/v1/ef.pdf',
               'ef-2025.pdf', 'application/pdf', 250000, '2026-01-15', '2027-01-15', 'fortex');
   `);
 
-  admin = signToken({ id: 1, role: 'admin', razon_social: 'Fortex' });
-  cliente = signToken({ id: 2, role: 'client', razon_social: 'Empresa A' });
+  admin = signToken({ id: 1, role: 'admin', nombre: 'Home Office' });
+  cliente = signToken({ id: 2, role: 'client', client_id: EMPRESA_A, nombre: 'Ana' });
 
   servidor = createServer(app);
   await new Promise((r) => servidor.listen(0, r));
@@ -69,7 +73,7 @@ const conArchivo = (nombre = 'ef.pdf') => {
 };
 
 test('el detalle del admin dice quién cargó cada documento', async () => {
-  const { documentos } = await (await pedir('/api/admin/clientes/2/detalle', admin)).json();
+  const { documentos } = await (await pedir(`/api/admin/clientes/${EMPRESA_A}/detalle`, admin)).json();
 
   const ef = documentos.find((d) => d.nombre === 'Estados financieros anuales');
   assert.equal(ef.subido_por, 'fortex');
@@ -78,6 +82,15 @@ test('el detalle del admin dice quién cargó cada documento', async () => {
   // El que nadie subió sigue apareciendo como pendiente, no desaparece.
   const csf = documentos.find((d) => d.nombre === 'Constancia de Situación Fiscal');
   assert.equal(csf.uploaded_at, null);
+});
+
+test('el detalle trae las personas que pueden entrar por ese fiado', async () => {
+  const { usuarios } = await (await pedir(`/api/admin/clientes/${EMPRESA_A}/detalle`, admin)).json();
+
+  assert.equal(usuarios.length, 1);
+  assert.equal(usuarios[0].email, 'a@demo.mx');
+  // El hash de la contraseña no sale de la base ni para el admin.
+  assert.equal(usuarios[0].password_hash, undefined);
 });
 
 test('el fiado ve que Fortex ya cargó su documento', async () => {
@@ -98,7 +111,7 @@ test('cargar para un cliente que no existe no llega ni a subir el archivo', asyn
 });
 
 test('cargar un tipo de documento que no está en el catálogo se rechaza', async () => {
-  const res = await pedir('/api/admin/clientes/2/documentos/999', admin, {
+  const res = await pedir(`/api/admin/clientes/${EMPRESA_A}/documentos/999`, admin, {
     method: 'POST', body: conArchivo(),
   });
 
@@ -107,7 +120,7 @@ test('cargar un tipo de documento que no está en el catálogo se rechaza', asyn
 });
 
 test('sin archivo no se guarda un registro vacío', async () => {
-  const res = await pedir('/api/admin/clientes/2/documentos/1', admin, {
+  const res = await pedir(`/api/admin/clientes/${EMPRESA_A}/documentos/1`, admin, {
     method: 'POST', body: new FormData(),
   });
 
@@ -116,7 +129,7 @@ test('sin archivo no se guarda un registro vacío', async () => {
 });
 
 test('un fiado no puede cargar documentos en el expediente de otro', async () => {
-  const res = await pedir('/api/admin/clientes/3/documentos/1', cliente, {
+  const res = await pedir('/api/admin/clientes/2/documentos/1', cliente, {
     method: 'POST', body: conArchivo(),
   });
 
@@ -124,16 +137,16 @@ test('un fiado no puede cargar documentos en el expediente de otro', async () =>
 });
 
 test('el admin quita un documento del expediente', async () => {
-  const res = await pedir('/api/admin/clientes/2/documentos/2', admin, { method: 'DELETE' });
+  const res = await pedir(`/api/admin/clientes/${EMPRESA_A}/documentos/2`, admin, { method: 'DELETE' });
   assert.equal(res.status, 200);
 
   const { total } = await memoria
-    .prepare('SELECT COUNT(*)::int AS total FROM client_documents WHERE client_id = 2')
-    .get();
+    .prepare('SELECT COUNT(*)::int AS total FROM client_documents WHERE client_id = ?')
+    .get(EMPRESA_A);
   assert.equal(total, 0);
 
   // Volver a borrarlo avisa en vez de responder que sí sin hacer nada.
-  const otra = await pedir('/api/admin/clientes/2/documentos/2', admin, { method: 'DELETE' });
+  const otra = await pedir(`/api/admin/clientes/${EMPRESA_A}/documentos/2`, admin, { method: 'DELETE' });
   assert.equal(otra.status, 404);
 });
 
@@ -164,7 +177,7 @@ test('no se quita del catálogo un documento que algún fiado ya cargó', async 
   await memoria.exec(`
     INSERT INTO client_documents
       (client_id, document_type_id, file_path, original_name, uploaded_at, subido_por)
-      VALUES (3, 1, 'https://res.cloudinary.com/fortex/raw/upload/v1/csf.pdf',
+      VALUES (2, 1, 'https://res.cloudinary.com/fortex/raw/upload/v1/csf.pdf',
               'csf.pdf', '2026-02-01', 'cliente');
   `);
 

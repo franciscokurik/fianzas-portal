@@ -97,15 +97,46 @@ npm run dev                 # http://localhost:5173
 
 Abre http://localhost:5173
 
+## Usuarios, clientes y carteras
+
+Una **empresa fiada** (`clients`) y una **cuenta de acceso** (`users`) son cosas
+distintas:
+
+- Una constructora puede tener varias personas dadas de alta (dirección,
+  contabilidad, residencia de obra). Cada una entra con su correo y **todas ven
+  lo mismo** de su empresa.
+- Las cuentas de Fortex no pertenecen a ninguna empresa. Hay dos roles:
+  - **admin** (Home Office): todo. Da de alta clientes y usuarios, autoriza
+    líneas de crédito y edita los catálogos que ven todos los fiados.
+  - **vendedor**: solo los clientes que tenga asignados (`clients.vendedor_id`).
+    Puede capturar proyectos, fianzas y documentos de su cartera; **no** puede
+    crear clientes, mover líneas ni tocar catálogos.
+- El correo de las cuentas de Fortex tiene que ser del dominio de la casa
+  (`DOMINIO_INTERNO`, por omisión `fortex.mx`). A los fiados **no** se les exige
+  dominio a propósito: muchos contratistas usan Gmail o el correo personal del
+  dueño.
+
+Se entra con el **correo**. El RFC se sigue aceptando como atajo, pero solo
+cuando la empresa tiene una sola cuenta activa: con varias personas, el RFC ya
+no identifica a nadie en particular.
+
+> El permiso se comprueba en el servidor en **cada** ruta (`lib/cartera.js`), no
+> escondiendo botones: ocultar algo en la pantalla no impide cambiar el id en la
+> URL, y por estas rutas pasan estados financieros de terceros.
+
 ## Cuentas de prueba
 
-| Rol     | Usuario             | Contraseña |
-|---------|---------------------|------------|
-| Cliente | cliente@demo.mx     | demo123    |
-| Cliente | norte@demo.mx       | demo123    |
-| Admin   | admin@fortex.mx     | admin123   |
+| Rol      | Usuario                 | Contraseña   |
+|----------|-------------------------|--------------|
+| Cliente  | cliente@demo.mx         | demo123      |
+| Cliente  | contabilidad@bajio.mx   | demo123      |
+| Cliente  | norte@demo.mx           | demo123      |
+| Vendedor | mariana@fortex.mx       | vendedor123  |
+| Admin    | admin@fortex.mx         | admin123     |
 
-(El cliente también puede entrar con su RFC, ej. `CBA120315ABC`.)
+Las dos primeras son de la **misma** empresa: sirven para ver que varias
+personas comparten la información del fiado. `norte@demo.mx` entra también con
+su RFC (`IAN980720XYZ`) porque su empresa tiene una sola cuenta.
 
 ## Alertas por email
 

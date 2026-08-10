@@ -3,7 +3,7 @@ import {
   LogOut, Building2, Plus, Save, Download,
   Users, FileText, Files, CheckCircle2, UserPlus, AlertTriangle,
   CreditCard, Trash2, Briefcase, Pencil, X, Bell, ListChecks, Check,
-  Paperclip, Upload, FileDown,
+  Paperclip, Upload, FileDown, Mail, KeyRound, UserCog,
 } from 'lucide-react';
 import { api, getToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
@@ -29,8 +29,13 @@ const ESTATUS_PROYECTO = [
 const etiquetaEstatus = (v) => (ESTATUS_PROYECTO.find(([k]) => k === v) || [, v])[1];
 
 export default function Admin() {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
+  // El vendedor usa esta misma pantalla, acotada a su cartera. Ocultar lo que no
+  // le toca es para que no estorbe: quien manda es el servidor en cada ruta.
+  const esAdmin = user?.role === 'admin';
+
   const [clientes, setClientes] = useState([]);
+  const [internos, setInternos] = useState([]);
   const [afianzadoras, setAfianzadoras] = useState([]);
   const [tipos, setTipos] = useState([]);
   const [tiposDoc, setTiposDoc] = useState({ proyecto: [], fianza: [] });
@@ -53,11 +58,17 @@ export default function Admin() {
   const cargarRecordatorios = () => cargar('/admin/recordatorios', (d) => setRecordatorios(d.recordatorios));
   const cargarTiposDoc = () => cargar('/admin/tipos-documento', (d) => setTiposDoc(d.tipos));
   const cargarDocsRequeridos = () => cargar('/admin/documentos-requeridos', (d) => setDocsRequeridos(d.tipos));
+  const cargarInternos = () => cargar('/admin/usuarios/internos', (d) => setInternos(d.usuarios));
 
   useEffect(() => {
     cargarClientes(); cargarAfianzadoras(); cargarTipos();
-    cargarRecordatorios(); cargarTiposDoc(); cargarDocsRequeridos();
-  }, []);
+    cargarRecordatorios(); cargarTiposDoc();
+    // Los catálogos globales y el personal solo los administra Home Office; al
+    // vendedor esas rutas le responden 403 y ensuciarían la pantalla de errores.
+    if (esAdmin) { cargarDocsRequeridos(); cargarInternos(); }
+  }, [esAdmin]);
+
+  const vendedores = internos.filter((u) => u.role === 'vendedor' && u.activo);
 
   function abrirDetalle(id) {
     setSel(id);
@@ -77,7 +88,7 @@ export default function Admin() {
           <div className="portal-brand">
             <span className="portal-brand-name text-sm font-semibold text-slate-700">
               <strong>FORTEX</strong>
-              <small>ADMINISTRACIÓN DE FIANZAS</small>
+              <small>{esAdmin ? 'ADMINISTRACIÓN DE FIANZAS' : 'CARTERA DE CLIENTES'}</small>
             </span>
           </div>
           <div className="portal-topbar-actions">
@@ -91,11 +102,16 @@ export default function Admin() {
       <main className="portal-main max-w-[1400px] mx-auto px-6 py-6">
         <div className="portal-page-heading flex flex-wrap items-end justify-between gap-3 mb-5">
           <div>
-            <p className="portal-eyebrow">Centro de operaciones</p>
+            <p className="portal-eyebrow">{esAdmin ? 'Centro de operaciones' : 'Mi cartera'}</p>
             <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-indigo-600" /> Panel de administración
+              <Building2 className="w-5 h-5 text-indigo-600" />
+              {esAdmin ? 'Panel de administración' : 'Mis clientes'}
             </h1>
-            <p className="text-sm text-slate-500 mt-0.5">Home Office · gestión de clientes, proyectos y pólizas</p>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {esAdmin
+                ? 'Home Office · gestión de clientes, proyectos y pólizas'
+                : `${user?.nombre || 'Vendedor'} · proyectos, pólizas y documentos de tus clientes`}
+            </p>
           </div>
         </div>
 
@@ -136,21 +152,35 @@ export default function Admin() {
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
           {/* Columna izquierda */}
           <div className="space-y-4">
-            <NuevoCliente onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }} />
-            <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
-            <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
-            {/* Cambiar el catálogo mueve la lista de pendientes de todos los
-                fiados, así que también se refresca el detalle abierto. */}
-            <CatalogoDocumentos
-              tipos={docsRequeridos}
-              onChange={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
-              flash={flash}
-            />
+            {esAdmin && (
+              <>
+                <NuevoCliente
+                  vendedores={vendedores}
+                  onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }}
+                />
+                <PersonalFortex
+                  internos={internos}
+                  onChange={() => { cargarInternos(); cargarClientes(); recargarDetalle(); }}
+                  flash={flash}
+                />
+                <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
+                <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
+                {/* Cambiar el catálogo mueve la lista de pendientes de todos los
+                    fiados, así que también se refresca el detalle abierto. */}
+                <CatalogoDocumentos
+                  tipos={docsRequeridos}
+                  onChange={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
+                  flash={flash}
+                />
+              </>
+            )}
 
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
               <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
                 <Users className="w-4 h-4 text-slate-500" />
-                <h3 className="text-sm font-semibold text-slate-700">Clientes ({clientes.length})</h3>
+                <h3 className="text-sm font-semibold text-slate-700">
+                  {esAdmin ? 'Clientes' : 'Mi cartera'} ({clientes.length})
+                </h3>
               </div>
               <div className="divide-y divide-slate-100 max-h-[65vh] overflow-y-auto">
                 {clientes.map((c) => {
@@ -173,6 +203,16 @@ export default function Admin() {
                           <span className="text-amber-600"> · {c.recordatorios_pendientes} recordatorio(s)</span>
                         )}
                       </p>
+                      {/* A quién le toca. Sin esto, Home Office no distingue lo
+                          asignado de lo que nadie está atendiendo. */}
+                      {esAdmin && (
+                        <p className="text-[11px] mt-0.5">
+                          {c.vendedor_nombre
+                            ? <span className="text-slate-400">{c.vendedor_nombre}</span>
+                            : <span className="text-amber-600">Sin vendedor asignado</span>}
+                          <span className="text-slate-300"> · {c.total_usuarios} usuario(s)</span>
+                        </p>
+                      )}
                     </button>
                   );
                 })}
@@ -184,11 +224,17 @@ export default function Admin() {
           <div className="xl:col-span-3 space-y-4">
             {!detalle ? (
               <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-400">
-                Selecciona un cliente para ver y gestionar su información.
+                {clientes.length
+                  ? 'Selecciona un cliente para ver y gestionar su información.'
+                  : esAdmin
+                    ? 'Todavía no hay clientes. Da de alta el primero desde "Agregar cliente".'
+                    : 'Aún no tienes clientes asignados. Home Office te los asigna.'}
               </div>
             ) : (
               <DetalleCliente
                 detalle={detalle}
+                esAdmin={esAdmin}
+                vendedores={vendedores}
                 afianzadoras={afianzadoras}
                 tipos={tipos}
                 tiposDoc={tiposDoc}
@@ -486,8 +532,11 @@ function CatalogoDocumentos({ tipos, onChange, flash }) {
    Detalle del cliente
    -------------------------------------------------------------------------- */
 
-function DetalleCliente({ detalle, afianzadoras, tipos, tiposDoc, onChange, flash }) {
-  const { cliente, lineas = [], proyectos = [], fianzas = [], documentos, papeleria } = detalle;
+function DetalleCliente({ detalle, esAdmin, vendedores, afianzadoras, tipos, tiposDoc, onChange, flash }) {
+  const {
+    cliente, usuarios = [], lineas = [], proyectos = [],
+    fianzas = [], documentos, papeleria,
+  } = detalle;
   const lineaTotal = lineas.reduce((s, l) => s + (l.linea_credito || 0), 0);
   const disponibleTotal = lineas.reduce((s, l) => s + (l.disponible || 0), 0);
   const afianzadoTotal = fianzas
@@ -516,8 +565,27 @@ function DetalleCliente({ detalle, afianzadoras, tipos, tiposDoc, onChange, flas
     <>
       {/* Encabezado del cliente */}
       <div className="bg-white border border-slate-200 rounded-lg p-4">
-        <h2 className="text-base font-semibold text-slate-800">{cliente.razon_social}</h2>
-        <p className="text-xs text-slate-500 mt-0.5">{cliente.rfc} · {cliente.email}</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-800">{cliente.razon_social}</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {cliente.rfc || 'Sin RFC'}
+              {cliente.telefono && ` · ${cliente.telefono}`}
+            </p>
+          </div>
+          {/* Mover de cartera es de Home Office: un vendedor no se asigna
+              clientes a sí mismo. Él solo ve a quién le toca. */}
+          {esAdmin ? (
+            <AsignarVendedor
+              clienteId={cliente.id}
+              vendedorId={cliente.vendedor_id}
+              vendedores={vendedores}
+              onChange={() => { onChange(); flash('Cartera actualizada'); }}
+            />
+          ) : (
+            <span className="text-[11px] text-slate-400">En tu cartera</span>
+          )}
+        </div>
         <div className="mt-2 flex flex-wrap gap-2">
           <Pill label="Línea total" valor={mxn(lineaTotal)} />
           <Pill label="Disponible" valor={mxn(disponibleTotal)} tono="emerald" />
@@ -530,11 +598,21 @@ function DetalleCliente({ detalle, afianzadoras, tipos, tiposDoc, onChange, flas
         </div>
       </div>
 
+      {/* Quiénes pueden entrar por este fiado */}
+      <UsuariosCliente
+        clienteId={cliente.id}
+        usuarios={usuarios}
+        esAdmin={esAdmin}
+        onChange={onChange}
+        flash={flash}
+      />
+
       {/* Líneas de crédito por afianzadora */}
       <LineasCredito
         clienteId={cliente.id}
         lineas={lineas}
         afianzadoras={afianzadoras}
+        puedeEditar={esAdmin}
         onChange={() => { onChange(); flash('Línea de crédito actualizada'); }}
       />
 
@@ -716,6 +794,310 @@ function ExpedienteCliente({ clienteId, documentos = [], descargar, onChange, fl
   );
 }
 
+/* --------------------------------------------------------------------------
+   Cartera: a qué vendedor le toca este fiado
+   -------------------------------------------------------------------------- */
+
+function AsignarVendedor({ clienteId, vendedorId, vendedores = [], onChange }) {
+  const [error, setError] = useState('');
+
+  async function asignar(valor) {
+    setError('');
+    try {
+      await api.put(`/admin/clientes/${clienteId}/vendedor`, { vendedor_id: valor || null });
+      onChange();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <div className="text-right">
+      <label className="text-[10px] uppercase tracking-wider text-slate-400 block mb-1">Vendedor</label>
+      <select
+        value={vendedorId || ''}
+        onChange={(e) => asignar(e.target.value)}
+        className={`${inputCls} w-auto min-w-44`}
+      >
+        <option value="">Sin asignar (Home Office)</option>
+        {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+      </select>
+      {error && <p className="text-[11px] text-rose-600 mt-1">{error}</p>}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Usuarios del fiado: varias personas de la misma empresa, cada una con su
+   correo, viendo todas lo mismo.
+   -------------------------------------------------------------------------- */
+
+function UsuariosCliente({ clienteId, usuarios = [], esAdmin, onChange, flash }) {
+  const vacio = { nombre: '', email: '', password: '' };
+  const [nuevo, setNuevo] = useState(vacio);
+  const [abierto, setAbierto] = useState(false);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const activos = usuarios.filter((u) => u.activo).length;
+
+  async function agregar() {
+    setError('');
+    if (!nuevo.nombre.trim() || !nuevo.email.trim() || !nuevo.password) {
+      return setError('Nombre, correo y contraseña son obligatorios.');
+    }
+    setBusy(true);
+    try {
+      await api.post('/admin/usuarios', { ...nuevo, role: 'client', client_id: clienteId });
+      setNuevo(vacio);
+      setAbierto(false);
+      onChange();
+      flash('Usuario agregado');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cambiarActivo(u) {
+    setError('');
+    try {
+      await api.put(`/admin/usuarios/${u.id}`, { activo: !u.activo });
+      onChange();
+      flash(u.activo ? 'Acceso desactivado' : 'Acceso reactivado');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function reponerClave(u) {
+    const clave = prompt(`Nueva contraseña para ${u.email} (mínimo 8 caracteres):`);
+    if (!clave) return;
+    setError('');
+    try {
+      await api.put(`/admin/usuarios/${u.id}`, { password: clave });
+      flash('Contraseña actualizada. Pásasela a la persona.');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <Users className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Accesos del cliente ({activos})</h3>
+        {esAdmin && (
+          <button onClick={() => setAbierto((a) => !a)} className={`${btnSecondary} ml-auto`}>
+            <UserPlus className={`h-3.5 w-3.5 transition-transform ${abierto ? 'rotate-45' : ''}`} /> Agregar persona
+          </button>
+        )}
+      </div>
+
+      {abierto && (
+        <div className="border-b border-slate-200 bg-indigo-50/30 px-4 py-3">
+          <p className="text-[11px] text-slate-500 mb-2">
+            Cada persona entra con su propio correo y ve las mismas fianzas y documentos de la empresa.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">Nombre o puesto<Req /></label>
+              <input
+                value={nuevo.nombre}
+                onChange={(e) => setNuevo({ ...nuevo, nombre: e.target.value })}
+                placeholder="Contabilidad, Residencia de obra…"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">Correo<Req /></label>
+              <input
+                type="email"
+                value={nuevo.email}
+                onChange={(e) => setNuevo({ ...nuevo, email: e.target.value })}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">Contraseña inicial<Req /></label>
+              <input
+                type="text"
+                value={nuevo.password}
+                onChange={(e) => setNuevo({ ...nuevo, password: e.target.value })}
+                placeholder="mínimo 8 caracteres"
+                className={inputCls}
+              />
+            </div>
+          </div>
+          <button onClick={agregar} disabled={busy} className={`${btnPrimary} mt-3`}>
+            <Save className="w-4 h-4" /> {busy ? 'Guardando…' : 'Crear acceso'}
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+
+      <div className="divide-y divide-slate-100">
+        {usuarios.map((u) => (
+          <div key={u.id} className="flex flex-wrap items-center gap-3 px-4 py-2 text-sm hover:bg-slate-50/40">
+            <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+            <div className="flex-1 min-w-[200px]">
+              <p className={`font-medium ${u.activo ? 'text-slate-700' : 'text-slate-400 line-through'}`}>
+                {u.nombre}
+              </p>
+              <p className="text-[11px] text-slate-500">{u.email}</p>
+            </div>
+            <EstadoBadge estado={u.activo ? 'al_dia' : 'vencido'} />
+            {esAdmin && (
+              <>
+                <button onClick={() => reponerClave(u)} className={btnSecondary} title="Reponer contraseña">
+                  <KeyRound className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => cambiarActivo(u)}
+                  className={`${btnSecondary} ${u.activo ? 'hover:border-rose-300 hover:text-rose-600' : ''}`}
+                >
+                  {u.activo ? 'Desactivar' : 'Reactivar'}
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+        {!usuarios.length && (
+          <div className="px-4 py-6 text-center text-xs text-slate-400">
+            Este cliente no tiene con qué entrar al portal.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Personal de Fortex: vendedores y administradores
+   -------------------------------------------------------------------------- */
+
+function PersonalFortex({ internos = [], onChange, flash }) {
+  const vacio = { nombre: '', email: '', password: '', role: 'vendedor' };
+  const [open, setOpen] = useState(false);
+  const [nuevo, setNuevo] = useState(vacio);
+  const [error, setError] = useState('');
+
+  async function agregar() {
+    setError('');
+    if (!nuevo.nombre.trim() || !nuevo.email.trim() || !nuevo.password) {
+      return setError('Nombre, correo y contraseña son obligatorios.');
+    }
+    try {
+      await api.post('/admin/usuarios', nuevo);
+      setNuevo(vacio);
+      onChange();
+      flash('Cuenta de Fortex creada');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function cambiarActivo(u) {
+    setError('');
+    try {
+      await api.put(`/admin/usuarios/${u.id}`, { activo: !u.activo });
+      onChange();
+      flash(u.activo ? 'Cuenta desactivada' : 'Cuenta reactivada');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
+      >
+        <UserCog className="w-4 h-4 text-indigo-600" /> Personal de Fortex ({internos.length})
+        <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
+      </button>
+      {open && (
+        <div className="p-4 space-y-2.5">
+          <p className="text-[11px] text-slate-400">
+            Los vendedores solo ven los clientes que les asignes. El correo debe ser del dominio de Fortex.
+          </p>
+
+          <div className="space-y-2 border border-slate-100 rounded-lg p-2.5 bg-slate-50/60">
+            <input
+              value={nuevo.nombre}
+              onChange={(e) => setNuevo({ ...nuevo, nombre: e.target.value })}
+              placeholder="Nombre de la persona"
+              className={inputCls}
+            />
+            <input
+              type="email"
+              value={nuevo.email}
+              onChange={(e) => setNuevo({ ...nuevo, email: e.target.value })}
+              placeholder="nombre@fortex.mx"
+              className={inputCls}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={nuevo.password}
+                onChange={(e) => setNuevo({ ...nuevo, password: e.target.value })}
+                placeholder="Contraseña (8+)"
+                className={inputCls}
+              />
+              <select
+                value={nuevo.role}
+                onChange={(e) => setNuevo({ ...nuevo, role: e.target.value })}
+                className={inputCls}
+              >
+                <option value="vendedor">Vendedor</option>
+                <option value="admin">Administrador</option>
+              </select>
+            </div>
+            <button onClick={agregar} className={`${btnPrimary} w-full justify-center`}>
+              <UserPlus className="w-4 h-4" /> Crear cuenta
+            </button>
+          </div>
+
+          <div className="divide-y divide-slate-100 border border-slate-100 rounded-lg max-h-64 overflow-y-auto">
+            {internos.map((u) => (
+              <div key={u.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                <div className="flex-1 min-w-0">
+                  <p className={`truncate ${u.activo ? 'text-slate-700' : 'text-slate-400 line-through'}`}>
+                    {u.nombre}
+                  </p>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    {u.email} · {u.role === 'admin' ? 'administrador' : `${u.clientes_asignados} cliente(s)`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => cambiarActivo(u)}
+                  className="text-slate-300 hover:text-rose-600 shrink-0"
+                  title={u.activo ? 'Desactivar' : 'Reactivar'}
+                >
+                  {u.activo ? <X className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {error && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Pill({ label, valor, tono = 'slate', ayuda }) {
   const tonos = {
     slate: 'bg-slate-50 text-slate-600',
@@ -736,7 +1118,7 @@ function Req() { return <span className="text-rose-500">*</span>; }
    Líneas de crédito
    -------------------------------------------------------------------------- */
 
-function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
+function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange }) {
   const [edits, setEdits] = useState({}); // afianzadora_id -> valor en edición
   const [nuevaAfi, setNuevaAfi] = useState('');
   const [nuevoMonto, setNuevoMonto] = useState(0); // en centavos
@@ -768,6 +1150,11 @@ function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
         <CreditCard className="w-4 h-4 text-slate-500" />
         <h3 className="text-sm font-semibold text-slate-700">Líneas de crédito por afianzadora</h3>
+        {/* La línea es el riesgo que asume la casa: la fija Home Office. El
+            vendedor la consulta para saber cuánto le queda disponible. */}
+        {!puedeEditar && (
+          <span className="text-[11px] text-slate-400 ml-auto">Las autoriza Home Office</span>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -787,26 +1174,32 @@ function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
               return (
                 <tr key={l.afianzadora_id} className="hover:bg-slate-50/40">
                   <td className="px-3 py-1.5 text-slate-700 font-medium">{l.afianzadora_nombre}</td>
-                  <td className="px-3 py-1.5 text-right">
-                    <InputPesos
-                      valor={editing}
-                      onChange={(centavos) => setEdits((s) => ({ ...s, [l.afianzadora_id]: centavos }))}
-                      className="w-32 px-2 py-1 text-right rounded-md border border-slate-200 bg-white tabular-nums focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
-                    />
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {puedeEditar ? (
+                      <InputPesos
+                        valor={editing}
+                        onChange={(centavos) => setEdits((s) => ({ ...s, [l.afianzadora_id]: centavos }))}
+                        className="w-32 px-2 py-1 text-right rounded-md border border-slate-200 bg-white tabular-nums focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
+                      />
+                    ) : (
+                      <span className="text-slate-700">{mxn(l.linea_credito)}</span>
+                    )}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxn(l.comprometido)}</td>
                   <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${negativo ? 'text-rose-600' : 'text-emerald-700'}`}>
                     {mxn(l.disponible)}
                   </td>
                   <td className="px-3 py-1.5">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => guardar(l.afianzadora_id, editing)} className={btnSecondary} title="Guardar">
-                        <Save className="h-3.5 w-3.5" />
-                      </button>
-                      <button onClick={() => eliminar(l.afianzadora_id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Quitar línea">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                    {puedeEditar && (
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={() => guardar(l.afianzadora_id, editing)} className={btnSecondary} title="Guardar">
+                          <Save className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => eliminar(l.afianzadora_id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Quitar línea">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               );
@@ -817,7 +1210,7 @@ function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
           </tbody>
         </table>
       </div>
-      {disponiblesParaAgregar.length > 0 && (
+      {puedeEditar && disponiblesParaAgregar.length > 0 && (
         <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
           <p className="text-xs font-medium text-slate-600 mb-2">Asignar línea a otra afianzadora</p>
           <div className="flex flex-col md:flex-row gap-2">
@@ -1546,9 +1939,12 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
    Altas simples
    -------------------------------------------------------------------------- */
 
-function NuevoCliente({ onDone }) {
+function NuevoCliente({ vendedores = [], onDone }) {
   const [open, setOpen] = useState(false);
-  const empty = { razon_social: '', email: '', password: '', rfc: '', telefono: '' };
+  const empty = {
+    razon_social: '', rfc: '', telefono: '', vendedor_id: '',
+    nombre_contacto: '', email: '', password: '',
+  };
   const [f, setF] = useState(empty);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1558,6 +1954,10 @@ function NuevoCliente({ onDone }) {
     setError('');
     if (!f.razon_social || !f.email || !f.password) {
       setError('Razón social, correo y contraseña son obligatorios.');
+      return;
+    }
+    if (f.password.length < 8) {
+      setError('La contraseña inicial debe tener al menos 8 caracteres.');
       return;
     }
     setBusy(true);
@@ -1588,14 +1988,6 @@ function NuevoCliente({ onDone }) {
             <label className="text-[11px] text-slate-500 mb-1 block">Razón social<Req /></label>
             <input value={f.razon_social} onChange={set('razon_social')} className={inputCls} />
           </div>
-          <div>
-            <label className="text-[11px] text-slate-500 mb-1 block">Correo electrónico<Req /></label>
-            <input type="email" value={f.email} onChange={set('email')} className={inputCls} />
-          </div>
-          <div>
-            <label className="text-[11px] text-slate-500 mb-1 block">Contraseña<Req /></label>
-            <input type="text" value={f.password} onChange={set('password')} placeholder="Contraseña inicial" className={inputCls} />
-          </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-[11px] text-slate-500 mb-1 block">RFC</label>
@@ -1606,8 +1998,38 @@ function NuevoCliente({ onDone }) {
               <input value={f.telefono} onChange={set('telefono')} className={inputCls} />
             </div>
           </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Vendedor que lo atiende</label>
+            <select value={f.vendedor_id} onChange={set('vendedor_id')} className={inputCls}>
+              <option value="">Sin asignar (Home Office)</option>
+              {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+            </select>
+          </div>
+
+          <div className="border-t border-slate-100 pt-2.5 space-y-2.5">
+            <p className="text-[11px] font-medium text-slate-600">Primer acceso al portal</p>
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">Nombre o puesto del contacto</label>
+              <input
+                value={f.nombre_contacto}
+                onChange={set('nombre_contacto')}
+                placeholder="Dirección, Contabilidad…"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">Correo electrónico<Req /></label>
+              <input type="email" value={f.email} onChange={set('email')} className={inputCls} />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">Contraseña inicial<Req /></label>
+              <input type="text" value={f.password} onChange={set('password')} placeholder="mínimo 8 caracteres" className={inputCls} />
+            </div>
+          </div>
+
           <p className="text-[11px] text-slate-400">
-            Las líneas de crédito se asignan por afianzadora desde el detalle del cliente.
+            Después puedes agregarle más personas desde el detalle del cliente. Las líneas
+            de crédito se asignan por afianzadora, también desde ahí.
           </p>
           {error && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-700 flex items-start gap-2">

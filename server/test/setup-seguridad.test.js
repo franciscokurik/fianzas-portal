@@ -34,11 +34,16 @@ beforeEach(async () => {
   await memoria.query(`DELETE FROM fianzas`);
   await memoria.query(`DELETE FROM proyectos`);
   await memoria.query(`DELETE FROM clients`);
+  await memoria.query(`DELETE FROM users`);
   await memoria.exec(`
-    INSERT INTO clients (razon_social, email, password_hash, role)
-      VALUES ('Fortex', 'admin@fortex.mx', 'hash', 'admin');
-    INSERT INTO clients (razon_social, email, password_hash)
-      VALUES ('GASPE', 'isidro@fortex.mx', 'x');
+    INSERT INTO clients (razon_social) VALUES ('GASPE'), ('Otra SA');
+    -- El id se busca en vez de escribirlo: este bloque corre antes de cada
+    -- prueba y la secuencia no se reinicia, así que en la segunda vuelta las
+    -- empresas ya no son la 1 y la 2.
+    INSERT INTO users (client_id, nombre, email, password_hash, role) VALUES
+      (NULL, 'Home Office', 'admin@fortex.mx', 'hash', 'admin'),
+      ((SELECT id FROM clients WHERE razon_social = 'GASPE'),
+       'Isidro', 'isidro@gaspe.mx', 'x', 'client');
   `);
 });
 
@@ -99,7 +104,12 @@ test('con SETUP_KEY correcta y confirmación, sí borra y conserva al admin', as
 
   assert.equal(res.status, 200);
   const cuerpo = await res.json();
-  assert.equal(cuerpo.borrado.clientes, 1);
+  assert.equal(cuerpo.borrado.clientes, 2);
   assert.equal(cuerpo.borrado.admins_conservados, 1);
-  assert.equal(await cuantosClientes(), 1, 'debe quedar solo el admin');
+  // Las empresas se van todas: el admin ya no vive en esa tabla, es un usuario.
+  assert.equal(await cuantosClientes(), 0);
+
+  const { total } = await memoria
+    .prepare(`SELECT COUNT(*)::int AS total FROM users WHERE role = 'admin'`).get();
+  assert.equal(total, 1, 'la cuenta de administrador debe seguir ahí');
 });

@@ -123,6 +123,11 @@ export default function Login() {
                 <code>demo123</code>
               </div>
               <div>
+                <span>Vendedor</span>
+                <strong>mariana@fortex.mx</strong>
+                <code>vendedor123</code>
+              </div>
+              <div>
                 <span>Administrador</span>
                 <strong>admin@fortex.mx</strong>
                 <code>admin123</code>
