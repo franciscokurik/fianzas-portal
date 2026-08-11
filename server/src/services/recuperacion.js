@@ -30,6 +30,19 @@ function fallo(mensaje, status = 400) {
   return e;
 }
 
+// Tumba los enlaces pendientes de una persona.
+//
+// Se llama al pedir uno nuevo, al usarlo, y también cuando le cambian la
+// contraseña por otra vía (desde el panel): un enlace emitido antes seguiría
+// sirviendo para volver a cambiarla, que es justo lo que se quiere cortar
+// cuando se repone una cuenta por sospecha de que alguien más entró.
+export async function invalidarEnlaces(userId) {
+  await db.prepare(
+    `UPDATE password_resets SET usado_el = ${AHORA}
+     WHERE user_id = ? AND usado_el IS NULL`
+  ).run(Number(userId));
+}
+
 // Genera el enlace y lo manda. Devuelve el token SOLO para que las pruebas
 // puedan seguir el flujo; las rutas no lo exponen jamás.
 export async function pedirRecuperacion(email, urlDelPortal) {
@@ -42,10 +55,7 @@ export async function pedirRecuperacion(email, urlDelPortal) {
   if (!usuario) return null;
 
   // Los enlaces anteriores dejan de servir: solo el último vale.
-  await db.prepare(
-    `UPDATE password_resets SET usado_el = ${AHORA}
-     WHERE user_id = ? AND usado_el IS NULL`
-  ).run(usuario.id);
+  await invalidarEnlaces(usuario.id);
 
   const token = crypto.randomBytes(32).toString('base64url');
   await db.prepare(
@@ -100,10 +110,7 @@ export async function restablecer(token, password) {
     .run(bcrypt.hashSync(password, 10), fila.user_id);
 
   // Se marca usado ESTE y se tumban los demás de la misma persona.
-  await db.prepare(
-    `UPDATE password_resets SET usado_el = ${AHORA}
-     WHERE user_id = ? AND usado_el IS NULL`
-  ).run(fila.user_id);
+  await invalidarEnlaces(fila.user_id);
 
   return { user_id: fila.user_id };
 }

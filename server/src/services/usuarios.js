@@ -4,6 +4,7 @@
 // rol 'client') y los de Fortex (client_id nulo, rol 'vendedor' o 'admin').
 import bcrypt from 'bcryptjs';
 import db from '../db.js';
+import { invalidarEnlaces } from './recuperacion.js';
 
 // Los correos de Fortex tienen que ser del dominio de Fortex. A los fiados NO
 // se les exige dominio a propósito: muchos contratistas usan Gmail o el correo
@@ -114,6 +115,12 @@ export async function actualizarUsuario(id, { nombre, email, password, activo })
   } catch {
     throw fallo('Ya hay otra cuenta con ese correo', 409);
   }
+
+  // Al reponer la contraseña por aquí, los enlaces de recuperación que ya se
+  // hubieran mandado dejan de servir. Si no, reponer la cuenta de alguien por
+  // sospecha de que le entraron no serviría de nada: un enlace viejo todavía
+  // en su correo alcanzaría para volver a cambiarla.
+  if (password !== undefined) await invalidarEnlaces(id);
 }
 
 // Baja lógica: el usuario deja de entrar pero no se borra. Si se borrara, se

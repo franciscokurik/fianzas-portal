@@ -141,3 +141,20 @@ test('en la base no se guarda el token, solo su huella', async () => {
   assert.ok(!filas.some((f) => f.token_hash === token),
     'quien lea la tabla (o un respaldo) no debe poder entrar con lo que ve');
 });
+
+test('reponer la contraseña desde el panel mata los enlaces pendientes', async () => {
+  // El caso que importa: se repone la cuenta de alguien porque se sospecha que
+  // le entraron. Si un enlace emitido antes siguiera sirviendo, quien lo tenga
+  // vuelve a cambiar la contraseña y la reposición no sirvió de nada.
+  const token = await tokenPara('director@demo.mx');
+
+  const { actualizarUsuario } = await import('../src/services/usuarios.js');
+  await actualizarUsuario(1, { password: 'la-que-puso-el-admin' });
+
+  const res = await post('/api/auth/restablecer', { token, password: 'con-el-enlace-viejo' });
+  assert.equal(res.status, 400, 'el enlace anterior debió quedar muerto');
+
+  // Y la contraseña que puso el admin es la que vale.
+  assert.equal((await entrar('director@demo.mx', 'la-que-puso-el-admin')).status, 200);
+  assert.equal((await entrar('director@demo.mx', 'con-el-enlace-viejo')).status, 401);
+});
