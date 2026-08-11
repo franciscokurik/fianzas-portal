@@ -113,12 +113,14 @@ test('el detalle del admin trae los documentos repartidos por entidad', async ()
 
 test('no se admite un tipo de documento que no exista para esa entidad', async () => {
   const admin = signToken({ id: 99, role: 'admin', razon_social: 'Fortex' });
-  const datos = new FormData();
-  datos.append('archivo', new Blob(['%PDF-1.4'], { type: 'application/pdf' }), 'x.pdf');
-  datos.append('tipo_doc', 'caratula'); // 'caratula' es de fianza, no de proyecto
-
+  // El archivo ya estaría en Cloudinary; aquí solo viaja dónde quedó. El tipo se
+  // revisa ANTES de tocarlo, así que no hace falta que el archivo exista: si se
+  // revisara después, cada rechazo dejaría basura en la cuenta.
   const res = await fetch(`${base}/api/admin/proyectos/1/documentos`, {
-    method: 'POST', headers: { Authorization: `Bearer ${admin}` }, body: datos,
+    method: 'POST',
+    headers: { Authorization: `Bearer ${admin}`, 'Content-Type': 'application/json' },
+    // 'caratula' es de fianza, no de proyecto.
+    body: JSON.stringify({ public_id: 'x', nombre: 'x.pdf', tipo_doc: 'caratula' }),
   });
 
   assert.equal(res.status, 400);

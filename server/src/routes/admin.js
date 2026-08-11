@@ -4,9 +4,12 @@ import { requireAuth, requireAdmin, requireInterno, requireOperador } from '../a
 import { estadoFianza, daysUntil, todayISO } from '../lib/dates.js';
 import { centavos } from '../lib/dinero.js';
 import { slugify } from '../lib/slug.js';
-import { upload, subirArchivo, borrarArchivo } from '../lib/upload.js';
+import { borrarArchivo } from '../lib/upload.js';
+import { adoptarArchivo } from '../services/subidas.js';
 import { TIPOS_DOC, esTipoValido, agruparPorEntidad, deEntidad } from '../lib/documentos.js';
-import { guardarDocumentoCliente, borrarDocumentoCliente } from '../services/documentos-cliente.js';
+import {
+  guardarDocumentoCliente, borrarDocumentoCliente, exigirTipoDocumento,
+} from '../services/documentos-cliente.js';
 import { exigirCliente, exigirEntidad, filtroCartera } from '../lib/permisos.js';
 import {
   crearUsuario, actualizarUsuario, desactivarUsuario, eliminarUsuario, DOMINIO_INTERNO,
@@ -488,34 +491,39 @@ async function duenoDe(entidadTipo, entidadId) {
   return fila ? fila.client_id : null;
 }
 
-// POST /api/admin/:entidadTipo/:id/documentos  (multipart: archivo, tipo_doc)
+// POST /api/admin/:entidadTipo/:id/documentos  { public_id, nombre, tipo_doc }
 //   entidadTipo: 'proyectos' | 'fianzas'
-router.post('/:entidadTipo(proyectos|fianzas)/:id/documentos',
-  upload.single('archivo'),
-  async (req, res) => {
-    const entidadTipo = req.params.entidadTipo === 'proyectos' ? 'proyecto' : 'fianza';
-    const entidadId = Number(req.params.id);
-    const tipoDoc = req.body?.tipo_doc || 'otro';
+//
+// El archivo ya está en Cloudinary (lo subió el navegador con la firma de
+// /api/subidas/firma); aquí solo llega dónde quedó.
+router.post('/:entidadTipo(proyectos|fianzas)/:id/documentos', async (req, res) => {
+  const entidadTipo = req.params.entidadTipo === 'proyectos' ? 'proyecto' : 'fianza';
+  const entidadId = Number(req.params.id);
+  const tipoDoc = req.body?.tipo_doc || 'otro';
 
-    if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
-    if (!esTipoValido(entidadTipo, tipoDoc)) {
-      return res.status(400).json({ error: `Tipo de documento no válido para ${entidadTipo}` });
-    }
+  if (!esTipoValido(entidadTipo, tipoDoc)) {
+    return res.status(400).json({ error: `Tipo de documento no válido para ${entidadTipo}` });
+  }
 
-    const clientId = await duenoDe(entidadTipo, entidadId);
-    if (!clientId) return res.status(404).json({ error: `No existe ese ${entidadTipo}` });
-    await exigirCliente(req.user, clientId);
+  const clientId = await duenoDe(entidadTipo, entidadId);
+  if (!clientId) return res.status(404).json({ error: `No existe ese ${entidadTipo}` });
+  await exigirCliente(req.user, clientId);
 
-    const url = await subirArchivo(req.file, clientId);
-    const row = await db.prepare(
-      `INSERT INTO documentos
-         (client_id, entidad_tipo, entidad_id, tipo_doc, url, nombre_archivo, mime_type, size_bytes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
-    ).get(clientId, entidadTipo, entidadId, tipoDoc, url,
-          req.file.originalname, req.file.mimetype, req.file.size);
-
-    res.json({ ok: true, id: row.id, url });
+  const archivo = await adoptarArchivo({
+    publicId: req.body?.public_id,
+    clientId,
+    nombre: req.body?.nombre,
   });
+
+  const row = await db.prepare(
+    `INSERT INTO documentos
+       (client_id, entidad_tipo, entidad_id, tipo_doc, url, nombre_archivo, size_bytes)
+     VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`
+  ).get(clientId, entidadTipo, entidadId, tipoDoc, archivo.url,
+        archivo.nombre, archivo.bytes);
+
+  res.json({ ok: true, id: row.id, url: archivo.url });
+});
 
 // DELETE /api/admin/documentos/:id -> quita el registro y el archivo del blob
 router.delete('/documentos/:id', async (req, res) => {
@@ -536,15 +544,24 @@ router.delete('/documentos/:id', async (req, res) => {
 // nombre y queda registrado que fue Fortex quien lo hizo.
 
 // POST /api/admin/clientes/:id/documentos/:typeId  (multipart: archivo)
-router.post('/clientes/:id/documentos/:typeId', upload.single('archivo'), async (req, res) => {
+router.post('/clientes/:id/documentos/:typeId', async (req, res) => {
   const clientId = Number(req.params.id);
-  // Comprueba de una vez que el cliente existe y que quien sube lo alcanza.
+  // Primero lo barato: que el cliente exista, que quien sube lo alcance y que el
+  // tipo de documento sea real. Rechazar DESPUÉS de adoptar el archivo dejaría
+  // basura en Cloudinary, porque el navegador ya lo subió.
   await exigirCliente(req.user, clientId);
+  await exigirTipoDocumento(Number(req.params.typeId));
+
+  const archivo = await adoptarArchivo({
+    publicId: req.body?.public_id,
+    clientId,
+    nombre: req.body?.nombre,
+  });
 
   const { vencimiento, tipo } = await guardarDocumentoCliente({
     clientId,
     typeId: Number(req.params.typeId),
-    file: req.file,
+    archivo,
     subidoPor: 'fortex',
   });
   res.json({ ok: true, vencimiento, tipo });

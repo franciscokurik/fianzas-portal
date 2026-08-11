@@ -5,7 +5,7 @@ import {
   CreditCard, Trash2, Briefcase, Pencil, X, Bell, ListChecks, Check,
   Paperclip, Upload, FileDown, Mail, KeyRound, UserCog,
 } from 'lucide-react';
-import { api, getToken } from '../api.js';
+import { api, getToken, subirACloudinary } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import {
   mxn, mxnCents, fmtDate, yaVencio, EstadoBadge, InputPesos,
@@ -747,9 +747,9 @@ function ExpedienteCliente({ clienteId, documentos = [], descargar, onChange, fl
 
     setBusyId(typeId);
     try {
-      const datos = new FormData();
-      datos.append('archivo', archivo);
-      await api.upload(`/admin/clientes/${clienteId}/documentos/${typeId}`, datos);
+      // Va directo a Cloudinary; a la API solo se le dice dónde quedó.
+      const subido = await subirACloudinary(clienteId, archivo);
+      await api.post(`/admin/clientes/${clienteId}/documentos/${typeId}`, subido);
       onChange();
       flash('Documento cargado al expediente');
     } catch (e) {
@@ -1500,6 +1500,7 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, tipo
             Documentos del proyecto <span className="text-slate-400">· contrato, convenios, acta de entrega</span>
           </p>
           <DocsEntidad
+            clienteId={clienteId}
             entidad="proyectos"
             id={p.id}
             documentos={docs}
@@ -1526,6 +1527,7 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, tipo
       {abierto && (
         <div className="bg-slate-50/40 border-t border-slate-100">
           <TablaFianzas
+            clienteId={clienteId}
             fianzas={p.fianzas || []}
             proyectos={proyectos}
             afianzadoras={afianzadoras}
@@ -1560,7 +1562,7 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, tipo
   );
 }
 
-function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, tiposDoc, onChange, flash }) {
+function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tiposDoc, onChange, flash }) {
   const [editandoId, setEditandoId] = useState(null);
   const [docsAbiertos, setDocsAbiertos] = useState(null);
 
@@ -1677,6 +1679,7 @@ function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, tiposDoc, onCha
                     Documentos de la fianza <span className="font-mono text-slate-400">{f.numero_poliza}</span>
                   </p>
                   <DocsEntidad
+                    clienteId={clienteId}
                     entidad="fianzas"
                     id={f.id}
                     documentos={f.documentos || []}
@@ -1698,7 +1701,7 @@ function TablaFianzas({ fianzas, proyectos, afianzadoras, tipos, tiposDoc, onCha
    Documentos colgados de un proyecto (contrato) o de una fianza (carátula)
    -------------------------------------------------------------------------- */
 
-function DocsEntidad({ entidad, id, documentos = [], tipos = [], onChange, flash }) {
+function DocsEntidad({ clienteId, entidad, id, documentos = [], tipos = [], onChange, flash }) {
   const [tipoDoc, setTipoDoc] = useState(tipos[0]?.clave || 'otro');
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState('');
@@ -1711,10 +1714,9 @@ function DocsEntidad({ entidad, id, documentos = [], tipos = [], onChange, flash
 
     setSubiendo(true);
     try {
-      const datos = new FormData();
-      datos.append('archivo', archivo);
-      datos.append('tipo_doc', tipoDoc);
-      await api.upload(`/admin/${entidad}/${id}/documentos`, datos);
+      // Va directo a Cloudinary; a la API solo se le dice dónde quedó.
+      const subido = await subirACloudinary(clienteId, archivo);
+      await api.post(`/admin/${entidad}/${id}/documentos`, { ...subido, tipo_doc: tipoDoc });
       onChange();
       flash('Documento subido');
     } catch (e) {

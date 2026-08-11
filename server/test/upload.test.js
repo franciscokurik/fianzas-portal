@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  referenciaCloudinary, subirArchivo, limpiarUrlCloudinary, traducirErrorCloudinary,
+  referenciaCloudinary, firmarSubida, limpiarUrlCloudinary, traducirErrorCloudinary,
 } from '../src/lib/upload.js';
 
 test('un 403 de Cloudinary dice que hay que revisar el rol de la API key', () => {
@@ -86,8 +86,7 @@ test('una credencial que no se puede rescatar dice qué corregir', async () => {
   // Con los marcadores sin sustituir, que es el otro error de dedo típico.
   process.env.CLOUDINARY_URL = 'cloudinary//<api_key>:<api_secret>@djowdzxpg';
 
-  const archivo = { originalname: 'x.pdf', mimetype: 'application/pdf', size: 8, buffer: Buffer.from('%PDF-1.4') };
-  await assert.rejects(() => subirArchivo(archivo, 1), /mal formada/);
+  await assert.rejects(() => firmarSubida({ clientId: 1, nombreArchivo: 'x.pdf' }), /mal formada/);
 
   delete process.env.CLOUDINARY_URL;
 });
@@ -97,20 +96,17 @@ test('sin credenciales, subir dice exactamente qué falta configurar', async () 
     delete process.env[v];
   }
 
-  const archivo = { originalname: 'x.pdf', mimetype: 'application/pdf', size: 8, buffer: Buffer.from('%PDF-1.4') };
-
   // El error del SDK ("Must supply api_key") no dice qué variable falta ni
   // dónde ponerla, y este es el primer tropiezo al desplegar.
-  await assert.rejects(() => subirArchivo(archivo, 1), /CLOUDINARY_URL/);
+  await assert.rejects(() => firmarSubida({ clientId: 1, nombreArchivo: 'x.pdf' }), /CLOUDINARY_URL/);
 });
 
-test('el tope declarado no promete más de lo que la plataforma deja pasar', async () => {
-  // Vercel corta el cuerpo de la petición en ~4.5 MB ANTES de que corra la
-  // función (medido contra producción: 4 MB pasa, 4.5 MB devuelve
-  // FUNCTION_PAYLOAD_TOO_LARGE). Si aquí se declara más, el usuario se topa con
-  // el error crudo de la plataforma —que no es JSON— en vez del nuestro.
-  const { MAXIMO_MB } = await import('../src/lib/upload.js');
-  assert.ok(MAXIMO_MB <= 4, `MAXIMO_MB es ${MAXIMO_MB}: por encima de 4 la plataforma corta primero`);
+test('todos los archivos de un fiado caen bajo su propio prefijo', async () => {
+  // Es lo que impide que una firma pedida para un cliente sirva para colgarle el
+  // archivo a otro: al registrarlo se comprueba que el public_id empiece así.
+  const { prefijoDe } = await import('../src/lib/upload.js');
+  assert.ok(prefijoDe(7).endsWith('/client_7/'), prefijoDe(7));
+  assert.notEqual(prefijoDe(7), prefijoDe(70), 'el prefijo de un cliente no debe ser prefijo de otro');
 });
 
 test('el cliente y el servidor declaran el mismo tope', async () => {

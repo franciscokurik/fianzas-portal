@@ -6,7 +6,7 @@
 // cuando llegan por correo a Fortex. Las dos deben dejar el registro
 // exactamente igual, cambiando solo quién aparece como quien lo subió.
 import db from '../db.js';
-import { subirArchivo, borrarArchivo } from '../lib/upload.js';
+import { borrarArchivo } from '../lib/upload.js';
 import { addMonths, todayISO } from '../lib/dates.js';
 
 // El manejador de errores de app.js respeta err.status, así que los fallos de
@@ -17,11 +17,23 @@ function fallo(mensaje, status) {
   return e;
 }
 
-// Guarda el documento vigente de un tipo, reemplazando el anterior si había.
-export async function guardarDocumentoCliente({ clientId, typeId, file, subidoPor = 'cliente' }) {
+// Comprobación barata, para hacerla ANTES de adoptar el archivo.
+//
+// Con la subida directa el archivo ya está en Cloudinary cuando llega esta
+// petición, así que cada rechazo posterior deja basura en la cuenta. Todo lo que
+// se pueda validar sin tocar el archivo, se valida primero.
+export async function exigirTipoDocumento(typeId) {
   const tipo = await db.prepare('SELECT * FROM document_types WHERE id = ?').get(typeId);
   if (!tipo) throw fallo('Tipo de documento no válido', 404);
-  if (!file) throw fallo('No se recibió archivo', 400);
+  return tipo;
+}
+
+// Guarda el documento vigente de un tipo, reemplazando el anterior si había.
+// El archivo ya está en Cloudinary: aquí llega { url, nombre, bytes }, verificado
+// contra Cloudinary por services/subidas.js.
+export async function guardarDocumentoCliente({ clientId, typeId, archivo, subidoPor = 'cliente' }) {
+  const tipo = await exigirTipoDocumento(typeId);
+  if (!archivo?.url) throw fallo('No se recibió archivo', 400);
 
   const hoy = todayISO();
   const vencimiento = tipo.periodicidad_meses ? addMonths(hoy, tipo.periodicidad_meses) : null;
@@ -30,30 +42,26 @@ export async function guardarDocumentoCliente({ clientId, typeId, file, subidoPo
     .prepare('SELECT file_path FROM client_documents WHERE client_id = ? AND document_type_id = ?')
     .get(clientId, typeId);
 
-  // Primero se sube el nuevo y hasta el final se borra el viejo: si la subida
-  // falla a medias, el fiado se queda con el documento que ya tenía en vez de
-  // quedarse sin ninguno.
-  const url = await subirArchivo(file, clientId);
-
   await db.prepare(
     `INSERT INTO client_documents
-       (client_id, document_type_id, file_path, original_name, mime_type,
+       (client_id, document_type_id, file_path, original_name,
         size_bytes, uploaded_at, vencimiento, subido_por)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(client_id, document_type_id) DO UPDATE SET
        file_path = excluded.file_path,
        original_name = excluded.original_name,
-       mime_type = excluded.mime_type,
        size_bytes = excluded.size_bytes,
        uploaded_at = excluded.uploaded_at,
        vencimiento = excluded.vencimiento,
        subido_por = excluded.subido_por`
   ).run(
-    clientId, typeId, url, file.originalname, file.mimetype,
-    file.size, hoy, vencimiento, subidoPor,
+    clientId, typeId, archivo.url, archivo.nombre,
+    archivo.bytes, hoy, vencimiento, subidoPor,
   );
 
-  if (previo?.file_path && previo.file_path !== url) await borrarArchivo(previo.file_path);
+  // El anterior se borra hasta el final: si algo falla antes, el fiado se queda
+  // con el documento que ya tenía en vez de quedarse sin ninguno.
+  if (previo?.file_path && previo.file_path !== archivo.url) await borrarArchivo(previo.file_path);
 
   return { vencimiento, tipo: tipo.nombre };
 }

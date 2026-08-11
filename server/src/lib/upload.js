@@ -1,17 +1,21 @@
-// Subida de archivos a Cloudinary. En serverless no hay disco persistente, así
-// que el archivo viaja en memoria (buffer de multer) y de ahí se manda al CDN;
-// en la base solo se guarda la URL.
+// Archivos en Cloudinary.
 //
-// Los archivos que se subieron antes de esta migración siguen en Vercel Blob:
-// su URL sigue en la base y se sirve igual, así que aquí solo hay que saber
-// borrarlos cuando se reemplazan.
-// Los SDK de almacenamiento se cargan con import() PEREZOSO, no arriba. En
-// serverless, un import de arriba que falle (versión de Node incompatible,
-// paquete que no quedó en el bundle, interop CommonJS) tumba TODA la función:
-// deja de responder hasta /api/health y el portal completo se cae por algo que
-// solo hacía falta para subir un archivo. Así, en el peor caso, lo único que
-// falla es subir o borrar, y con un mensaje que dice qué pasó.
-import multer from 'multer';
+// El archivo NO pasa por este servidor: el navegador lo sube directo a
+// Cloudinary con una firma que se da aquí, y después nos avisa qué subió. Es la
+// única forma de admitir 10 MB, porque Vercel corta el cuerpo de cada petición
+// en ~4.5 MB antes de que corra la función.
+//
+// Lo que sí vive aquí: firmar la subida, comprobar contra Cloudinary que el
+// archivo existe de verdad (no se le cree al navegador) y borrarlo.
+//
+// Los archivos que quedaron en Vercel Blob de antes siguen sirviéndose igual;
+// solo hay que saber borrarlos cuando se reemplazan.
+//
+// Los SDK se cargan con import() PEREZOSO, no arriba. En serverless, un import
+// de arriba que falle (versión de Node incompatible, paquete que no quedó en el
+// bundle, interop CommonJS) tumba TODA la función: deja de responder hasta
+// /api/health y el portal completo se cae por algo que solo hacía falta para
+// subir un archivo.
 
 // Qué se acepta. La carátula de una fianza siempre es PDF o imagen, pero los
 // estados financieros suelen llegar en Excel y las actas en Word: si no se
@@ -28,26 +32,16 @@ const PERMITIDOS = new Map([
 
 export const FORMATOS_PERMITIDOS = [...new Set(PERMITIDOS.values())];
 
-// 4 MB, y no los 10 que aguanta Cloudinary, porque el tope que manda es otro:
-// Vercel corta el cuerpo de cada petición en ~4.5 MB y lo hace ANTES de que
-// corra esta función (medido contra producción: 4 MB pasa, 4.5 MB devuelve
-// FUNCTION_PAYLOAD_TOO_LARGE). Configurar 10 aquí no subía el techo, solo hacía
-// que el usuario se topara con el error crudo de la plataforma —que no es JSON y
-// llega a la pantalla como un "Error en la solicitud" sin explicación— en vez
-// del nuestro, que sí dice qué pasó.
+// 10 MB: el tope del plan gratuito de Cloudinary para archivos raw.
 //
-// Para archivos más grandes hay que subir del navegador directo a Cloudinary con
-// una firma, saltándose la función. Mientras eso no exista, este es el techo.
-export const MAXIMO_MB = 4;
+// Se puede prometer ese número porque los archivos NO pasan por aquí. Vercel
+// corta el cuerpo de cada petición en ~4.5 MB, así que el navegador sube directo
+// a Cloudinary con una firma que da este servidor, y luego solo nos avisa qué
+// subió. Si algún día se vuelve a subir a través de la función, el techo baja a
+// 4 MB de golpe y sin avisar.
+export const MAXIMO_MB = 10;
 
-export const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAXIMO_MB * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (PERMITIDOS.has(file.mimetype)) return cb(null, true);
-    cb(new Error(`Tipo de archivo no permitido. Usa ${FORMATOS_PERMITIDOS.join(', ')}.`));
-  },
-});
+export const esFormatoPermitido = (mimetype) => PERMITIDOS.has(mimetype);
 
 // Carpeta raíz dentro de Cloudinary. Configurable para que un entorno de
 // pruebas no revuelva sus archivos con los de producción.
@@ -132,26 +126,54 @@ export function traducirErrorCloudinary(err) {
   return porCodigo[codigo] ? new Error(porCodigo[codigo]) : err;
 }
 
-// Sube el buffer de multer y devuelve la URL https del archivo.
-export async function subirArchivo(file, clientId) {
+// Todos los archivos de un fiado viven bajo su propio prefijo. Es lo que se
+// comprueba al registrar un documento: una firma pedida para un cliente no
+// sirve para colgarle el archivo a otro.
+export const prefijoDe = (clientId) => `${carpeta()}/client_${Number(clientId)}/`;
+
+// Firma para que el NAVEGADOR suba directo a Cloudinary.
+//
+// Se firma un public_id concreto, no un permiso general: con esta firma solo se
+// puede escribir en esa ruta exacta, bajo la carpeta del cliente. El api_secret
+// nunca sale de aquí; lo que viaja al navegador es la firma, que además caduca
+// (Cloudinary rechaza timestamps de más de una hora).
+//
+// resource_type 'raw' y no 'auto': el portal solo guarda y devuelve archivos, no
+// los transforma. Con 'auto' un PDF entra como imagen y su entrega depende del
+// interruptor "PDF and ZIP files delivery", que Cloudinary trae APAGADO en las
+// cuentas nuevas — el archivo sube bien y al abrirlo da 401.
+export async function firmarSubida({ clientId, nombreArchivo }) {
   const cloudinary = await configurar();
+  const { cloud_name, api_key, api_secret } = cloudinary.config();
 
-  // resource_type 'raw' y no 'auto': el portal solo guarda y devuelve archivos,
-  // no los transforma. Con 'auto' un PDF entra como imagen y su entrega depende
-  // del interruptor "PDF and ZIP files delivery", que Cloudinary trae APAGADO
-  // en las cuentas nuevas — el archivo se sube bien y al abrirlo da 401.
-  const nombre = file.originalname.replace(/[^\w.\-]+/g, '_');
-  const publicId = `${carpeta()}/client_${clientId}/${Date.now()}_${nombre}`;
+  const limpio = String(nombreArchivo || 'archivo').replace(/[^\w.\-]+/g, '_');
+  const publicId = `${prefijoDe(clientId)}${Date.now()}_${limpio}`;
+  const timestamp = Math.round(Date.now() / 1000);
 
-  const subida = await new Promise((resolve, reject) => {
-    const flujo = cloudinary.uploader.upload_stream(
-      { public_id: publicId, resource_type: 'raw', overwrite: false },
-      (err, resultado) => (err ? reject(traducirErrorCloudinary(err)) : resolve(resultado)),
-    );
-    flujo.end(file.buffer);
-  });
+  return {
+    subir_a: `https://api.cloudinary.com/v1_1/${cloud_name}/raw/upload`,
+    public_id: publicId,
+    campos: {
+      api_key,
+      timestamp,
+      public_id: publicId,
+      signature: cloudinary.utils.api_sign_request({ public_id: publicId, timestamp }, api_secret),
+    },
+  };
+}
 
-  return subida.secure_url;
+// Le pregunta a Cloudinary qué hay en ese public_id. No se le cree al navegador
+// ni la URL ni el tamaño: el navegador solo dice DÓNDE subió, y el peso y la URL
+// definitiva los da el propio Cloudinary. Devuelve null si no existe.
+export async function consultarArchivo(publicId) {
+  const cloudinary = await configurar();
+  try {
+    const r = await cloudinary.api.resource(String(publicId), { resource_type: 'raw' });
+    return { url: r.secure_url, bytes: r.bytes, public_id: r.public_id };
+  } catch (e) {
+    if (e?.http_code === 404 || e?.error?.http_code === 404) return null;
+    throw traducirErrorCloudinary(e);
+  }
 }
 
 // Saca de la URL lo que hace falta para borrar el archivo en Cloudinary. Se

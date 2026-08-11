@@ -9,14 +9,12 @@ export function setToken(t) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
-async function request(method, path, body, isForm = false) {
+async function request(method, path, body) {
   const headers = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   let payload;
-  if (isForm) {
-    payload = body; // FormData
-  } else if (body !== undefined) {
+  if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
     payload = JSON.stringify(body);
   }
@@ -31,6 +29,35 @@ async function request(method, path, body, isForm = false) {
   return data;
 }
 
+// Sube un archivo SIN pasarlo por nuestra API: Vercel corta el cuerpo de cada
+// petición en ~4.5 MB, así que un escaneo de 8 MB no llegaría nunca. En vez de
+// eso se pide una firma, se sube directo a Cloudinary, y a la API solo se le
+// avisa dónde quedó — que es lo que devuelve esta función para que quien la llama
+// lo registre donde corresponda.
+export async function subirACloudinary(clientId, file) {
+  const firma = await request('POST', '/subidas/firma', {
+    client_id: clientId,
+    nombre: file.name,
+    mime: file.type,
+  });
+
+  const datos = new FormData();
+  datos.append('file', file);
+  for (const [campo, valor] of Object.entries(firma.campos)) datos.append(campo, valor);
+
+  const res = await fetch(firma.subir_a, { method: 'POST', body: datos });
+  if (!res.ok) {
+    // Cloudinary contesta con su propio formato de error; se rescata su mensaje
+    // porque suele decir exactamente qué pasó (formato, tamaño, firma vencida).
+    let detalle = '';
+    try { detalle = (await res.json())?.error?.message || ''; } catch { /* noop */ }
+    throw new Error(detalle || `No se pudo subir el archivo (${res.status}).`);
+  }
+
+  const subido = await res.json();
+  return { public_id: subido.public_id, nombre: file.name };
+}
+
 export const api = {
   get: (p) => request('GET', p),
   post: (p, b) => request('POST', p, b),
@@ -38,5 +65,4 @@ export const api = {
   // El DELETE acepta cuerpo: las bajas que no se pueden deshacer piden una
   // confirmación explícita (ver el borrado de clientes).
   del: (p, b) => request('DELETE', p, b),
-  upload: (p, formData) => request('POST', p, formData, true),
 };

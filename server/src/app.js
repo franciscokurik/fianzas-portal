@@ -2,7 +2,6 @@
 // La usan tanto el arranque local (index.js) como la función serverless de Vercel (api/index.js).
 import express from 'express';
 import cors from 'cors';
-import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,10 +10,10 @@ import authRoutes from './routes/auth.js';
 import dashboardRoutes from './routes/dashboard.js';
 import fianzasRoutes from './routes/fianzas.js';
 import documentosRoutes from './routes/documentos.js';
+import subidasRoutes from './routes/subidas.js';
 import adminRoutes from './routes/admin.js';
 import { correrAlertas } from './services/alerts.js';
 import { probarCorreo } from './services/email.js';
-import { MAXIMO_MB } from './lib/upload.js';
 import { seed, seedIfEmpty, reiniciarVacio } from './seed.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -110,6 +109,7 @@ app.use('/api/auth', capturarAsync(authRoutes));
 app.use('/api/dashboard', capturarAsync(dashboardRoutes));
 app.use('/api/fianzas', capturarAsync(fianzasRoutes));
 app.use('/api/documentos', capturarAsync(documentosRoutes));
+app.use('/api/subidas', capturarAsync(subidasRoutes));
 app.use('/api/admin', capturarAsync(adminRoutes));
 
 // Dispara alertas manualmente (útil en MVP/demo)
@@ -128,13 +128,9 @@ if (fs.existsSync(CLIENT_DIST)) {
   });
 }
 
-// Manejo de errores (incluye límite de tamaño de multer)
+// Manejo de errores
 app.use((err, req, res, next) => {
   if (!err) return next();
-
-  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: `El archivo supera ${MAXIMO_MB} MB` });
-  }
 
   // Los errores de Postgres traen un `code` de 5 caracteres. Casi siempre
   // significan que falta correr /api/setup tras un despliegue, así que se

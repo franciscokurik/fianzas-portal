@@ -66,11 +66,9 @@ const pedir = (ruta, token, opciones = {}) =>
     redirect: 'manual',
   });
 
-const conArchivo = (nombre = 'ef.pdf') => {
-  const datos = new FormData();
-  datos.append('archivo', new Blob(['%PDF-1.4'], { type: 'application/pdf' }), nombre);
-  return datos;
-};
+// El archivo ya estaría en Cloudinary: a la API solo se le dice dónde quedó.
+const conArchivo = (nombre = 'ef.pdf') => JSON.stringify({ public_id: 'no-existe', nombre });
+const json = { 'Content-Type': 'application/json' };
 
 test('el detalle del admin dice quién cargó cada documento', async () => {
   const { documentos } = await (await pedir(`/api/admin/clientes/${EMPRESA_A}/detalle`, admin)).json();
@@ -103,7 +101,7 @@ test('el fiado ve que Fortex ya cargó su documento', async () => {
 
 test('cargar para un cliente que no existe no llega ni a subir el archivo', async () => {
   const res = await pedir('/api/admin/clientes/999/documentos/1', admin, {
-    method: 'POST', body: conArchivo(),
+    method: 'POST', headers: json, body: conArchivo(),
   });
 
   assert.equal(res.status, 404);
@@ -112,7 +110,7 @@ test('cargar para un cliente que no existe no llega ni a subir el archivo', asyn
 
 test('cargar un tipo de documento que no está en el catálogo se rechaza', async () => {
   const res = await pedir(`/api/admin/clientes/${EMPRESA_A}/documentos/999`, admin, {
-    method: 'POST', body: conArchivo(),
+    method: 'POST', headers: json, body: conArchivo(),
   });
 
   assert.equal(res.status, 404);
@@ -121,16 +119,16 @@ test('cargar un tipo de documento que no está en el catálogo se rechaza', asyn
 
 test('sin archivo no se guarda un registro vacío', async () => {
   const res = await pedir(`/api/admin/clientes/${EMPRESA_A}/documentos/1`, admin, {
-    method: 'POST', body: new FormData(),
+    method: 'POST', headers: json, body: JSON.stringify({}),
   });
 
   assert.equal(res.status, 400);
-  assert.match((await res.json()).error, /No se recibió archivo/);
+  assert.match((await res.json()).error, /Falta indicar el archivo/);
 });
 
 test('un fiado no puede cargar documentos en el expediente de otro', async () => {
   const res = await pedir('/api/admin/clientes/2/documentos/1', cliente, {
-    method: 'POST', body: conArchivo(),
+    method: 'POST', headers: json, body: conArchivo(),
   });
 
   assert.equal(res.status, 403);

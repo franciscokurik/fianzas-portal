@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Upload, Loader2, AlertTriangle, FileText, Files, FileDown } from 'lucide-react';
-import { api, getToken } from '../api.js';
+import { api, getToken, subirACloudinary } from '../api.js';
+import { useAuth } from '../auth.jsx';
 import { fmtDate, EstadoBadge, ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, revisarArchivo } from '../lib.jsx';
 
 const btnCls =
@@ -54,6 +55,7 @@ function SectionCard({ icon: Icon, title, children }) {
 }
 
 export default function Documentos() {
+  const { user } = useAuth();
   const [docs, setDocs] = useState([]);
   const [papeleria, setPapeleria] = useState([]);
   const [busyId, setBusyId] = useState(null);
@@ -72,9 +74,9 @@ export default function Documentos() {
 
     setBusyId(key);
     try {
-      const fd = new FormData();
-      fd.append('archivo', file);
-      await api.upload(url, fd);
+      // Va directo a Cloudinary; a la API solo se le dice dónde quedó.
+      const archivo = await subirACloudinary(user.client_id, file);
+      await api.post(url, archivo);
       cargar();
     } catch (e) { setError(e.message); }
     finally { setBusyId(null); }

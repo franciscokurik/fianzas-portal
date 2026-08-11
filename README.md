@@ -30,6 +30,27 @@ Si prefieres no armar la URL, funcionan igual las tres variables sueltas
 (`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`); con
 `CLOUDINARY_URL` definida, esas tres se ignoran.
 
+### El archivo no pasa por el servidor
+
+Vercel corta el cuerpo de cada petición en ~4.5 MB, así que subir a través de la
+API topaba ahí (medido: 4 MB pasa, 4.5 MB devuelve FUNCTION_PAYLOAD_TOO_LARGE).
+Por eso el navegador sube **directo a Cloudinary**:
+
+1. Pide una firma a  con el cliente al que pertenece el
+   archivo. Ahí se comprueba que quien pide pueda subir para ese fiado, y se
+   firma un  **concreto** bajo la carpeta de ese cliente. El
+    nunca sale del servidor.
+2. El navegador sube el archivo a Cloudinary con esa firma.
+3. Le avisa a la API **dónde quedó**, y la API le pregunta a Cloudinary la URL y
+   el peso: no se le cree al navegador ni una cosa ni la otra.
+
+De ahí salen dos reglas que conviene no aflojar: el  tiene que caer
+bajo el prefijo del cliente correcto (si no, una firma legítima serviría para
+colgarle el archivo a otro fiado), y todo lo que se pueda validar sin tocar el
+archivo se valida ANTES —el tipo de documento, los permisos—, porque cuando la
+petición llega el archivo ya está en Cloudinary y cada rechazo tardío deja
+basura en la cuenta.
+
 ### Compartir la cuenta con otro proyecto
 
 Se puede, y no hace falta configurar nada extra: todo lo del portal cae bajo
@@ -48,10 +69,7 @@ Detalles que conviene saber:
   transforma imágenes, y con `image` los PDF dependen del interruptor
   *PDF and ZIP files delivery*, que Cloudinary trae apagado en las cuentas
   nuevas (el archivo sube bien y al abrirlo devuelve 401).
-- Formatos aceptados: PDF, JPG, PNG, Excel y Word. Máximo **4 MB** por archivo:
-  el tope no lo pone Cloudinary (aguanta 10) sino Vercel, que corta el cuerpo de
-  la petición en ~4.5 MB antes de que corra la función. Para archivos más
-  grandes habría que subir del navegador directo a Cloudinary con una firma.
+- Formatos aceptados: PDF, JPG, PNG, Excel y Word. Máximo **10 MB** por archivo.
 - Los documentos que se subieron antes de esta migración siguen en Vercel Blob y
   se sirven igual. Si quieres que al reemplazarlos se borre también el archivo
   viejo, deja `BLOB_READ_WRITE_TOKEN` configurada.

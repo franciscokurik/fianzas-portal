@@ -71,15 +71,15 @@ export const yaVencio = (iso) => Boolean(iso) && iso < new Date().toISOString().
 // viaja completo nada más para que lo rechacen.
 export const ACCEPT_ARCHIVOS = '.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.doc';
 
-// El mismo tope que MAXIMO_MB del servidor. Lo impone Vercel, que corta el
-// cuerpo de la petición en ~4.5 MB antes de que corra nuestro código.
-export const MAXIMO_MB = 4;
+// El mismo tope que MAXIMO_MB del servidor: el del plan de Cloudinary. Se puede
+// prometer porque el archivo no pasa por nuestra API — el navegador lo sube
+// directo a Cloudinary (ver subirACloudinary en api.js).
+export const MAXIMO_MB = 10;
 export const AYUDA_ARCHIVOS = `PDF, JPG, PNG, Excel o Word · máx. ${MAXIMO_MB} MB`;
 
-// Se revisa AQUÍ, antes de mandar nada. Si se deja pasar, un archivo grande lo
-// corta la plataforma con una respuesta que no es JSON, y a la pantalla llega un
-// "Error en la solicitud" que no le dice nada a nadie. Además se ahorra subir
-// megas para nada.
+// Se revisa AQUÍ, antes de pedir la firma. Así el usuario se entera de que su
+// archivo no cabe ANTES de esperar a que se suban ocho megas, y el error se lo
+// da el portal con sus palabras en vez de Cloudinary con las suyas.
 export function revisarArchivo(file) {
   if (!file) return 'No se eligió ningún archivo.';
 
