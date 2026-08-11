@@ -45,10 +45,10 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE INDEX IF NOT EXISTS idx_users_client ON users(client_id);
 
--- Quién atiende a este fiado. Puede ser CUALQUIER cuenta interna: un admin o un
--- operador también llevan clientes. Para ellos el campo es informativo, porque
--- de todas formas ven todo; para el vendedor es lo que lo limita (ver
--- lib/permisos.js, que es el único lugar donde eso se decide).
+-- El vendedor titular de la cuenta. Puede ser CUALQUIER cuenta interna: un
+-- admin o un operador también llevan cuentas propias. Para ellos el campo no
+-- limita nada, porque de todas formas ven todo; para el vendedor es justo lo
+-- que lo acota (ver lib/permisos.js, el único lugar donde eso se decide).
 --
 -- ON DELETE SET NULL: al dar de baja a quien lo atendía, el cliente queda sin
 -- asignar y lo siguen viendo los admins y operadores. Nunca se borra con él.

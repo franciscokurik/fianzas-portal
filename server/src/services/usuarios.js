@@ -139,7 +139,7 @@ export async function desactivarUsuario(id) {
 // o una creada con el correo equivocado). Desactivarlas las deja estorbando en
 // la lista para siempre.
 //
-// Si atendía clientes, quedan sin responsable asignado en vez de perderse
+// Si era titular de alguna cuenta, esa queda sin vendedor en vez de perderse
 // (clients.vendedor_id es ON DELETE SET NULL).
 export async function eliminarUsuario(id, { solicitanteId } = {}) {
   const usuario = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(Number(id));

@@ -115,17 +115,18 @@ distintas:
   | Dar de alta clientes y sus accesos | ❌ | ✅ | ✅ |
   | Líneas de crédito | solo consultar | ✅ | ✅ |
   | Catálogos (afianzadoras, tipos, documentos) | solo consultar | ✅ | ✅ |
-  | Reasignar quién atiende a un cliente | ❌ | ✅ | ✅ |
+  | Cambiar el vendedor titular de una cuenta | ❌ | ✅ | ✅ |
   | Cuentas de acceso | ❌ | ❌ | ✅ |
   | Dar de baja una empresa | ❌ | ❌ | ✅ |
 
   Reservar al admin solo esas dos últimas es deliberado: son las que **no se
   arreglan volviendo a capturar**.
 
-- La cartera vive en `clients.vendedor_id` y puede apuntar a **cualquier** cuenta
-  interna: un admin o un operador también llevan clientes. Para ellos el campo es
-  informativo (de todas formas ven todo); para el vendedor es lo que lo limita.
-  Un cliente que atiende el admin **no** se le aparece al vendedor.
+- Cada cuenta tiene un **vendedor titular** (`clients.vendedor_id`), que puede ser
+  **cualquier** cuenta interna: un admin o un operador también llevan cuentas
+  propias. Para ellos el campo no limita nada (de todas formas ven todo); para el
+  vendedor es justo lo que lo acota. Una cuenta cuyo titular es el admin **no** se
+  le aparece al vendedor.
 - El correo de las cuentas de Fortex tiene que ser del dominio de la casa
   (`DOMINIO_INTERNO`, por omisión `fortex.mx`). A los fiados **no** se les exige
   dominio a propósito: muchos contratistas usan Gmail o el correo personal del

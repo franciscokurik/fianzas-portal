@@ -10,10 +10,10 @@
 //   operador  -> todos los clientes; toda la operación.
 //   vendedor  -> SOLO los clientes que tenga asignados, y solo sobre ellos.
 //
-// La cartera vive en clients.vendedor_id y puede apuntar a cualquier cuenta
-// interna: un admin o un operador también atienden clientes. Para ellos el
-// campo es informativo, porque de todas formas ven todo; para el vendedor es lo
-// que lo limita.
+// La cartera vive en clients.vendedor_id —el vendedor titular de cada cuenta— y
+// puede apuntar a cualquier cuenta interna: un admin o un operador también
+// llevan cuentas propias. Para ellos el campo no limita nada, porque de todas
+// formas ven todo; para el vendedor es justo lo que lo acota.
 import db from '../db.js';
 
 export const esAdmin = (user) => user?.role === 'admin';

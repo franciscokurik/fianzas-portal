@@ -158,22 +158,23 @@ router.delete('/clientes/:id', soloAdmin, async (req, res) => {
   res.json({ ok: true, cliente: cliente.razon_social, borrado });
 });
 
-// PUT /api/admin/clientes/:id/vendedor -> quién atiende a este fiado
+// PUT /api/admin/clientes/:id/vendedor -> el vendedor titular de la cuenta
 //
-// Es INFORMATIVO: sirve para saber a quién preguntarle por ese cliente, no
-// limita lo que nadie ve. Todo el personal de Fortex ve a todos los fiados.
+// Se admite cualquier cuenta interna y no solo las de rol vendedor: un admin o
+// un operador también llevan cuentas propias. Para ellos el campo no limita
+// nada, porque de todas formas ven todo.
 router.put('/clientes/:id/vendedor', soloOperador, async (req, res) => {
-  const responsableId = req.body?.vendedor_id ? Number(req.body.vendedor_id) : null;
+  const vendedorId = req.body?.vendedor_id ? Number(req.body.vendedor_id) : null;
 
-  if (responsableId) {
+  if (vendedorId) {
     const u = await db
       .prepare(`SELECT id FROM users WHERE id = ? AND client_id IS NULL AND activo = 1`)
-      .get(responsableId);
+      .get(vendedorId);
     if (!u) return res.status(400).json({ error: 'Esa cuenta no existe o está dada de baja' });
   }
 
   await db.prepare('UPDATE clients SET vendedor_id = ? WHERE id = ?')
-    .run(responsableId, Number(req.params.id));
+    .run(vendedorId, Number(req.params.id));
   res.json({ ok: true });
 });
 

@@ -74,8 +74,10 @@ export default function Admin() {
     if (puedeOperar) { cargarDocsRequeridos(); cargarInternos(); }
   }, [puedeOperar]);
 
-  // Para el selector de "quién atiende" a cada fiado: cualquiera de Fortex.
-  const responsables = internos.filter((u) => u.activo);
+  // Para el selector de vendedor titular. Se listan todas las cuentas de
+  // Fortex y no solo las de rol vendedor, porque un admin o un operador también
+  // llevan cuentas propias.
+  const vendedores = internos.filter((u) => u.activo);
 
   function abrirDetalle(id) {
     setSel(id);
@@ -164,7 +166,7 @@ export default function Admin() {
             {puedeOperar && (
               <>
                 <NuevoCliente
-                  responsables={responsables}
+                  vendedores={vendedores}
                   onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }}
                 />
                 {/* Las cuentas de acceso son lo único del admin en esta columna. */}
@@ -215,11 +217,11 @@ export default function Admin() {
                           <span className="text-amber-600"> · {c.recordatorios_pendientes} recordatorio(s)</span>
                         )}
                       </p>
-                      {/* Quién lo atiende. Es informativo: no limita quién lo ve. */}
+                      {/* El vendedor titular de la cuenta. */}
                       <p className="text-[11px] mt-0.5">
                         {c.vendedor_nombre
                           ? <span className="text-slate-400">{c.vendedor_nombre}</span>
-                          : <span className="text-slate-300">Sin responsable</span>}
+                          : <span className="text-slate-300">Sin vendedor</span>}
                         <span className="text-slate-300"> · {c.total_usuarios} usuario(s)</span>
                       </p>
                     </button>
@@ -244,7 +246,7 @@ export default function Admin() {
                 detalle={detalle}
                 esAdmin={esAdmin}
                 puedeOperar={puedeOperar}
-                responsables={responsables}
+                vendedores={vendedores}
                 onEliminado={() => {
                   setSel(null);
                   setDetalle(null);
@@ -550,7 +552,7 @@ function CatalogoDocumentos({ tipos, onChange, flash }) {
    -------------------------------------------------------------------------- */
 
 function DetalleCliente({
-  detalle, esAdmin, puedeOperar, responsables, afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
+  detalle, esAdmin, puedeOperar, vendedores, afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
 }) {
   const {
     cliente, usuarios = [], lineas = [], proyectos = [],
@@ -617,14 +619,14 @@ function DetalleCliente({
             </p>
           </div>
           <div className="flex items-end gap-2">
-            {/* Reasignar la cartera no es del vendedor: nadie se queda ni se
+            {/* Cambiar de vendedor no es del vendedor: nadie se queda ni se
                 quita clientes a sí mismo. */}
             {puedeOperar ? (
-              <AsignarResponsable
+              <AsignarVendedor
                 clienteId={cliente.id}
-                responsableId={cliente.vendedor_id}
-                responsables={responsables}
-                onChange={() => { onChange(); flash('Responsable actualizado'); }}
+                vendedorId={cliente.vendedor_id}
+                vendedores={vendedores}
+                onChange={() => { onChange(); flash('Vendedor actualizado'); }}
               />
             ) : (
               <span className="text-[11px] text-slate-400">En tu cartera</span>
@@ -857,10 +859,10 @@ function ExpedienteCliente({ clienteId, documentos = [], descargar, onChange, fl
 }
 
 /* --------------------------------------------------------------------------
-   Quién atiende a este fiado. Es informativo: no limita quién lo ve.
+   El vendedor titular de la cuenta.
    -------------------------------------------------------------------------- */
 
-function AsignarResponsable({ clienteId, responsableId, responsables = [], onChange }) {
+function AsignarVendedor({ clienteId, vendedorId, vendedores = [], onChange }) {
   const [error, setError] = useState('');
 
   async function asignar(valor) {
@@ -875,14 +877,14 @@ function AsignarResponsable({ clienteId, responsableId, responsables = [], onCha
 
   return (
     <div className="text-right">
-      <label className="text-[10px] uppercase tracking-wider text-slate-400 block mb-1">Atiende</label>
+      <label className="text-[10px] uppercase tracking-wider text-slate-400 block mb-1">Vendedor</label>
       <select
-        value={responsableId || ''}
+        value={vendedorId || ''}
         onChange={(e) => asignar(e.target.value)}
         className={`${inputCls} w-auto min-w-44`}
       >
         <option value="">Sin asignar</option>
-        {responsables.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+        {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
       </select>
       {error && <p className="text-[11px] text-rose-600 mt-1">{error}</p>}
     </div>
@@ -1097,7 +1099,7 @@ function PersonalFortex({ internos = [], onChange, flash }) {
   async function borrar(u) {
     if (!confirm(`¿Borrar definitivamente la cuenta de ${u.nombre} <${u.email}>?\n\n`
       + (u.clientes_asignados
-        ? `Sus ${u.clientes_asignados} cliente(s) quedarán sin responsable asignado.\n\n`
+        ? `Sus ${u.clientes_asignados} cliente(s) quedarán sin vendedor asignado.\n\n`
         : '')
       + 'Si esta persona sí trabajó en el portal, mejor desactívala con la ✕ para conservar el registro.')) return;
 
@@ -1189,7 +1191,7 @@ function PersonalFortex({ internos = [], onChange, flash }) {
                   </p>
                   <p className="text-[10px] text-slate-400 truncate">
                     {u.email} · {u.role}
-                    {u.clientes_asignados > 0 && ` · atiende ${u.clientes_asignados}`}
+                    {u.clientes_asignados > 0 && ` · titular de ${u.clientes_asignados}`}
                   </p>
                 </div>
                 <button
@@ -2076,7 +2078,7 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
    Altas simples
    -------------------------------------------------------------------------- */
 
-function NuevoCliente({ responsables = [], onDone }) {
+function NuevoCliente({ vendedores = [], onDone }) {
   const [open, setOpen] = useState(false);
   const empty = {
     razon_social: '', rfc: '', telefono: '', vendedor_id: '',
@@ -2136,10 +2138,10 @@ function NuevoCliente({ responsables = [], onDone }) {
             </div>
           </div>
           <div>
-            <label className="text-[11px] text-slate-500 mb-1 block">Quién lo atiende</label>
+            <label className="text-[11px] text-slate-500 mb-1 block">Vendedor</label>
             <select value={f.vendedor_id} onChange={set('vendedor_id')} className={inputCls}>
               <option value="">Sin asignar</option>
-              {responsables.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+              {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
             </select>
           </div>
 
