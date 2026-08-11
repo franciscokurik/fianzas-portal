@@ -48,7 +48,10 @@ Detalles que conviene saber:
   transforma imágenes, y con `image` los PDF dependen del interruptor
   *PDF and ZIP files delivery*, que Cloudinary trae apagado en las cuentas
   nuevas (el archivo sube bien y al abrirlo devuelve 401).
-- Formatos aceptados: PDF, JPG, PNG, Excel y Word. Máximo 10 MB por archivo.
+- Formatos aceptados: PDF, JPG, PNG, Excel y Word. Máximo **4 MB** por archivo:
+  el tope no lo pone Cloudinary (aguanta 10) sino Vercel, que corta el cuerpo de
+  la petición en ~4.5 MB antes de que corra la función. Para archivos más
+  grandes habría que subir del navegador directo a Cloudinary con una firma.
 - Los documentos que se subieron antes de esta migración siguen en Vercel Blob y
   se sirven igual. Si quieres que al reemplazarlos se borre también el archivo
   viejo, deja `BLOB_READ_WRITE_TOKEN` configurada.

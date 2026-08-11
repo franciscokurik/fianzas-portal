@@ -70,7 +70,27 @@ export const yaVencio = (iso) => Boolean(iso) && iso < new Date().toISOString().
 // server/src/lib/upload.js: si aquí se ofrece algo que allá no, el archivo
 // viaja completo nada más para que lo rechacen.
 export const ACCEPT_ARCHIVOS = '.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.doc';
-export const AYUDA_ARCHIVOS = 'PDF, JPG, PNG, Excel o Word · máx. 10 MB';
+
+// El mismo tope que MAXIMO_MB del servidor. Lo impone Vercel, que corta el
+// cuerpo de la petición en ~4.5 MB antes de que corra nuestro código.
+export const MAXIMO_MB = 4;
+export const AYUDA_ARCHIVOS = `PDF, JPG, PNG, Excel o Word · máx. ${MAXIMO_MB} MB`;
+
+// Se revisa AQUÍ, antes de mandar nada. Si se deja pasar, un archivo grande lo
+// corta la plataforma con una respuesta que no es JSON, y a la pantalla llega un
+// "Error en la solicitud" que no le dice nada a nadie. Además se ahorra subir
+// megas para nada.
+export function revisarArchivo(file) {
+  if (!file) return 'No se eligió ningún archivo.';
+
+  const mb = file.size / (1024 * 1024);
+  if (mb > MAXIMO_MB) {
+    return `"${file.name}" pesa ${mb.toFixed(1)} MB y el máximo es ${MAXIMO_MB} MB. `
+      + 'Si es un escaneo, vuelve a generarlo en menor resolución o divídelo.';
+  }
+  if (file.size === 0) return `"${file.name}" está vacío.`;
+  return null;
+}
 
 // Peso del archivo en texto corto ("340 KB", "1.2 MB").
 export const pesoArchivo = (bytes) =>

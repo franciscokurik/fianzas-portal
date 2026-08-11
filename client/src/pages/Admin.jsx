@@ -9,7 +9,7 @@ import { api, getToken } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import {
   mxn, mxnCents, fmtDate, yaVencio, EstadoBadge, InputPesos,
-  ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, pesoArchivo,
+  ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, pesoArchivo, revisarArchivo,
 } from '../lib.jsx';
 
 const inputCls =
@@ -742,6 +742,9 @@ function ExpedienteCliente({ clienteId, documentos = [], descargar, onChange, fl
   async function subir(typeId, archivo) {
     if (!archivo) return;
     setError('');
+    const problema = revisarArchivo(archivo);
+    if (problema) return setError(problema);
+
     setBusyId(typeId);
     try {
       const datos = new FormData();
@@ -1703,6 +1706,9 @@ function DocsEntidad({ entidad, id, documentos = [], tipos = [], onChange, flash
   async function subir(archivo) {
     if (!archivo) return;
     setError('');
+    const problema = revisarArchivo(archivo);
+    if (problema) return setError(problema);
+
     setSubiendo(true);
     try {
       const datos = new FormData();

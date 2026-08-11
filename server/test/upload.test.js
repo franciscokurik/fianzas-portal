@@ -103,3 +103,23 @@ test('sin credenciales, subir dice exactamente qué falta configurar', async () 
   // dónde ponerla, y este es el primer tropiezo al desplegar.
   await assert.rejects(() => subirArchivo(archivo, 1), /CLOUDINARY_URL/);
 });
+
+test('el tope declarado no promete más de lo que la plataforma deja pasar', async () => {
+  // Vercel corta el cuerpo de la petición en ~4.5 MB ANTES de que corra la
+  // función (medido contra producción: 4 MB pasa, 4.5 MB devuelve
+  // FUNCTION_PAYLOAD_TOO_LARGE). Si aquí se declara más, el usuario se topa con
+  // el error crudo de la plataforma —que no es JSON— en vez del nuestro.
+  const { MAXIMO_MB } = await import('../src/lib/upload.js');
+  assert.ok(MAXIMO_MB <= 4, `MAXIMO_MB es ${MAXIMO_MB}: por encima de 4 la plataforma corta primero`);
+});
+
+test('el cliente y el servidor declaran el mismo tope', async () => {
+  // Son dos archivos distintos y nada los ata; si se separan, la pantalla
+  // promete un tamaño que la API rechaza.
+  const fs = await import('node:fs');
+  const { MAXIMO_MB } = await import('../src/lib/upload.js');
+  const lib = fs.readFileSync('client/src/lib.jsx', 'utf8');
+  const enElCliente = Number(/export const MAXIMO_MB = (\d+)/.exec(lib)?.[1]);
+
+  assert.equal(enElCliente, MAXIMO_MB);
+});

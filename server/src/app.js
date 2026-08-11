@@ -14,6 +14,7 @@ import documentosRoutes from './routes/documentos.js';
 import adminRoutes from './routes/admin.js';
 import { correrAlertas } from './services/alerts.js';
 import { probarCorreo } from './services/email.js';
+import { MAXIMO_MB } from './lib/upload.js';
 import { seed, seedIfEmpty, reiniciarVacio } from './seed.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -132,7 +133,7 @@ app.use((err, req, res, next) => {
   if (!err) return next();
 
   if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: 'El archivo supera 10 MB' });
+    return res.status(413).json({ error: `El archivo supera ${MAXIMO_MB} MB` });
   }
 
   // Los errores de Postgres traen un `code` de 5 caracteres. Casi siempre

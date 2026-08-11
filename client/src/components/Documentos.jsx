@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Upload, Loader2, AlertTriangle, FileText, Files, FileDown } from 'lucide-react';
 import { api, getToken } from '../api.js';
-import { fmtDate, EstadoBadge, ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS } from '../lib.jsx';
+import { fmtDate, EstadoBadge, ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, revisarArchivo } from '../lib.jsx';
 
 const btnCls =
   'flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300 disabled:opacity-50';
@@ -66,7 +66,11 @@ export default function Documentos() {
   useEffect(cargar, []);
 
   async function subir(url, key, file) {
-    setError(''); setBusyId(key);
+    setError('');
+    const problema = revisarArchivo(file);
+    if (problema) return setError(problema);
+
+    setBusyId(key);
     try {
       const fd = new FormData();
       fd.append('archivo', file);

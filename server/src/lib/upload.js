@@ -27,7 +27,18 @@ const PERMITIDOS = new Map([
 ]);
 
 export const FORMATOS_PERMITIDOS = [...new Set(PERMITIDOS.values())];
-export const MAXIMO_MB = 10; // el plan gratuito de Cloudinary corta ahí
+
+// 4 MB, y no los 10 que aguanta Cloudinary, porque el tope que manda es otro:
+// Vercel corta el cuerpo de cada petición en ~4.5 MB y lo hace ANTES de que
+// corra esta función (medido contra producción: 4 MB pasa, 4.5 MB devuelve
+// FUNCTION_PAYLOAD_TOO_LARGE). Configurar 10 aquí no subía el techo, solo hacía
+// que el usuario se topara con el error crudo de la plataforma —que no es JSON y
+// llega a la pantalla como un "Error en la solicitud" sin explicación— en vez
+// del nuestro, que sí dice qué pasó.
+//
+// Para archivos más grandes hay que subir del navegador directo a Cloudinary con
+// una firma, saltándose la función. Mientras eso no exista, este es el techo.
+export const MAXIMO_MB = 4;
 
 export const upload = multer({
   storage: multer.memoryStorage(),
