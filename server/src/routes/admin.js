@@ -9,7 +9,7 @@ import { TIPOS_DOC, esTipoValido, agruparPorEntidad, deEntidad } from '../lib/do
 import { guardarDocumentoCliente, borrarDocumentoCliente } from '../services/documentos-cliente.js';
 import { esAdmin, exigirCliente, exigirEntidad, filtroCartera } from '../lib/cartera.js';
 import {
-  crearUsuario, actualizarUsuario, desactivarUsuario, DOMINIO_INTERNO,
+  crearUsuario, actualizarUsuario, desactivarUsuario, eliminarUsuario, DOMINIO_INTERNO,
 } from '../services/usuarios.js';
 import { eliminarCliente } from '../services/clientes.js';
 
@@ -819,9 +819,19 @@ router.put('/usuarios/:id', soloAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-// DELETE /api/admin/usuarios/:id -> baja lógica (deja de entrar, no se borra)
+// DELETE /api/admin/usuarios/:id -> baja lógica (deja de entrar, sigue en lista)
 router.delete('/usuarios/:id', soloAdmin, async (req, res) => {
   await desactivarUsuario(Number(req.params.id));
+  res.json({ ok: true });
+});
+
+// DELETE /api/admin/usuarios/:id/permanente -> la borra de veras
+//
+// Aparte de la baja lógica porque son dos intenciones distintas: desactivar es
+// para quien ya trabajó y conviene conservar; borrar es para la cuenta que nunca
+// debió existir (las de demostración, o una creada con el correo equivocado).
+router.delete('/usuarios/:id/permanente', soloAdmin, async (req, res) => {
+  await eliminarUsuario(Number(req.params.id), { solicitanteId: req.user.id });
   res.json({ ok: true });
 });
 

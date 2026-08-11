@@ -1078,6 +1078,25 @@ function PersonalFortex({ internos = [], onChange, flash }) {
     }
   }
 
+  // Borrar de veras, no desactivar: es para las cuentas que nunca debieron
+  // existir (las de demostración, o una creada con el correo equivocado).
+  async function borrar(u) {
+    if (!confirm(`¿Borrar definitivamente la cuenta de ${u.nombre} <${u.email}>?\n\n`
+      + (u.clientes_asignados
+        ? `Sus ${u.clientes_asignados} cliente(s) quedarán sin vendedor asignado.\n\n`
+        : '')
+      + 'Si esta persona sí trabajó en el portal, mejor desactívala con la ✕ para conservar el registro.')) return;
+
+    setError('');
+    try {
+      await api.del(`/admin/usuarios/${u.id}/permanente`);
+      onChange();
+      flash('Cuenta eliminada');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   // Aquí es donde se corrige el correo de la propia cuenta de administrador
   // cuando la que quedó sembrada no es la que se usa de verdad.
   async function editar(u, campo, etiqueta) {
@@ -1171,10 +1190,17 @@ function PersonalFortex({ internos = [], onChange, flash }) {
                 </button>
                 <button
                   onClick={() => cambiarActivo(u)}
-                  className="text-slate-300 hover:text-rose-600 shrink-0"
-                  title={u.activo ? 'Desactivar' : 'Reactivar'}
+                  className="text-slate-300 hover:text-amber-600 shrink-0"
+                  title={u.activo ? 'Desactivar (sigue en la lista)' : 'Reactivar'}
                 >
                   {u.activo ? <X className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+                </button>
+                <button
+                  onClick={() => borrar(u)}
+                  className="text-slate-300 hover:text-rose-600 shrink-0"
+                  title="Borrar definitivamente"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
             ))}

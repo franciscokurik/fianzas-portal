@@ -219,3 +219,66 @@ test('no se puede desactivar la última cuenta de administrador', async () => {
   assert.match((await res.json()).error, /única cuenta de administrador/i);
   assert.equal((await entrar('admin@fortex.mx')).status, 200, 'el admin debe seguir entrando');
 });
+
+/* --- Borrar de veras --- */
+
+const borrarDefinitivo = (id, token = admin) =>
+  fetch(`${base}/api/admin/usuarios/${id}/permanente`, {
+    method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+  });
+
+test('una cuenta que nunca debió existir se borra de la lista', async () => {
+  const { id } = await (await crear({
+    nombre: 'Demo', email: 'demo@fortex.mx', password: CLAVE, role: 'vendedor',
+  })).json();
+
+  assert.equal((await borrarDefinitivo(id)).status, 200);
+
+  const { total } = await memoria.prepare('SELECT COUNT(*)::int AS total FROM users WHERE id = ?').get(id);
+  assert.equal(total, 0, 'la baja definitiva no debe dejarla marcada como inactiva');
+  assert.equal((await entrar('demo@fortex.mx')).status, 401);
+});
+
+test('al borrar un vendedor sus clientes quedan sin asignar, no se pierden', async () => {
+  const { id } = await (await crear({
+    nombre: 'Vendedor efímero', email: 'efimero@fortex.mx', password: CLAVE, role: 'vendedor',
+  })).json();
+  await memoria.query('UPDATE clients SET vendedor_id = ? WHERE id = 1', [id]);
+
+  assert.equal((await borrarDefinitivo(id)).status, 200);
+
+  const c = await memoria.prepare('SELECT razon_social, vendedor_id FROM clients WHERE id = 1').get();
+  assert.equal(c.razon_social, 'Constructora del Bajío', 'la empresa no debió irse con el vendedor');
+  assert.equal(c.vendedor_id, null);
+});
+
+test('nadie borra su propia cuenta', async () => {
+  // Dejaría el portal sin quien lo administre en cuanto expire la sesión.
+  const res = await borrarDefinitivo(1);
+
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /tu propia cuenta/i);
+  assert.equal((await entrar('admin@fortex.mx')).status, 200);
+});
+
+test('no se borra el último administrador activo', async () => {
+  const { id } = await (await crear({
+    nombre: 'Segundo admin', email: 'segundo@fortex.mx', password: CLAVE, role: 'admin',
+  })).json();
+
+  // Con dos admins, el segundo sí se puede borrar…
+  assert.equal((await borrarDefinitivo(id)).status, 200);
+
+  // …y el que queda no, ni pidiéndolo desde otra sesión de admin.
+  const otro = await (await crear({
+    nombre: 'Tercero', email: 'tercero@fortex.mx', password: CLAVE, role: 'admin',
+  })).json();
+  const { signToken: firmar } = await import('../src/auth/middleware.js');
+  const tokenTercero = firmar({ id: otro.id, role: 'admin', nombre: 'Tercero' });
+
+  await borrarDefinitivo(1, tokenTercero); // se lleva al admin original
+  const res = await fetch(`${base}/api/admin/usuarios/${otro.id}/permanente`, {
+    method: 'DELETE', headers: { Authorization: `Bearer ${tokenTercero}` },
+  });
+  assert.equal(res.status, 400, 'quedaría el portal sin ningún administrador');
+});

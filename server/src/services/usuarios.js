@@ -123,12 +123,33 @@ export async function actualizarUsuario(id, { nombre, email, password, activo })
   if (password !== undefined) await invalidarEnlaces(id);
 }
 
-// Baja lógica: el usuario deja de entrar pero no se borra. Si se borrara, se
-// perdería de quién fue cada documento que subió.
+// Baja lógica: el usuario deja de entrar pero sigue en la lista, marcado como
+// inactivo. Es lo correcto para alguien que sí trabajó: queda el rastro de que
+// existió y se puede reactivar.
 export async function desactivarUsuario(id) {
   const usuario = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(Number(id));
   if (!usuario) throw fallo('Usuario no encontrado', 404);
 
   await exigirQueQuedeUnAdmin(usuario);
   await db.prepare('UPDATE users SET activo = 0 WHERE id = ?').run(Number(id));
+}
+
+// Baja definitiva: para cuentas que nunca debieron existir (las de demostración,
+// o una creada con el correo equivocado). Desactivarlas las deja estorbando en
+// la lista para siempre.
+//
+// Si era vendedor, sus clientes quedan sin asignar en vez de perderse
+// (clients.vendedor_id es ON DELETE SET NULL).
+export async function eliminarUsuario(id, { solicitanteId } = {}) {
+  const usuario = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(Number(id));
+  if (!usuario) throw fallo('Usuario no encontrado', 404);
+
+  // Borrarse a sí mismo deja al portal sin quien lo administre en cuanto expire
+  // la sesión que se está usando para hacerlo.
+  if (Number(id) === Number(solicitanteId)) {
+    throw fallo('No puedes borrar tu propia cuenta. Pídeselo a otro administrador.');
+  }
+  await exigirQueQuedeUnAdmin(usuario);
+
+  await db.prepare('DELETE FROM users WHERE id = ?').run(Number(id));
 }
