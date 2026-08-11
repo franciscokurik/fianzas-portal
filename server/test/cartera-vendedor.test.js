@@ -266,3 +266,77 @@ test('sin sesión no se llega a ninguna de las dos', async () => {
     assert.equal(res.status, 401, ruta);
   }
 });
+
+/* --- Dar de baja una empresa --- */
+
+test('el vendedor no puede eliminar un cliente, ni el suyo', async () => {
+  const res = await pedir(`/api/admin/clientes/${DE_MARIANA}`, mariana, {
+    method: 'DELETE', body: json({ confirmar: 'Constructora A' }),
+  });
+
+  assert.equal(res.status, 403);
+  const { total } = await memoria
+    .prepare('SELECT COUNT(*)::int AS total FROM clients WHERE id = ?').get(DE_MARIANA);
+  assert.equal(total, 1, 'el cliente debió seguir ahí');
+});
+
+test('sin la razón social exacta no se borra nada', async () => {
+  for (const confirmar of ['', 'constructora a', 'Constructora', 'Constructora A ', undefined]) {
+    const res = await pedir(`/api/admin/clientes/${DE_PABLO}`, admin, {
+      method: 'DELETE', body: json({ confirmar }),
+    });
+    assert.equal(res.status, 400, `no debió aceptar: ${JSON.stringify(confirmar)}`);
+  }
+
+  const { total } = await memoria
+    .prepare('SELECT COUNT(*)::int AS total FROM clients WHERE id = ?').get(DE_PABLO);
+  assert.equal(total, 1);
+});
+
+test('eliminar el cliente se lleva su historial completo', async () => {
+  // El de Pablo tiene proyecto, fianza, documento y un usuario.
+  await memoria.exec(`
+    INSERT INTO users (client_id, nombre, email, password_hash, role)
+      VALUES (2, 'Beto', 'beto@constructora-b.mx', 'x', 'client');
+    INSERT INTO client_credit_lines (client_id, afianzadora_id, linea_credito) VALUES (2, 1, 500000);
+    INSERT INTO papeleria_requests (client_id, descripcion) VALUES (2, 'Carta de no adeudo');
+    INSERT INTO notifications (client_id, tipo, ref_key) VALUES (2, 'fianza_30', 'fianza:2');
+  `);
+
+  const res = await pedir(`/api/admin/clientes/${DE_PABLO}`, admin, {
+    method: 'DELETE', body: json({ confirmar: 'Constructora B' }),
+  });
+  assert.equal(res.status, 200);
+
+  const cuerpo = await res.json();
+  assert.equal(cuerpo.borrado.proyectos, 1);
+  assert.equal(cuerpo.borrado.fianzas, 1);
+  assert.equal(cuerpo.borrado.usuarios, 1);
+  assert.equal(cuerpo.borrado.archivos, 1, 'debió juntar la carátula para borrarla del CDN');
+
+  // Nada debe quedar apuntando a la empresa que ya no existe.
+  for (const tabla of ['clients', 'proyectos', 'fianzas', 'documentos',
+                       'client_credit_lines', 'papeleria_requests', 'notifications']) {
+    const columna = tabla === 'clients' ? 'id' : 'client_id';
+    const { total } = await memoria
+      .prepare(`SELECT COUNT(*)::int AS total FROM ${tabla} WHERE ${columna} = ?`).get(DE_PABLO);
+    assert.equal(total, 0, `quedaron filas huérfanas en ${tabla}`);
+  }
+
+  const { total: cuentas } = await memoria
+    .prepare('SELECT COUNT(*)::int AS total FROM users WHERE client_id = ?').get(DE_PABLO);
+  assert.equal(cuentas, 0, 'los accesos del fiado debieron irse con él');
+});
+
+test('borrar un cliente libera su correo para otra cuenta', async () => {
+  // Es el caso de un perfil de prueba hecho con el correo del propio admin:
+  // hasta que se va, ese correo sigue ocupado.
+  const res = await pedir('/api/admin/usuarios', admin, {
+    method: 'POST',
+    body: json({
+      nombre: 'Otra vez Beto', email: 'beto@constructora-b.mx',
+      password: 'contrasena8', role: 'client', client_id: DE_MARIANA,
+    }),
+  });
+  assert.equal(res.status, 200);
+});

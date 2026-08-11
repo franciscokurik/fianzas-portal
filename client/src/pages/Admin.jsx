@@ -235,6 +235,13 @@ export default function Admin() {
                 detalle={detalle}
                 esAdmin={esAdmin}
                 vendedores={vendedores}
+                onEliminado={() => {
+                  setSel(null);
+                  setDetalle(null);
+                  cargarClientes();
+                  cargarRecordatorios();
+                  cargarInternos(); // cambian los conteos de cartera
+                }}
                 afianzadoras={afianzadoras}
                 tipos={tipos}
                 tiposDoc={tiposDoc}
@@ -532,11 +539,14 @@ function CatalogoDocumentos({ tipos, onChange, flash }) {
    Detalle del cliente
    -------------------------------------------------------------------------- */
 
-function DetalleCliente({ detalle, esAdmin, vendedores, afianzadoras, tipos, tiposDoc, onChange, flash }) {
+function DetalleCliente({
+  detalle, esAdmin, vendedores, afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
+}) {
   const {
     cliente, usuarios = [], lineas = [], proyectos = [],
     fianzas = [], documentos, papeleria,
   } = detalle;
+  const [errorBaja, setErrorBaja] = useState('');
   const lineaTotal = lineas.reduce((s, l) => s + (l.linea_credito || 0), 0);
   const disponibleTotal = lineas.reduce((s, l) => s + (l.disponible || 0), 0);
   const afianzadoTotal = fianzas
@@ -561,6 +571,29 @@ function DetalleCliente({ detalle, esAdmin, vendedores, afianzadoras, tipos, tip
     URL.revokeObjectURL(url);
   }
 
+  // Se pide teclear la razón social, no un "¿estás seguro?": esto se lleva las
+  // pólizas, el expediente y los accesos del fiado, y no hay deshacer.
+  async function eliminar() {
+    setErrorBaja('');
+    const escrito = prompt(
+      `Esto elimina a "${cliente.razon_social}" con TODO su historial:\n`
+      + `· ${proyectos.length} proyecto(s)\n`
+      + `· ${fianzas.length} fianza(s)\n`
+      + `· ${usuarios.length} acceso(s) al portal\n`
+      + '· su expediente, papelería y archivos\n\n'
+      + 'No se puede deshacer. Para confirmar, escribe la razón social exacta:'
+    );
+    if (!escrito) return;
+
+    try {
+      const r = await api.del(`/admin/clientes/${cliente.id}`, { confirmar: escrito });
+      flash(`${r.cliente} eliminado (${r.borrado.fianzas} fianza(s), ${r.borrado.archivos} archivo(s))`);
+      onEliminado();
+    } catch (e) {
+      setErrorBaja(e.message);
+    }
+  }
+
   return (
     <>
       {/* Encabezado del cliente */}
@@ -576,16 +609,31 @@ function DetalleCliente({ detalle, esAdmin, vendedores, afianzadoras, tipos, tip
           {/* Mover de cartera es de Home Office: un vendedor no se asigna
               clientes a sí mismo. Él solo ve a quién le toca. */}
           {esAdmin ? (
-            <AsignarVendedor
-              clienteId={cliente.id}
-              vendedorId={cliente.vendedor_id}
-              vendedores={vendedores}
-              onChange={() => { onChange(); flash('Cartera actualizada'); }}
-            />
+            <div className="flex items-end gap-2">
+              <AsignarVendedor
+                clienteId={cliente.id}
+                vendedorId={cliente.vendedor_id}
+                vendedores={vendedores}
+                onChange={() => { onChange(); flash('Cartera actualizada'); }}
+              />
+              <button
+                onClick={eliminar}
+                className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
+                title="Eliminar cliente con todo su historial"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Eliminar
+              </button>
+            </div>
           ) : (
             <span className="text-[11px] text-slate-400">En tu cartera</span>
           )}
         </div>
+
+        {errorBaja && (
+          <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {errorBaja}
+          </div>
+        )}
         <div className="mt-2 flex flex-wrap gap-2">
           <Pill label="Línea total" valor={mxn(lineaTotal)} />
           <Pill label="Disponible" valor={mxn(disponibleTotal)} tono="emerald" />

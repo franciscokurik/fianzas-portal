@@ -11,6 +11,7 @@ import { esAdmin, exigirCliente, exigirEntidad, filtroCartera } from '../lib/car
 import {
   crearUsuario, actualizarUsuario, desactivarUsuario, DOMINIO_INTERNO,
 } from '../services/usuarios.js';
+import { eliminarCliente } from '../services/clientes.js';
 
 const router = Router();
 
@@ -128,6 +129,26 @@ router.put('/clientes/:id', soloAdmin, async (req, res) => {
      WHERE id = ?`
   ).run(razon_social ?? null, telefono ?? null, Number(req.params.id));
   res.json({ ok: true });
+});
+
+// DELETE /api/admin/clientes/:id  { confirmar: "<razón social>" }
+//
+// Se lleva el historial completo del fiado y no hay deshacer, así que se pide
+// teclear la razón social. Un `confirm()` del navegador no basta: se acepta sin
+// leerlo, y aquí el clic equivocado borra las pólizas de un cliente real.
+router.delete('/clientes/:id', soloAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const cliente = await db.prepare('SELECT razon_social FROM clients WHERE id = ?').get(id);
+  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+  if (String(req.body?.confirmar || '').trim() !== cliente.razon_social) {
+    return res.status(400).json({
+      error: `Para eliminarlo hay que escribir su razón social exactamente: "${cliente.razon_social}".`,
+    });
+  }
+
+  const borrado = await eliminarCliente(id);
+  res.json({ ok: true, cliente: cliente.razon_social, borrado });
 });
 
 // PUT /api/admin/clientes/:id/vendedor -> mover el cliente de cartera

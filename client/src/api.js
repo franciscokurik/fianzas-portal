@@ -35,6 +35,8 @@ export const api = {
   get: (p) => request('GET', p),
   post: (p, b) => request('POST', p, b),
   put: (p, b) => request('PUT', p, b),
-  del: (p) => request('DELETE', p),
+  // El DELETE acepta cuerpo: las bajas que no se pueden deshacer piden una
+  // confirmación explícita (ver el borrado de clientes).
+  del: (p, b) => request('DELETE', p, b),
   upload: (p, formData) => request('POST', p, formData, true),
 };
