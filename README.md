@@ -36,15 +36,15 @@ Vercel corta el cuerpo de cada petición en ~4.5 MB, así que subir a través de
 API topaba ahí (medido: 4 MB pasa, 4.5 MB devuelve FUNCTION_PAYLOAD_TOO_LARGE).
 Por eso el navegador sube **directo a Cloudinary**:
 
-1. Pide una firma a  con el cliente al que pertenece el
+1. Pide una firma a `POST /api/subidas/firma` con el cliente al que pertenece el
    archivo. Ahí se comprueba que quien pide pueda subir para ese fiado, y se
-   firma un  **concreto** bajo la carpeta de ese cliente. El
-    nunca sale del servidor.
+   firma un `public_id` **concreto** bajo la carpeta de ese cliente. El
+   `api_secret` nunca sale del servidor.
 2. El navegador sube el archivo a Cloudinary con esa firma.
 3. Le avisa a la API **dónde quedó**, y la API le pregunta a Cloudinary la URL y
    el peso: no se le cree al navegador ni una cosa ni la otra.
 
-De ahí salen dos reglas que conviene no aflojar: el  tiene que caer
+De ahí salen dos reglas que conviene no aflojar: el `public_id` tiene que caer
 bajo el prefijo del cliente correcto (si no, una firma legítima serviría para
 colgarle el archivo a otro fiado), y todo lo que se pueda validar sin tocar el
 archivo se valida ANTES —el tipo de documento, los permisos—, porque cuando la
