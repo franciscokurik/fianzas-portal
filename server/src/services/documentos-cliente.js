@@ -3,7 +3,7 @@
 //
 // Vive aquí y no dentro de una ruta porque hay DOS puertas al mismo lugar: el
 // fiado sube sus papeles desde su portal, y Fortex los carga en su nombre
-// cuando llegan por correo a Home Office. Las dos deben dejar el registro
+// cuando llegan por correo a Fortex. Las dos deben dejar el registro
 // exactamente igual, cambiando solo quién aparece como quien lo subió.
 import db from '../db.js';
 import { subirArchivo, borrarArchivo } from '../lib/upload.js';

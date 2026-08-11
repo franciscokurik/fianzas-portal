@@ -36,7 +36,7 @@ before(async () => {
       ('Ingeniería del Norte',   'IAN980720XYZ');
 
     INSERT INTO users (client_id, nombre, email, password_hash, role, activo) VALUES
-      (NULL, 'Home Office',  'admin@fortex.mx',        '${hash}', 'admin', 1),
+      (NULL, 'Administración',  'admin@fortex.mx',        '${hash}', 'admin', 1),
       (1,    'Dirección',    'director@bajio.mx',      '${hash}', 'client', 1),
       (1,    'Contabilidad', 'contabilidad@bajio.mx',  '${hash}', 'client', 1),
       (2,    'Dirección',    'norte@demo.mx',          '${hash}', 'client', 1),
@@ -50,7 +50,7 @@ before(async () => {
               (SELECT id FROM tipos_fianza WHERE nombre='Cumplimiento'), 5000000);
   `);
 
-  admin = signToken({ id: 1, role: 'admin', nombre: 'Home Office' });
+  admin = signToken({ id: 1, role: 'admin', nombre: 'Administración' });
 
   servidor = createServer(app);
   await new Promise((r) => servidor.listen(0, r));

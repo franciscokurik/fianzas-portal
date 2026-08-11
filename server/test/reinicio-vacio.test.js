@@ -29,7 +29,7 @@ before(async () => {
     -- Personal de Fortex (sin empresa) y gente de los fiados. Al reiniciar se
     -- conservan los primeros y se van los segundos con su empresa.
     INSERT INTO users (client_id, nombre, email, password_hash, role) VALUES
-      (NULL, 'Home Office', 'admin@fortex.mx', 'hash-del-admin', 'admin'),
+      (NULL, 'Administración', 'admin@fortex.mx', 'hash-del-admin', 'admin'),
       (NULL, 'Mariana',     'mariana@fortex.mx', 'hash-vendedora', 'vendedor'),
       (1, 'Isidro', 'isidro@gaspe.mx', 'x', 'client'),
       (2, 'Otra',   'otra@demo.mx',    'x', 'client');

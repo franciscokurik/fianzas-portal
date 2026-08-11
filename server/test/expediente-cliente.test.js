@@ -33,7 +33,7 @@ before(async () => {
   await memoria.exec(`
     INSERT INTO clients (razon_social) VALUES ('Empresa A'), ('Empresa B');
     INSERT INTO users (client_id, nombre, email, password_hash, role) VALUES
-      (NULL, 'Home Office', 'admin@fortex.mx', 'x', 'admin'),
+      (NULL, 'Administración', 'admin@fortex.mx', 'x', 'admin'),
       (1, 'Ana',  'a@demo.mx', 'x', 'client'),
       (2, 'Beto', 'b@demo.mx', 'x', 'client');
 
@@ -41,7 +41,7 @@ before(async () => {
       ('Constancia de Situación Fiscal', 'csf', NULL, 30, 1),
       ('Estados financieros anuales', 'estados-financieros', 12, 60, 2);
 
-    -- Los estados financieros llegaron por correo y los cargó Home Office.
+    -- Los estados financieros llegaron por correo y los cargó un administrador.
     INSERT INTO client_documents
       (client_id, document_type_id, file_path, original_name, mime_type, size_bytes,
        uploaded_at, vencimiento, subido_por)
@@ -49,7 +49,7 @@ before(async () => {
               'ef-2025.pdf', 'application/pdf', 250000, '2026-01-15', '2027-01-15', 'fortex');
   `);
 
-  admin = signToken({ id: 1, role: 'admin', nombre: 'Home Office' });
+  admin = signToken({ id: 1, role: 'admin', nombre: 'Administración' });
   cliente = signToken({ id: 2, role: 'client', client_id: EMPRESA_A, nombre: 'Ana' });
 
   servidor = createServer(app);

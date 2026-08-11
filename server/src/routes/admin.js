@@ -20,7 +20,7 @@ const router = Router();
 // contra la base: la lista que se le mandó a la pantalla no es una autorización.
 router.use(requireAuth, requireInterno);
 
-// Lo que solo puede Home Office: dar de alta clientes y usuarios, mover líneas
+// Lo que solo puede un administrador: dar de alta clientes y usuarios, mover líneas
 // de crédito y cambiar los catálogos que ven todos los fiados.
 const soloAdmin = requireAdmin;
 
@@ -152,7 +152,7 @@ router.delete('/clientes/:id', soloAdmin, async (req, res) => {
 });
 
 // PUT /api/admin/clientes/:id/vendedor -> mover el cliente de cartera
-// (vendedor_id null = sin asignar, lo ve solo Home Office)
+// (vendedor_id null = sin asignar; a esos clientes solo llega un administrador)
 router.put('/clientes/:id/vendedor', soloAdmin, async (req, res) => {
   const vendedorId = req.body?.vendedor_id ? Number(req.body.vendedor_id) : null;
 
@@ -522,7 +522,7 @@ router.delete('/documentos/:id', async (req, res) => {
 // --- Expediente del fiado (CSF, estados financieros, acta constitutiva…) ---
 //
 // Estos documentos los sube el propio fiado desde su portal, pero en la
-// práctica muchos llegan por correo a Home Office: Fortex los carga en su
+// práctica muchos llegan por correo a Fortex: se cargan en su
 // nombre y queda registrado que fue Fortex quien lo hizo.
 
 // POST /api/admin/clientes/:id/documentos/:typeId  (multipart: archivo)

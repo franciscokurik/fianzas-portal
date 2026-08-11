@@ -1,7 +1,7 @@
 # Portal de Fianzas · Fortex
 
 Portal web para que los clientes (fiados) de Fortex consulten y gestionen sus fianzas,
-con panel de administración para Home Office.
+con panel de administración para el equipo de Fortex.
 
 ## Stack (MVP)
 
@@ -106,7 +106,7 @@ distintas:
   contabilidad, residencia de obra). Cada una entra con su correo y **todas ven
   lo mismo** de su empresa.
 - Las cuentas de Fortex no pertenecen a ninguna empresa. Hay dos roles:
-  - **admin** (Home Office): todo. Da de alta clientes y usuarios, autoriza
+  - **admin**: todo. Da de alta clientes y usuarios, autoriza
     líneas de crédito y edita los catálogos que ven todos los fiados.
   - **vendedor**: solo los clientes que tenga asignados (`clients.vendedor_id`).
     Puede capturar proyectos, fianzas y documentos de su cartera; **no** puede
@@ -196,7 +196,7 @@ Para automatizar diariamente, programa un cron que llame a ese endpoint o a `cor
 - Activar SendGrid y WhatsApp (Twilio) en `services/`.
 - Cron diario para alertas (hoy hay que llamar `POST /api/alertas/correr`).
 - Que cada quien pueda cambiar su propia contraseña estando dentro (hoy se
-  repone olvidándola, o pidiéndoselo a Home Office).
+  repone olvidándola, o pidiéndoselo a un administrador).
 - Histórico de documentos: hoy cada tipo guarda **un** archivo vigente y al
   renovarlo se reemplaza (no queda el del año pasado).
 - Estado de pago de la prima (pagada / pendiente, fecha y recibo).

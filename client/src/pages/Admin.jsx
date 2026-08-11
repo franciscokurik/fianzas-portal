@@ -63,7 +63,7 @@ export default function Admin() {
   useEffect(() => {
     cargarClientes(); cargarAfianzadoras(); cargarTipos();
     cargarRecordatorios(); cargarTiposDoc();
-    // Los catálogos globales y el personal solo los administra Home Office; al
+    // Los catálogos globales y el personal solo los administra un administrador; al
     // vendedor esas rutas le responden 403 y ensuciarían la pantalla de errores.
     if (esAdmin) { cargarDocsRequeridos(); cargarInternos(); }
   }, [esAdmin]);
@@ -109,7 +109,7 @@ export default function Admin() {
             </h1>
             <p className="text-sm text-slate-500 mt-0.5">
               {esAdmin
-                ? 'Home Office · gestión de clientes, proyectos y pólizas'
+                ? 'Gestión de clientes, proyectos y pólizas'
                 : `${user?.nombre || 'Vendedor'} · proyectos, pólizas y documentos de tus clientes`}
             </p>
           </div>
@@ -203,7 +203,7 @@ export default function Admin() {
                           <span className="text-amber-600"> · {c.recordatorios_pendientes} recordatorio(s)</span>
                         )}
                       </p>
-                      {/* A quién le toca. Sin esto, Home Office no distingue lo
+                      {/* A quién le toca. Sin esto, la administración no distingue lo
                           asignado de lo que nadie está atendiendo. */}
                       {esAdmin && (
                         <p className="text-[11px] mt-0.5">
@@ -228,7 +228,7 @@ export default function Admin() {
                   ? 'Selecciona un cliente para ver y gestionar su información.'
                   : esAdmin
                     ? 'Todavía no hay clientes. Da de alta el primero desde "Agregar cliente".'
-                    : 'Aún no tienes clientes asignados. Home Office te los asigna.'}
+                    : 'Aún no tienes clientes asignados. Te los asigna un administrador.'}
               </div>
             ) : (
               <DetalleCliente
@@ -606,7 +606,7 @@ function DetalleCliente({
               {cliente.telefono && ` · ${cliente.telefono}`}
             </p>
           </div>
-          {/* Mover de cartera es de Home Office: un vendedor no se asigna
+          {/* Mover de cartera es del administrador: un vendedor no se asigna
               clientes a sí mismo. Él solo ve a quién le toca. */}
           {esAdmin ? (
             <div className="flex items-end gap-2">
@@ -867,7 +867,7 @@ function AsignarVendedor({ clienteId, vendedorId, vendedores = [], onChange }) {
         onChange={(e) => asignar(e.target.value)}
         className={`${inputCls} w-auto min-w-44`}
       >
-        <option value="">Sin asignar (Home Office)</option>
+        <option value="">Sin asignar</option>
         {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
       </select>
       {error && <p className="text-[11px] text-rose-600 mt-1">{error}</p>}
@@ -1078,7 +1078,7 @@ function PersonalFortex({ internos = [], onChange, flash }) {
     }
   }
 
-  // Aquí es donde se corrige el correo de la propia cuenta de Home Office
+  // Aquí es donde se corrige el correo de la propia cuenta de administrador
   // cuando la que quedó sembrada no es la que se usa de verdad.
   async function editar(u, campo, etiqueta) {
     const valor = prompt(`${etiqueta} de ${u.nombre}:`, campo === 'email' ? u.email : '');
@@ -1243,10 +1243,10 @@ function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange 
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
         <CreditCard className="w-4 h-4 text-slate-500" />
         <h3 className="text-sm font-semibold text-slate-700">Líneas de crédito por afianzadora</h3>
-        {/* La línea es el riesgo que asume la casa: la fija Home Office. El
+        {/* La línea es el riesgo que asume la casa: la fija un administrador. El
             vendedor la consulta para saber cuánto le queda disponible. */}
         {!puedeEditar && (
-          <span className="text-[11px] text-slate-400 ml-auto">Las autoriza Home Office</span>
+          <span className="text-[11px] text-slate-400 ml-auto">Las autoriza un administrador</span>
         )}
       </div>
       <div className="overflow-x-auto">
@@ -2094,7 +2094,7 @@ function NuevoCliente({ vendedores = [], onDone }) {
           <div>
             <label className="text-[11px] text-slate-500 mb-1 block">Vendedor que lo atiende</label>
             <select value={f.vendedor_id} onChange={set('vendedor_id')} className={inputCls}>
-              <option value="">Sin asignar (Home Office)</option>
+              <option value="">Sin asignar</option>
               {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
             </select>
           </div>

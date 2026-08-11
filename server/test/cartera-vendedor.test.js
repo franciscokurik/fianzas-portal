@@ -23,7 +23,7 @@ const { inicializar } = await import('../src/migrations.js');
 let servidor;
 let base;
 
-// Empresas: 1 = de Mariana, 2 = de Pablo, 3 = sin vendedor (solo Home Office).
+// Empresas: 1 = de Mariana, 2 = de Pablo, 3 = sin vendedor (solo un administrador).
 const [DE_MARIANA, DE_PABLO, SIN_VENDEDOR] = [1, 2, 3];
 let admin;
 let mariana;
@@ -39,7 +39,7 @@ before(async () => {
       ('Constructora C', 'CCC010101CCC');
 
     INSERT INTO users (client_id, nombre, email, password_hash, role) VALUES
-      (NULL, 'Home Office', 'admin@fortex.mx',   'x', 'admin'),
+      (NULL, 'Administración', 'admin@fortex.mx',   'x', 'admin'),
       (NULL, 'Mariana',     'mariana@fortex.mx', 'x', 'vendedor'),
       (NULL, 'Pablo',       'pablo@fortex.mx',   'x', 'vendedor'),
       (1,    'Ana',         'ana@constructora-a.mx', 'x', 'client');
@@ -60,7 +60,7 @@ before(async () => {
              (2, 'fianza', 2, 'caratula', 'https://res.cloudinary.com/fx/raw/upload/v1/b.pdf', 'b.pdf');
   `);
 
-  admin = signToken({ id: 1, role: 'admin', nombre: 'Home Office' });
+  admin = signToken({ id: 1, role: 'admin', nombre: 'Administración' });
   mariana = signToken({ id: 2, role: 'vendedor', nombre: 'Mariana' });
   pablo = signToken({ id: 3, role: 'vendedor', nombre: 'Pablo' });
   ana = signToken({ id: 4, role: 'client', client_id: DE_MARIANA, nombre: 'Ana' });
@@ -92,10 +92,10 @@ test('el vendedor solo ve los clientes de su cartera', async () => {
   assert.deepEqual(clientes.map((c) => c.razon_social), ['Constructora A']);
 
   const deTodos = await (await pedir('/api/admin/clientes', admin)).json();
-  assert.equal(deTodos.clientes.length, 3, 'Home Office ve todo, incluso lo no asignado');
+  assert.equal(deTodos.clientes.length, 3, 'un administrador ve todo, incluso lo no asignado');
 });
 
-test('un cliente sin vendedor asignado solo lo ve Home Office', async () => {
+test('un cliente sin vendedor asignado solo lo ve un administrador', async () => {
   for (const token of [mariana, pablo]) {
     const { clientes } = await (await pedir('/api/admin/clientes', token)).json();
     assert.ok(!clientes.some((c) => c.id === SIN_VENDEDOR));
@@ -198,7 +198,7 @@ test('la descarga comprueba de quién es el archivo, no solo que sea una URL', a
   assert.equal(fuera.status, 404);
 });
 
-/* --- Lo que es solo de Home Office --- */
+/* --- Lo que es solo de un administrador --- */
 
 test('el vendedor no da de alta clientes ni mueve líneas de crédito', async () => {
   const cliente = await pedir('/api/admin/clientes', mariana, {

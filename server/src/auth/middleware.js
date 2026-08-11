@@ -32,7 +32,7 @@ export function requireAuth(req, res, next) {
   }
 }
 
-// Exige rol admin (Home Office). Lo que solo puede hacer Fortex central:
+// Exige rol admin. Lo que solo puede hacer la administración de Fortex:
 // dar de alta clientes y usuarios, mover líneas de crédito y tocar catálogos.
 export function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') {

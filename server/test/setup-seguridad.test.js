@@ -41,7 +41,7 @@ beforeEach(async () => {
     -- prueba y la secuencia no se reinicia, así que en la segunda vuelta las
     -- empresas ya no son la 1 y la 2.
     INSERT INTO users (client_id, nombre, email, password_hash, role) VALUES
-      (NULL, 'Home Office', 'admin@fortex.mx', 'hash', 'admin'),
+      (NULL, 'Administración', 'admin@fortex.mx', 'hash', 'admin'),
       ((SELECT id FROM clients WHERE razon_social = 'GASPE'),
        'Isidro', 'isidro@gaspe.mx', 'x', 'client');
   `);

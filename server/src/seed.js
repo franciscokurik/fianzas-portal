@@ -82,7 +82,7 @@ export async function seed() {
   await insUsuario.get(c1, 'Contabilidad', 'contabilidad@bajio.mx', hash('demo123'), 'client');
   await insUsuario.get(c1, 'Residencia de obra', 'obra@bajio.mx', hash('demo123'), 'client');
 
-  // Cliente demo 2, todavía sin vendedor asignado: lo ve solo Home Office.
+  // Cliente demo 2, todavía sin vendedor asignado: solo lo ve un administrador.
   const c2 = (await insClient.get(
     'Ingeniería Aplicada del Norte SA', 'IAN980720XYZ', '5559876543', null
   )).id;
@@ -168,7 +168,7 @@ export async function seed() {
   await insDoc.run(c1, tipoIds['comprobante_domicilio'], 'demo/comprobante.pdf', 'comprobante.pdf', 'application/pdf', 102400, addMonths(hoy, -3), addMonths(hoy, 0), 'cliente');
   await insDoc.run(c1, tipoIds['csf'], 'demo/csf.pdf', 'csf.pdf', 'application/pdf', 88000, addMonths(hoy, -1), null, 'cliente');
   // Los estados financieros suelen llegar por correo al contador de Fortex, no
-  // por el portal: así se ve en la demo cómo queda uno cargado por Home Office.
+  // por el portal: así se ve en la demo cómo queda uno cargado por Fortex.
   await insDoc.run(c1, tipoIds['estados_financieros'], 'demo/ef.pdf', 'estados_financieros.pdf', 'application/pdf', 250000, addMonths(hoy, -10), addMonths(hoy, 2), 'fortex');
 
   // --- Papelería específica para cliente 1 ---

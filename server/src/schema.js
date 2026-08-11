@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_client ON users(client_id);
 
 -- Quién atiende a este fiado. ON DELETE SET NULL: si se da de baja al vendedor,
--- sus clientes quedan sin asignar (visibles para Home Office), nunca se borran.
+-- sus clientes quedan sin asignar (solo los ve un administrador), nunca se borran.
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS vendedor_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_clients_vendedor ON clients(vendedor_id);
 
@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS client_documents (
   uploaded_at      TEXT    NOT NULL DEFAULT ${TS_DEFAULT},
   vencimiento      TEXT,
   -- 'cliente' o 'fortex': el papel puede llegar por el portal o por correo a
-  -- Home Office, y conviene saber quién lo cargó para no perseguir al fiado
+  -- Fortex, y conviene saber quién lo cargó para no perseguir al fiado
   -- por algo que ya entregó.
   subido_por       TEXT    NOT NULL DEFAULT 'cliente',
   UNIQUE(client_id, document_type_id)
