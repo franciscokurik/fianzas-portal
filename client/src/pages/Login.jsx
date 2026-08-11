@@ -115,37 +115,9 @@ export default function Login() {
             </p>
           </form>
 
-          {/* Las cuentas sembradas solo se listan corriendo en local.
-              import.meta.env.DEV lo resuelve Vite al compilar, así que en el
-              bundle de producción este bloque no existe: no es que se esconda
-              con CSS, es que las contraseñas ni siquiera viajan al navegador.
-              Publicarlas en la pantalla de acceso de un portal donde vive el
-              expediente financiero de terceros no tiene ninguna defensa. */}
-          {import.meta.env.DEV && (
-            <div className="login-demo">
-              <div className="login-demo-title">
-                <span>Cuentas sembradas</span>
-                <span className="login-demo-badge">SOLO LOCAL</span>
-              </div>
-              <div className="login-demo-grid">
-                <div>
-                  <span>Cliente</span>
-                  <strong>cliente@demo.mx</strong>
-                  <code>demo123</code>
-                </div>
-                <div>
-                  <span>Operador</span>
-                  <strong>mariana@fortex.mx</strong>
-                  <code>operador123</code>
-                </div>
-                <div>
-                  <span>Administrador</span>
-                  <strong>francisco@fortex.mx</strong>
-                  <code>admin123</code>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Aquí vivían las cuentas de demostración con sus contraseñas. No
+              van en la pantalla de acceso ni en local: las que siembra el seed
+              están documentadas en el README, que es donde se buscan. */}
 
           <p className="login-security-note">
             <LockKeyhole aria-hidden="true" />
