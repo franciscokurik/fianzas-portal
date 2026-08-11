@@ -89,13 +89,17 @@ app.get('/api/setup', async (req, res) => {
     // SMTP estén mal se descubre el día que alguien olvida su contraseña y el
     // enlace no le llega nunca.
     const correo = await probarCorreo();
+    // Y con qué dominio se van a armar los enlaces de recuperación: si APP_URL
+    // apunta al sitio equivocado, el correo llega con una URL que no es la del
+    // portal y no hay otra forma de notarlo sin mandarse uno de prueba.
+    const portal = process.env.APP_URL || '(se deduce de cada petición)';
 
     if (req.query.force === '1') {
       await seed();
-      return res.json({ ok: true, seeded: true, forced: true, correo });
+      return res.json({ ok: true, seeded: true, forced: true, correo, portal });
     }
     const seeded = await seedIfEmpty();
-    res.json({ ok: true, seeded, correo });
+    res.json({ ok: true, seeded, correo, portal });
   } catch (e) {
     res.status(500).json({ error: 'Fallo en setup', detail: e.message });
   }
