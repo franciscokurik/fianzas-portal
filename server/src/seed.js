@@ -68,10 +68,14 @@ export async function seed() {
      VALUES (?, ?, ?, ?) RETURNING id`
   );
 
-  // Personal de Fortex: no cuelgan de ninguna empresa.
+  // Personal de Fortex: no cuelgan de ninguna empresa. Los tres niveles, para
+  // poder ver en la demo en qué se diferencian.
   await insUsuario.get(null, 'Francisco Kuri', 'francisco@fortex.mx', hash('admin123'), 'admin');
   const operador = (await insUsuario.get(
     null, 'Mariana Ruiz', 'mariana@fortex.mx', hash('operador123'), 'operador'
+  )).id;
+  const vendedor = (await insUsuario.get(
+    null, 'Carlos Treviño', 'carlos@fortex.mx', hash('vendedor123'), 'vendedor'
   )).id;
 
   // Cliente demo 1, con tres accesos: así se ve para qué sirve tener varios.
@@ -82,10 +86,10 @@ export async function seed() {
   await insUsuario.get(c1, 'Contabilidad', 'contabilidad@bajio.mx', hash('demo123'), 'client');
   await insUsuario.get(c1, 'Residencia de obra', 'obra@bajio.mx', hash('demo123'), 'client');
 
-  // Cliente demo 2, todavía sin responsable asignado (se ve igual, el campo
-  // es informativo).
+  // Cliente demo 2, en la cartera del VENDEDOR: es el único que él alcanza, y
+  // sirve para comprobar que no ve el de arriba.
   const c2 = (await insClient.get(
-    'Ingeniería Aplicada del Norte SA', 'IAN980720XYZ', '5559876543', null
+    'Ingeniería Aplicada del Norte SA', 'IAN980720XYZ', '5559876543', vendedor
   )).id;
   await insUsuario.get(c2, 'Dirección', 'norte@demo.mx', hash('demo123'), 'client');
 
@@ -177,7 +181,7 @@ export async function seed() {
     `INSERT INTO papeleria_requests (client_id, afianzadora_id, fianza_id, descripcion) VALUES (?, ?, ?, ?)`
   ).run(c1, afiIds['aserta'], null, 'Aserta requiere carta de no adeudo del SAT (formato 32-D) para renovar la línea.');
 
-  return { clientes: 2, usuarios: 6, afianzadoras: afianzadoras.length };
+  return { clientes: 2, usuarios: 7, afianzadoras: afianzadoras.length };
 }
 
 // Deja el portal listo para operar de verdad: borra TODOS los datos de
@@ -245,6 +249,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       console.log(`✅ Listo (${r.clientes} empresas, ${r.usuarios} usuarios, ${r.afianzadoras} afianzadoras).`);
       console.log('   Admin    -> francisco@fortex.mx / admin123');
       console.log('   Operador -> mariana@fortex.mx / operador123');
+      console.log('   Vendedor -> carlos@fortex.mx / vendedor123  (solo ve un cliente)');
       console.log('   Cliente  -> cliente@demo.mx (RFC CBA120315ABC) / demo123');
       console.log('   Cliente  -> contabilidad@bajio.mx / demo123  (misma empresa)');
       console.log('   Cliente  -> norte@demo.mx / demo123');

@@ -11,7 +11,8 @@ import { invalidarEnlaces } from './recuperacion.js';
 // personal del dueño, y amarrarlos dejaría fuera a clientes legítimos.
 export const DOMINIO_INTERNO = (process.env.DOMINIO_INTERNO || 'fortex.mx').toLowerCase();
 
-export const ROLES_INTERNOS = ['operador', 'admin'];
+// De menos a más permisos. El orden importa para la pantalla: así se listan.
+export const ROLES_INTERNOS = ['vendedor', 'operador', 'admin'];
 
 function fallo(mensaje, status = 400) {
   const e = new Error(mensaje);

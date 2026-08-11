@@ -41,12 +41,26 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
-// Personal de Fortex: admin u operador. Los dos entran al panel y ven a todos
-// los fiados; el operador solo no maneja cuentas de acceso ni da de baja
-// empresas (ver el soloAdmin de routes/admin.js).
+const ROLES_INTERNOS = ['admin', 'operador', 'vendedor'];
+
+// Personal de Fortex: los tres niveles entran al panel. Lo que cada uno alcanza
+// se decide después: el vendedor solo su cartera (lib/permisos.js) y las rutas
+// que ni siquiera le tocan van marcadas con requireOperador o requireAdmin.
 export function requireInterno(req, res, next) {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'operador') {
+  if (!ROLES_INTERNOS.includes(req.user?.role)) {
     return res.status(403).json({ error: 'Requiere una cuenta de Fortex' });
+  }
+  next();
+}
+
+// Deja fuera al vendedor. Es para lo que no es "de un cliente" sino de la casa:
+// dar de alta empresas, mover líneas de crédito y cambiar los catálogos que ven
+// TODOS los fiados. El vendedor solo puede con lo suyo, y esto no es suyo.
+export function requireOperador(req, res, next) {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'operador') {
+    return res.status(403).json({
+      error: 'Solo un operador o un administrador puede hacer esto',
+    });
   }
   next();
 }

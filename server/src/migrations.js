@@ -163,6 +163,19 @@ export const MIGRACIONES = [
         CHECK (role IN ('client', 'operador', 'admin'));
     `,
   },
+  {
+    // Vuelve a haber vendedores, pero ahora como TERCER nivel y no en lugar del
+    // operador: ven y editan solo los clientes que tengan asignados. Las cuentas
+    // que la 006 convirtió a operador se quedan como están — quien deba ser
+    // vendedor se cambia desde el panel, que es una decisión de negocio y no
+    // algo que deba adivinar una migración.
+    nombre: '007_repone_el_rol_vendedor',
+    sql: `
+      ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+      ALTER TABLE users ADD CONSTRAINT users_role_check
+        CHECK (role IN ('client', 'vendedor', 'operador', 'admin'));
+    `,
+  },
 ];
 
 // Parte un bloque de SQL en sentencias sueltas: el driver HTTP de Neon corre

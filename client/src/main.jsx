@@ -8,10 +8,11 @@ import Dashboard from './pages/Dashboard.jsx';
 import Admin from './pages/Admin.jsx';
 import './index.css';
 
-// Al panel entra el personal de Fortex: admin y operador ven la misma
-// pantalla. Esto es solo para no mostrar lo que no le toca al operador; quien
-// decide de verdad es el servidor en cada petición.
-const esInterno = (user) => user?.role === 'admin' || user?.role === 'operador';
+// Al panel entran los tres niveles internos y comparten pantalla; lo que cambia
+// es qué se les muestra. Esto es solo para que no estorbe: quien decide de
+// verdad es el servidor en cada petición.
+const ROLES_INTERNOS = ['admin', 'operador', 'vendedor'];
+const esInterno = (user) => ROLES_INTERNOS.includes(user?.role);
 
 function Protected({ children, internoOnly }) {
   const { user, loading } = useAuth();

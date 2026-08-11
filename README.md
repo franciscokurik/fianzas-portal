@@ -105,17 +105,27 @@ distintas:
 - Una constructora puede tener varias personas dadas de alta (dirección,
   contabilidad, residencia de obra). Cada una entra con su correo y **todas ven
   lo mismo** de su empresa.
-- Las cuentas de Fortex no pertenecen a ninguna empresa. Hay dos roles, y la
-  diferencia entre ellos es corta:
-  - **operador**: toda la operación sobre **todos** los fiados. Da de alta
-    clientes, captura proyectos, pólizas y documentos, fija líneas de crédito y
-    mantiene los catálogos.
-  - **admin**: lo mismo, y además las **cuentas de acceso** —quién entra al
-    portal— y la **baja de una empresa** completa, que se lleva su historial y
-    no tiene deshacer.
+- Las cuentas de Fortex no pertenecen a ninguna empresa. Hay tres niveles, de
+  menos a más permiso:
 
-  La columna `clients.vendedor_id` guarda quién atiende a cada fiado, pero es
-  **informativa**: sirve para saber a quién preguntarle, no limita lo que nadie ve.
+  | | vendedor | operador | admin |
+  |---|---|---|---|
+  | Ver clientes | **solo su cartera** | todos | todos |
+  | Capturar proyectos, pólizas y documentos | solo su cartera | todos | todos |
+  | Dar de alta clientes y sus accesos | ❌ | ✅ | ✅ |
+  | Líneas de crédito | solo consultar | ✅ | ✅ |
+  | Catálogos (afianzadoras, tipos, documentos) | solo consultar | ✅ | ✅ |
+  | Reasignar quién atiende a un cliente | ❌ | ✅ | ✅ |
+  | Cuentas de acceso | ❌ | ❌ | ✅ |
+  | Dar de baja una empresa | ❌ | ❌ | ✅ |
+
+  Reservar al admin solo esas dos últimas es deliberado: son las que **no se
+  arreglan volviendo a capturar**.
+
+- La cartera vive en `clients.vendedor_id` y puede apuntar a **cualquier** cuenta
+  interna: un admin o un operador también llevan clientes. Para ellos el campo es
+  informativo (de todas formas ven todo); para el vendedor es lo que lo limita.
+  Un cliente que atiende el admin **no** se le aparece al vendedor.
 - El correo de las cuentas de Fortex tiene que ser del dominio de la casa
   (`DOMINIO_INTERNO`, por omisión `fortex.mx`). A los fiados **no** se les exige
   dominio a propósito: muchos contratistas usan Gmail o el correo personal del
@@ -137,11 +147,13 @@ no identifica a nadie en particular.
 | Cliente  | contabilidad@bajio.mx   | demo123      |
 | Cliente  | norte@demo.mx           | demo123      |
 | Operador | mariana@fortex.mx       | operador123  |
+| Vendedor | carlos@fortex.mx        | vendedor123  |
 | Admin    | francisco@fortex.mx     | admin123     |
 
 Las dos primeras son de la **misma** empresa: sirven para ver que varias
 personas comparten la información del fiado. `norte@demo.mx` entra también con
-su RFC (`IAN980720XYZ`) porque su empresa tiene una sola cuenta.
+su RFC (`IAN980720XYZ`) porque su empresa tiene una sola cuenta. `carlos@fortex.mx`
+solo ve a Ingeniería del Norte: sirve para comprobar el alcance del vendedor.
 
 ## Correo saliente y recuperación de contraseña
 

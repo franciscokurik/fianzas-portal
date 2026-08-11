@@ -30,10 +30,15 @@ const etiquetaEstatus = (v) => (ESTATUS_PROYECTO.find(([k]) => k === v) || [, v]
 
 export default function Admin() {
   const { user, logout } = useAuth();
-  // Admin y operador usan la misma pantalla y ven a todos los fiados. Lo único
-  // que se le oculta al operador son las cuentas de acceso y la baja de una
-  // empresa; quien manda de verdad es el servidor en cada ruta.
+  // Los tres niveles usan la misma pantalla; lo que cambia es qué se muestra.
+  // Ocultar es solo para que no estorbe: quien decide de verdad es el servidor
+  // en cada ruta.
+  //   vendedor -> solo su cartera, y sin nada de lo que es de la casa.
+  //   operador -> todo salvo las cuentas de acceso y la baja de empresas.
+  //   admin    -> todo.
   const esAdmin = user?.role === 'admin';
+  const esVendedor = user?.role === 'vendedor';
+  const puedeOperar = !esVendedor;
 
   const [clientes, setClientes] = useState([]);
   const [internos, setInternos] = useState([]);
@@ -64,8 +69,10 @@ export default function Admin() {
   useEffect(() => {
     cargarClientes(); cargarAfianzadoras(); cargarTipos();
     cargarRecordatorios(); cargarTiposDoc();
-    cargarDocsRequeridos(); cargarInternos();
-  }, []);
+    // Al vendedor estas dos le responden 403 y solo le llenarían la pantalla de
+    // errores por algo que no necesita.
+    if (puedeOperar) { cargarDocsRequeridos(); cargarInternos(); }
+  }, [puedeOperar]);
 
   // Para el selector de "quién atiende" a cada fiado: cualquiera de Fortex.
   const responsables = internos.filter((u) => u.activo);
@@ -88,7 +95,7 @@ export default function Admin() {
           <div className="portal-brand">
             <span className="portal-brand-name text-sm font-semibold text-slate-700">
               <strong>FORTEX</strong>
-              <small>ADMINISTRACIÓN DE FIANZAS</small>
+              <small>{esVendedor ? 'CARTERA DE CLIENTES' : 'ADMINISTRACIÓN DE FIANZAS'}</small>
             </span>
           </div>
           <div className="portal-topbar-actions">
@@ -102,12 +109,15 @@ export default function Admin() {
       <main className="portal-main max-w-[1400px] mx-auto px-6 py-6">
         <div className="portal-page-heading flex flex-wrap items-end justify-between gap-3 mb-5">
           <div>
-            <p className="portal-eyebrow">Centro de operaciones</p>
+            <p className="portal-eyebrow">{esVendedor ? 'Mi cartera' : 'Centro de operaciones'}</p>
             <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-indigo-600" /> Panel de administración
+              <Building2 className="w-5 h-5 text-indigo-600" />
+              {esVendedor ? 'Mis clientes' : 'Panel de administración'}
             </h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              {user?.nombre} · gestión de clientes, proyectos y pólizas
+              {user?.nombre} · {esVendedor
+                ? 'proyectos, pólizas y documentos de tus clientes'
+                : 'gestión de clientes, proyectos y pólizas'}
             </p>
           </div>
         </div>
@@ -149,33 +159,39 @@ export default function Admin() {
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
           {/* Columna izquierda */}
           <div className="space-y-4">
-            <NuevoCliente
-              responsables={responsables}
-              onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }}
-            />
-            {/* Las cuentas de acceso son lo único del admin en esta columna. */}
-            {esAdmin && (
-              <PersonalFortex
-                internos={internos}
-                onChange={() => { cargarInternos(); cargarClientes(); recargarDetalle(); }}
-                flash={flash}
-              />
+            {/* Nada de esta columna es del vendedor: son cosas de la casa, no
+                de un cliente suyo. */}
+            {puedeOperar && (
+              <>
+                <NuevoCliente
+                  responsables={responsables}
+                  onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }}
+                />
+                {/* Las cuentas de acceso son lo único del admin en esta columna. */}
+                {esAdmin && (
+                  <PersonalFortex
+                    internos={internos}
+                    onChange={() => { cargarInternos(); cargarClientes(); recargarDetalle(); }}
+                    flash={flash}
+                  />
+                )}
+                <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
+                <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
+                {/* Cambiar el catálogo mueve la lista de pendientes de todos los
+                    fiados, así que también se refresca el detalle abierto. */}
+                <CatalogoDocumentos
+                  tipos={docsRequeridos}
+                  onChange={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
+                  flash={flash}
+                />
+              </>
             )}
-            <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
-            <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
-            {/* Cambiar el catálogo mueve la lista de pendientes de todos los
-                fiados, así que también se refresca el detalle abierto. */}
-            <CatalogoDocumentos
-              tipos={docsRequeridos}
-              onChange={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
-              flash={flash}
-            />
 
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
               <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
                 <Users className="w-4 h-4 text-slate-500" />
                 <h3 className="text-sm font-semibold text-slate-700">
-                  Clientes ({clientes.length})
+                  {esVendedor ? 'Mi cartera' : 'Clientes'} ({clientes.length})
                 </h3>
               </div>
               <div className="divide-y divide-slate-100 max-h-[65vh] overflow-y-auto">
@@ -219,12 +235,15 @@ export default function Admin() {
               <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-400">
                 {clientes.length
                   ? 'Selecciona un cliente para ver y gestionar su información.'
-                  : 'Todavía no hay clientes. Da de alta el primero desde "Agregar cliente".'}
+                  : esVendedor
+                    ? 'Aún no tienes clientes asignados. Te los asigna un operador.'
+                    : 'Todavía no hay clientes. Da de alta el primero desde "Agregar cliente".'}
               </div>
             ) : (
               <DetalleCliente
                 detalle={detalle}
                 esAdmin={esAdmin}
+                puedeOperar={puedeOperar}
                 responsables={responsables}
                 onEliminado={() => {
                   setSel(null);
@@ -531,7 +550,7 @@ function CatalogoDocumentos({ tipos, onChange, flash }) {
    -------------------------------------------------------------------------- */
 
 function DetalleCliente({
-  detalle, esAdmin, responsables, afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
+  detalle, esAdmin, puedeOperar, responsables, afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
 }) {
   const {
     cliente, usuarios = [], lineas = [], proyectos = [],
@@ -598,12 +617,18 @@ function DetalleCliente({
             </p>
           </div>
           <div className="flex items-end gap-2">
-            <AsignarResponsable
-              clienteId={cliente.id}
-              responsableId={cliente.vendedor_id}
-              responsables={responsables}
-              onChange={() => { onChange(); flash('Responsable actualizado'); }}
-            />
+            {/* Reasignar la cartera no es del vendedor: nadie se queda ni se
+                quita clientes a sí mismo. */}
+            {puedeOperar ? (
+              <AsignarResponsable
+                clienteId={cliente.id}
+                responsableId={cliente.vendedor_id}
+                responsables={responsables}
+                onChange={() => { onChange(); flash('Responsable actualizado'); }}
+              />
+            ) : (
+              <span className="text-[11px] text-slate-400">En tu cartera</span>
+            )}
             {/* Dar de baja la empresa se lleva su historial y no tiene deshacer:
                 eso sí queda solo para el administrador. */}
             {esAdmin && (
@@ -649,6 +674,7 @@ function DetalleCliente({
         clienteId={cliente.id}
         lineas={lineas}
         afianzadoras={afianzadoras}
+        puedeEditar={puedeOperar}
         onChange={() => { onChange(); flash('Línea de crédito actualizada'); }}
       />
 
@@ -1031,7 +1057,7 @@ function UsuariosCliente({ clienteId, usuarios = [], esAdmin, onChange, flash })
 }
 
 /* --------------------------------------------------------------------------
-   Personal de Fortex: operadores y administradores
+   Personal de Fortex: vendedores, operadores y administradores
    -------------------------------------------------------------------------- */
 
 function PersonalFortex({ internos = [], onChange, flash }) {
@@ -1112,8 +1138,9 @@ function PersonalFortex({ internos = [], onChange, flash }) {
       {open && (
         <div className="p-4 space-y-2.5">
           <p className="text-[11px] text-slate-400">
-            El operador hace toda la operación sobre todos los clientes; el administrador además maneja
-            estas cuentas y puede dar de baja empresas. El correo debe ser del dominio de Fortex.
+            El vendedor solo ve y edita los clientes que le asignes. El operador hace toda la
+            operación sobre todos. El administrador además maneja estas cuentas y puede dar de
+            baja empresas. El correo debe ser del dominio de Fortex.
           </p>
 
           <div className="space-y-2 border border-slate-100 rounded-lg p-2.5 bg-slate-50/60">
@@ -1143,6 +1170,7 @@ function PersonalFortex({ internos = [], onChange, flash }) {
                 onChange={(e) => setNuevo({ ...nuevo, role: e.target.value })}
                 className={inputCls}
               >
+                <option value="vendedor">Vendedor</option>
                 <option value="operador">Operador</option>
                 <option value="admin">Administrador</option>
               </select>
@@ -1160,7 +1188,7 @@ function PersonalFortex({ internos = [], onChange, flash }) {
                     {u.nombre}
                   </p>
                   <p className="text-[10px] text-slate-400 truncate">
-                    {u.email} · {u.role === 'admin' ? 'administrador' : 'operador'}
+                    {u.email} · {u.role}
                     {u.clientes_asignados > 0 && ` · atiende ${u.clientes_asignados}`}
                   </p>
                 </div>
@@ -1227,7 +1255,7 @@ function Req() { return <span className="text-rose-500">*</span>; }
    Líneas de crédito
    -------------------------------------------------------------------------- */
 
-function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
+function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange }) {
   const [edits, setEdits] = useState({}); // afianzadora_id -> valor en edición
   const [nuevaAfi, setNuevaAfi] = useState('');
   const [nuevoMonto, setNuevoMonto] = useState(0); // en centavos
@@ -1259,6 +1287,11 @@ function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
         <CreditCard className="w-4 h-4 text-slate-500" />
         <h3 className="text-sm font-semibold text-slate-700">Líneas de crédito por afianzadora</h3>
+        {/* La línea es el riesgo que asume la casa. El vendedor la consulta para
+            saber cuánto le queda disponible al cliente, pero no la mueve. */}
+        {!puedeEditar && (
+          <span className="text-[11px] text-slate-400 ml-auto">Las autoriza un operador</span>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -1279,25 +1312,31 @@ function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
                 <tr key={l.afianzadora_id} className="hover:bg-slate-50/40">
                   <td className="px-3 py-1.5 text-slate-700 font-medium">{l.afianzadora_nombre}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
-                    <InputPesos
-                      valor={editing}
-                      onChange={(centavos) => setEdits((s) => ({ ...s, [l.afianzadora_id]: centavos }))}
-                      className="w-32 px-2 py-1 text-right rounded-md border border-slate-200 bg-white tabular-nums focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
-                    />
+                    {puedeEditar ? (
+                      <InputPesos
+                        valor={editing}
+                        onChange={(centavos) => setEdits((s) => ({ ...s, [l.afianzadora_id]: centavos }))}
+                        className="w-32 px-2 py-1 text-right rounded-md border border-slate-200 bg-white tabular-nums focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
+                      />
+                    ) : (
+                      <span className="text-slate-700">{mxn(l.linea_credito)}</span>
+                    )}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxn(l.comprometido)}</td>
                   <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${negativo ? 'text-rose-600' : 'text-emerald-700'}`}>
                     {mxn(l.disponible)}
                   </td>
                   <td className="px-3 py-1.5">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => guardar(l.afianzadora_id, editing)} className={btnSecondary} title="Guardar">
-                        <Save className="h-3.5 w-3.5" />
-                      </button>
-                      <button onClick={() => eliminar(l.afianzadora_id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Quitar línea">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                    {puedeEditar && (
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={() => guardar(l.afianzadora_id, editing)} className={btnSecondary} title="Guardar">
+                          <Save className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => eliminar(l.afianzadora_id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Quitar línea">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               );
@@ -1308,7 +1347,7 @@ function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
           </tbody>
         </table>
       </div>
-      {disponiblesParaAgregar.length > 0 && (
+      {puedeEditar && disponiblesParaAgregar.length > 0 && (
         <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
           <p className="text-xs font-medium text-slate-600 mb-2">Asignar línea a otra afianzadora</p>
           <div className="flex flex-col md:flex-row gap-2">

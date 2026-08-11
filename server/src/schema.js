@@ -26,10 +26,12 @@ CREATE TABLE IF NOT EXISTS clients (
 --   client_id lleno  -> gente del fiado; ve solo lo de su empresa.
 --   client_id NULL   -> personal de Fortex (admin u operador).
 --
--- Solo hay dos roles internos y la diferencia es corta: el OPERADOR hace toda
--- la operación (da de alta clientes, captura pólizas y documentos, fija líneas
--- de crédito) y el ADMIN además maneja las cuentas de acceso y puede dar de
--- baja empresas completas. Los dos ven a todos los fiados.
+-- Tres niveles internos, de menos a más:
+--   VENDEDOR -> solo los clientes que tenga asignados, y solo sobre ellos.
+--   OPERADOR -> todos los clientes; toda la operación (alta de clientes,
+--               líneas de crédito, catálogos).
+--   ADMIN    -> lo del operador, más las cuentas de acceso y la baja de una
+--               empresa completa.
 CREATE TABLE IF NOT EXISTS users (
   id            SERIAL PRIMARY KEY,
   client_id     INTEGER REFERENCES clients(id) ON DELETE CASCADE,
@@ -37,16 +39,19 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT    UNIQUE NOT NULL,
   password_hash TEXT    NOT NULL,
   role          TEXT    NOT NULL DEFAULT 'client'
-                CHECK (role IN ('client', 'operador', 'admin')),
+                CHECK (role IN ('client', 'vendedor', 'operador', 'admin')),
   activo        INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
 );
 CREATE INDEX IF NOT EXISTS idx_users_client ON users(client_id);
 
--- Quién atiende a este fiado. Es INFORMATIVO: sirve para saber a quién
--- preguntarle, NO limita lo que nadie ve. Todo el personal de Fortex ve a
--- todos los clientes; si algún día hace falta acotarlo, el filtro va en el
--- servidor y no en este campo.
+-- Quién atiende a este fiado. Puede ser CUALQUIER cuenta interna: un admin o un
+-- operador también llevan clientes. Para ellos el campo es informativo, porque
+-- de todas formas ven todo; para el vendedor es lo que lo limita (ver
+-- lib/permisos.js, que es el único lugar donde eso se decide).
+--
+-- ON DELETE SET NULL: al dar de baja a quien lo atendía, el cliente queda sin
+-- asignar y lo siguen viendo los admins y operadores. Nunca se borra con él.
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS vendedor_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_clients_vendedor ON clients(vendedor_id);
 

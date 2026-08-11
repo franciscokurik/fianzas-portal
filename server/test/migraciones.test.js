@@ -46,7 +46,30 @@ test('sobre una base existente aplica todas las migraciones', async () => {
     '004_prima_total_desde_prima_neta',
     '005_usuarios_aparte_de_clientes',
     '006_vendedor_pasa_a_operador',
+    '007_repone_el_rol_vendedor',
   ]);
+});
+
+test('después de reponer el rol, la base admite los tres niveles internos', async () => {
+  const db = await baseVieja();
+  await inicializar(db);
+
+  for (const role of ['vendedor', 'operador', 'admin']) {
+    await db.query(
+      `INSERT INTO users (nombre, email, password_hash, role) VALUES (?, ?, 'x', ?)`,
+      [role, `${role}@fortex.mx`, role],
+    );
+  }
+  const internos = await db
+    .prepare(`SELECT role FROM users WHERE client_id IS NULL ORDER BY role`).all();
+  assert.deepEqual(internos.map((u) => u.role), ['admin', 'operador', 'vendedor']);
+
+  // Y un rol inventado sigue rebotando: la restricción no se aflojó de más.
+  await assert.rejects(
+    () => db.query(`INSERT INTO users (nombre, email, password_hash, role)
+                    VALUES ('X', 'x@fortex.mx', 'x', 'gerente')`),
+    'la restricción debe seguir cerrando la puerta a roles que no existen'
+  );
 });
 
 test('una cuenta de vendedor que ya existía queda convertida en operador', async () => {
