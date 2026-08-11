@@ -16,7 +16,7 @@ function urlDelPortal(req) {
 }
 
 // Los datos que el front necesita del usuario. La razón social viene de la
-// empresa, no de la persona: el admin y los vendedores no tienen.
+// empresa, no de la persona: el personal de Fortex no tiene.
 const SELECT_USUARIO = `
   SELECT u.id, u.nombre, u.email, u.role, u.activo, u.password_hash,
          u.client_id, c.razon_social, c.rfc

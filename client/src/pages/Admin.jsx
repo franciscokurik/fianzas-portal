@@ -30,8 +30,9 @@ const etiquetaEstatus = (v) => (ESTATUS_PROYECTO.find(([k]) => k === v) || [, v]
 
 export default function Admin() {
   const { user, logout } = useAuth();
-  // El vendedor usa esta misma pantalla, acotada a su cartera. Ocultar lo que no
-  // le toca es para que no estorbe: quien manda es el servidor en cada ruta.
+  // Admin y operador usan la misma pantalla y ven a todos los fiados. Lo único
+  // que se le oculta al operador son las cuentas de acceso y la baja de una
+  // empresa; quien manda de verdad es el servidor en cada ruta.
   const esAdmin = user?.role === 'admin';
 
   const [clientes, setClientes] = useState([]);
@@ -63,12 +64,11 @@ export default function Admin() {
   useEffect(() => {
     cargarClientes(); cargarAfianzadoras(); cargarTipos();
     cargarRecordatorios(); cargarTiposDoc();
-    // Los catálogos globales y el personal solo los administra un administrador; al
-    // vendedor esas rutas le responden 403 y ensuciarían la pantalla de errores.
-    if (esAdmin) { cargarDocsRequeridos(); cargarInternos(); }
-  }, [esAdmin]);
+    cargarDocsRequeridos(); cargarInternos();
+  }, []);
 
-  const vendedores = internos.filter((u) => u.role === 'vendedor' && u.activo);
+  // Para el selector de "quién atiende" a cada fiado: cualquiera de Fortex.
+  const responsables = internos.filter((u) => u.activo);
 
   function abrirDetalle(id) {
     setSel(id);
@@ -88,7 +88,7 @@ export default function Admin() {
           <div className="portal-brand">
             <span className="portal-brand-name text-sm font-semibold text-slate-700">
               <strong>FORTEX</strong>
-              <small>{esAdmin ? 'ADMINISTRACIÓN DE FIANZAS' : 'CARTERA DE CLIENTES'}</small>
+              <small>ADMINISTRACIÓN DE FIANZAS</small>
             </span>
           </div>
           <div className="portal-topbar-actions">
@@ -102,15 +102,12 @@ export default function Admin() {
       <main className="portal-main max-w-[1400px] mx-auto px-6 py-6">
         <div className="portal-page-heading flex flex-wrap items-end justify-between gap-3 mb-5">
           <div>
-            <p className="portal-eyebrow">{esAdmin ? 'Centro de operaciones' : 'Mi cartera'}</p>
+            <p className="portal-eyebrow">Centro de operaciones</p>
             <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-indigo-600" />
-              {esAdmin ? 'Panel de administración' : 'Mis clientes'}
+              <Building2 className="w-5 h-5 text-indigo-600" /> Panel de administración
             </h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              {esAdmin
-                ? 'Gestión de clientes, proyectos y pólizas'
-                : `${user?.nombre || 'Vendedor'} · proyectos, pólizas y documentos de tus clientes`}
+              {user?.nombre} · gestión de clientes, proyectos y pólizas
             </p>
           </div>
         </div>
@@ -152,34 +149,33 @@ export default function Admin() {
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
           {/* Columna izquierda */}
           <div className="space-y-4">
+            <NuevoCliente
+              responsables={responsables}
+              onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }}
+            />
+            {/* Las cuentas de acceso son lo único del admin en esta columna. */}
             {esAdmin && (
-              <>
-                <NuevoCliente
-                  vendedores={vendedores}
-                  onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }}
-                />
-                <PersonalFortex
-                  internos={internos}
-                  onChange={() => { cargarInternos(); cargarClientes(); recargarDetalle(); }}
-                  flash={flash}
-                />
-                <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
-                <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
-                {/* Cambiar el catálogo mueve la lista de pendientes de todos los
-                    fiados, así que también se refresca el detalle abierto. */}
-                <CatalogoDocumentos
-                  tipos={docsRequeridos}
-                  onChange={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
-                  flash={flash}
-                />
-              </>
+              <PersonalFortex
+                internos={internos}
+                onChange={() => { cargarInternos(); cargarClientes(); recargarDetalle(); }}
+                flash={flash}
+              />
             )}
+            <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
+            <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
+            {/* Cambiar el catálogo mueve la lista de pendientes de todos los
+                fiados, así que también se refresca el detalle abierto. */}
+            <CatalogoDocumentos
+              tipos={docsRequeridos}
+              onChange={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
+              flash={flash}
+            />
 
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
               <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
                 <Users className="w-4 h-4 text-slate-500" />
                 <h3 className="text-sm font-semibold text-slate-700">
-                  {esAdmin ? 'Clientes' : 'Mi cartera'} ({clientes.length})
+                  Clientes ({clientes.length})
                 </h3>
               </div>
               <div className="divide-y divide-slate-100 max-h-[65vh] overflow-y-auto">
@@ -203,16 +199,13 @@ export default function Admin() {
                           <span className="text-amber-600"> · {c.recordatorios_pendientes} recordatorio(s)</span>
                         )}
                       </p>
-                      {/* A quién le toca. Sin esto, la administración no distingue lo
-                          asignado de lo que nadie está atendiendo. */}
-                      {esAdmin && (
-                        <p className="text-[11px] mt-0.5">
-                          {c.vendedor_nombre
-                            ? <span className="text-slate-400">{c.vendedor_nombre}</span>
-                            : <span className="text-amber-600">Sin vendedor asignado</span>}
-                          <span className="text-slate-300"> · {c.total_usuarios} usuario(s)</span>
-                        </p>
-                      )}
+                      {/* Quién lo atiende. Es informativo: no limita quién lo ve. */}
+                      <p className="text-[11px] mt-0.5">
+                        {c.vendedor_nombre
+                          ? <span className="text-slate-400">{c.vendedor_nombre}</span>
+                          : <span className="text-slate-300">Sin responsable</span>}
+                        <span className="text-slate-300"> · {c.total_usuarios} usuario(s)</span>
+                      </p>
                     </button>
                   );
                 })}
@@ -226,15 +219,13 @@ export default function Admin() {
               <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-400">
                 {clientes.length
                   ? 'Selecciona un cliente para ver y gestionar su información.'
-                  : esAdmin
-                    ? 'Todavía no hay clientes. Da de alta el primero desde "Agregar cliente".'
-                    : 'Aún no tienes clientes asignados. Te los asigna un administrador.'}
+                  : 'Todavía no hay clientes. Da de alta el primero desde "Agregar cliente".'}
               </div>
             ) : (
               <DetalleCliente
                 detalle={detalle}
                 esAdmin={esAdmin}
-                vendedores={vendedores}
+                responsables={responsables}
                 onEliminado={() => {
                   setSel(null);
                   setDetalle(null);
@@ -540,7 +531,7 @@ function CatalogoDocumentos({ tipos, onChange, flash }) {
    -------------------------------------------------------------------------- */
 
 function DetalleCliente({
-  detalle, esAdmin, vendedores, afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
+  detalle, esAdmin, responsables, afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
 }) {
   const {
     cliente, usuarios = [], lineas = [], proyectos = [],
@@ -606,16 +597,16 @@ function DetalleCliente({
               {cliente.telefono && ` · ${cliente.telefono}`}
             </p>
           </div>
-          {/* Mover de cartera es del administrador: un vendedor no se asigna
-              clientes a sí mismo. Él solo ve a quién le toca. */}
-          {esAdmin ? (
-            <div className="flex items-end gap-2">
-              <AsignarVendedor
-                clienteId={cliente.id}
-                vendedorId={cliente.vendedor_id}
-                vendedores={vendedores}
-                onChange={() => { onChange(); flash('Cartera actualizada'); }}
-              />
+          <div className="flex items-end gap-2">
+            <AsignarResponsable
+              clienteId={cliente.id}
+              responsableId={cliente.vendedor_id}
+              responsables={responsables}
+              onChange={() => { onChange(); flash('Responsable actualizado'); }}
+            />
+            {/* Dar de baja la empresa se lleva su historial y no tiene deshacer:
+                eso sí queda solo para el administrador. */}
+            {esAdmin && (
               <button
                 onClick={eliminar}
                 className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
@@ -623,10 +614,8 @@ function DetalleCliente({
               >
                 <Trash2 className="h-3.5 w-3.5" /> Eliminar
               </button>
-            </div>
-          ) : (
-            <span className="text-[11px] text-slate-400">En tu cartera</span>
-          )}
+            )}
+          </div>
         </div>
 
         {errorBaja && (
@@ -660,7 +649,6 @@ function DetalleCliente({
         clienteId={cliente.id}
         lineas={lineas}
         afianzadoras={afianzadoras}
-        puedeEditar={esAdmin}
         onChange={() => { onChange(); flash('Línea de crédito actualizada'); }}
       />
 
@@ -843,10 +831,10 @@ function ExpedienteCliente({ clienteId, documentos = [], descargar, onChange, fl
 }
 
 /* --------------------------------------------------------------------------
-   Cartera: a qué vendedor le toca este fiado
+   Quién atiende a este fiado. Es informativo: no limita quién lo ve.
    -------------------------------------------------------------------------- */
 
-function AsignarVendedor({ clienteId, vendedorId, vendedores = [], onChange }) {
+function AsignarResponsable({ clienteId, responsableId, responsables = [], onChange }) {
   const [error, setError] = useState('');
 
   async function asignar(valor) {
@@ -861,14 +849,14 @@ function AsignarVendedor({ clienteId, vendedorId, vendedores = [], onChange }) {
 
   return (
     <div className="text-right">
-      <label className="text-[10px] uppercase tracking-wider text-slate-400 block mb-1">Vendedor</label>
+      <label className="text-[10px] uppercase tracking-wider text-slate-400 block mb-1">Atiende</label>
       <select
-        value={vendedorId || ''}
+        value={responsableId || ''}
         onChange={(e) => asignar(e.target.value)}
         className={`${inputCls} w-auto min-w-44`}
       >
         <option value="">Sin asignar</option>
-        {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+        {responsables.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
       </select>
       {error && <p className="text-[11px] text-rose-600 mt-1">{error}</p>}
     </div>
@@ -1043,11 +1031,11 @@ function UsuariosCliente({ clienteId, usuarios = [], esAdmin, onChange, flash })
 }
 
 /* --------------------------------------------------------------------------
-   Personal de Fortex: vendedores y administradores
+   Personal de Fortex: operadores y administradores
    -------------------------------------------------------------------------- */
 
 function PersonalFortex({ internos = [], onChange, flash }) {
-  const vacio = { nombre: '', email: '', password: '', role: 'vendedor' };
+  const vacio = { nombre: '', email: '', password: '', role: 'operador' };
   const [open, setOpen] = useState(false);
   const [nuevo, setNuevo] = useState(vacio);
   const [error, setError] = useState('');
@@ -1083,7 +1071,7 @@ function PersonalFortex({ internos = [], onChange, flash }) {
   async function borrar(u) {
     if (!confirm(`¿Borrar definitivamente la cuenta de ${u.nombre} <${u.email}>?\n\n`
       + (u.clientes_asignados
-        ? `Sus ${u.clientes_asignados} cliente(s) quedarán sin vendedor asignado.\n\n`
+        ? `Sus ${u.clientes_asignados} cliente(s) quedarán sin responsable asignado.\n\n`
         : '')
       + 'Si esta persona sí trabajó en el portal, mejor desactívala con la ✕ para conservar el registro.')) return;
 
@@ -1124,7 +1112,8 @@ function PersonalFortex({ internos = [], onChange, flash }) {
       {open && (
         <div className="p-4 space-y-2.5">
           <p className="text-[11px] text-slate-400">
-            Los vendedores solo ven los clientes que les asignes. El correo debe ser del dominio de Fortex.
+            El operador hace toda la operación sobre todos los clientes; el administrador además maneja
+            estas cuentas y puede dar de baja empresas. El correo debe ser del dominio de Fortex.
           </p>
 
           <div className="space-y-2 border border-slate-100 rounded-lg p-2.5 bg-slate-50/60">
@@ -1154,7 +1143,7 @@ function PersonalFortex({ internos = [], onChange, flash }) {
                 onChange={(e) => setNuevo({ ...nuevo, role: e.target.value })}
                 className={inputCls}
               >
-                <option value="vendedor">Vendedor</option>
+                <option value="operador">Operador</option>
                 <option value="admin">Administrador</option>
               </select>
             </div>
@@ -1171,7 +1160,8 @@ function PersonalFortex({ internos = [], onChange, flash }) {
                     {u.nombre}
                   </p>
                   <p className="text-[10px] text-slate-400 truncate">
-                    {u.email} · {u.role === 'admin' ? 'administrador' : `${u.clientes_asignados} cliente(s)`}
+                    {u.email} · {u.role === 'admin' ? 'administrador' : 'operador'}
+                    {u.clientes_asignados > 0 && ` · atiende ${u.clientes_asignados}`}
                   </p>
                 </div>
                 <button
@@ -1237,7 +1227,7 @@ function Req() { return <span className="text-rose-500">*</span>; }
    Líneas de crédito
    -------------------------------------------------------------------------- */
 
-function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange }) {
+function LineasCredito({ clienteId, lineas, afianzadoras, onChange }) {
   const [edits, setEdits] = useState({}); // afianzadora_id -> valor en edición
   const [nuevaAfi, setNuevaAfi] = useState('');
   const [nuevoMonto, setNuevoMonto] = useState(0); // en centavos
@@ -1269,11 +1259,6 @@ function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange 
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
         <CreditCard className="w-4 h-4 text-slate-500" />
         <h3 className="text-sm font-semibold text-slate-700">Líneas de crédito por afianzadora</h3>
-        {/* La línea es el riesgo que asume la casa: la fija un administrador. El
-            vendedor la consulta para saber cuánto le queda disponible. */}
-        {!puedeEditar && (
-          <span className="text-[11px] text-slate-400 ml-auto">Las autoriza un administrador</span>
-        )}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -1294,31 +1279,25 @@ function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange 
                 <tr key={l.afianzadora_id} className="hover:bg-slate-50/40">
                   <td className="px-3 py-1.5 text-slate-700 font-medium">{l.afianzadora_nombre}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
-                    {puedeEditar ? (
-                      <InputPesos
-                        valor={editing}
-                        onChange={(centavos) => setEdits((s) => ({ ...s, [l.afianzadora_id]: centavos }))}
-                        className="w-32 px-2 py-1 text-right rounded-md border border-slate-200 bg-white tabular-nums focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
-                      />
-                    ) : (
-                      <span className="text-slate-700">{mxn(l.linea_credito)}</span>
-                    )}
+                    <InputPesos
+                      valor={editing}
+                      onChange={(centavos) => setEdits((s) => ({ ...s, [l.afianzadora_id]: centavos }))}
+                      className="w-32 px-2 py-1 text-right rounded-md border border-slate-200 bg-white tabular-nums focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
+                    />
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxn(l.comprometido)}</td>
                   <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${negativo ? 'text-rose-600' : 'text-emerald-700'}`}>
                     {mxn(l.disponible)}
                   </td>
                   <td className="px-3 py-1.5">
-                    {puedeEditar && (
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button onClick={() => guardar(l.afianzadora_id, editing)} className={btnSecondary} title="Guardar">
-                          <Save className="h-3.5 w-3.5" />
-                        </button>
-                        <button onClick={() => eliminar(l.afianzadora_id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Quitar línea">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button onClick={() => guardar(l.afianzadora_id, editing)} className={btnSecondary} title="Guardar">
+                        <Save className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => eliminar(l.afianzadora_id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Quitar línea">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -1329,7 +1308,7 @@ function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange 
           </tbody>
         </table>
       </div>
-      {puedeEditar && disponiblesParaAgregar.length > 0 && (
+      {disponiblesParaAgregar.length > 0 && (
         <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
           <p className="text-xs font-medium text-slate-600 mb-2">Asignar línea a otra afianzadora</p>
           <div className="flex flex-col md:flex-row gap-2">
@@ -2058,7 +2037,7 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
    Altas simples
    -------------------------------------------------------------------------- */
 
-function NuevoCliente({ vendedores = [], onDone }) {
+function NuevoCliente({ responsables = [], onDone }) {
   const [open, setOpen] = useState(false);
   const empty = {
     razon_social: '', rfc: '', telefono: '', vendedor_id: '',
@@ -2118,10 +2097,10 @@ function NuevoCliente({ vendedores = [], onDone }) {
             </div>
           </div>
           <div>
-            <label className="text-[11px] text-slate-500 mb-1 block">Vendedor que lo atiende</label>
+            <label className="text-[11px] text-slate-500 mb-1 block">Quién lo atiende</label>
             <select value={f.vendedor_id} onChange={set('vendedor_id')} className={inputCls}>
               <option value="">Sin asignar</option>
-              {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+              {responsables.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
             </select>
           </div>
 

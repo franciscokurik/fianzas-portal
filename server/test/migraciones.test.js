@@ -45,7 +45,39 @@ test('sobre una base existente aplica todas las migraciones', async () => {
     '003_quitar_tipo_fianza_legacy',
     '004_prima_total_desde_prima_neta',
     '005_usuarios_aparte_de_clientes',
+    '006_vendedor_pasa_a_operador',
   ]);
+});
+
+test('una cuenta de vendedor que ya existía queda convertida en operador', async () => {
+  const db = baseEnMemoria();
+  await inicializar(db);
+
+  // Se devuelve la base al estado en que quedó tras la 005 —restricción vieja y
+  // una cuenta con el rol viejo— porque es lo que hay en lo ya desplegado. Sin
+  // esto la prueba no toca la migración: en una base nueva el esquema ya nace
+  // con el rol renombrado y las migraciones se dan por aplicadas.
+  await db.query('ALTER TABLE users DROP CONSTRAINT users_role_check');
+  await db.query(`ALTER TABLE users ADD CONSTRAINT users_role_check
+                  CHECK (role IN ('client', 'vendedor', 'admin'))`);
+  await db.exec(`INSERT INTO users (nombre, email, password_hash, role)
+                 VALUES ('Mariana', 'mariana@fortex.mx', 'no-se-toca', 'vendedor')`);
+  await db.query(`DELETE FROM schema_migrations WHERE nombre = '006_vendedor_pasa_a_operador'`);
+
+  const corridas = await inicializar(db);
+  assert.ok(corridas.includes('006_vendedor_pasa_a_operador'), 'la migración debió correr');
+
+  const u = await db.prepare('SELECT role, password_hash FROM users WHERE email = ?')
+    .get('mariana@fortex.mx');
+  assert.equal(u.role, 'operador');
+  assert.equal(u.password_hash, 'no-se-toca', 'renombrar el rol no debe tocar el acceso');
+
+  // Y la restricción nueva ya rechaza el rol que dejó de existir.
+  await assert.rejects(
+    () => db.query(`INSERT INTO users (nombre, email, password_hash, role)
+                    VALUES ('Viejo', 'viejo@fortex.mx', 'x', 'vendedor')`),
+    'la base no debería seguir admitiendo el rol viejo'
+  );
 });
 
 test('las cuentas que existían se vuelven usuarios sin perder la contraseña', async () => {

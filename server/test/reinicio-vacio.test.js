@@ -30,7 +30,7 @@ before(async () => {
     -- conservan los primeros y se van los segundos con su empresa.
     INSERT INTO users (client_id, nombre, email, password_hash, role) VALUES
       (NULL, 'Administración', 'admin@fortex.mx', 'hash-del-admin', 'admin'),
-      (NULL, 'Mariana',     'mariana@fortex.mx', 'hash-vendedora', 'vendedor'),
+      (NULL, 'Mariana',     'mariana@fortex.mx', 'hash-operadora', 'operador'),
       (1, 'Isidro', 'isidro@gaspe.mx', 'x', 'client'),
       (2, 'Otra',   'otra@demo.mx',    'x', 'client');
     UPDATE clients SET vendedor_id = 2 WHERE id = 1;
@@ -66,8 +66,8 @@ test('conserva al personal de Fortex, con su contraseña', async () => {
   const internos = await memoria.prepare(
     `SELECT email, password_hash, role FROM users ORDER BY role`).all();
 
-  assert.deepEqual(internos.map((u) => u.role), ['admin', 'vendedor'],
-    'deben quedar el admin y el vendedor, y ningún usuario de fiado');
+  assert.deepEqual(internos.map((u) => u.role), ['admin', 'operador'],
+    'deben quedar el admin y el operador, y ningún usuario de fiado');
   assert.equal(internos[0].password_hash, 'hash-del-admin',
     'no debe reescribirse la contraseña del admin');
   assert.equal(internos[1].email, 'mariana@fortex.mx');

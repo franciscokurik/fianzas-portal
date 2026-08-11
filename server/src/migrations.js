@@ -147,6 +147,22 @@ export const MIGRACIONES = [
       ALTER TABLE clients DROP COLUMN IF EXISTS role;
     `,
   },
+  {
+    // 'vendedor' pasa a 'operador'. No es solo el nombre: el vendedor estaba
+    // acotado a una cartera y no podía dar de alta clientes ni mover líneas de
+    // crédito. El operador hace toda la operación sobre todos los fiados, y lo
+    // único que queda del admin son las cuentas de acceso y la baja de empresas.
+    //
+    // Se tira y se rehace la restricción porque menciona los roles permitidos.
+    // El DROP va primero para que volver a correrla no truene al reañadirla.
+    nombre: '006_vendedor_pasa_a_operador',
+    sql: `
+      ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+      UPDATE users SET role = 'operador' WHERE role = 'vendedor';
+      ALTER TABLE users ADD CONSTRAINT users_role_check
+        CHECK (role IN ('client', 'operador', 'admin'));
+    `,
+  },
 ];
 
 // Parte un bloque de SQL en sentencias sueltas: el driver HTTP de Neon corre

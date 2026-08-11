@@ -24,10 +24,12 @@ CREATE TABLE IF NOT EXISTS clients (
 
 -- Las PERSONAS que entran al portal.
 --   client_id lleno  -> gente del fiado; ve solo lo de su empresa.
---   client_id NULL   -> personal de Fortex (admin o vendedor).
--- El vendedor no se acota con una columna aquí sino con clients.vendedor_id:
--- la cartera es del cliente, no del usuario, y así reasignar una cuenta es
--- cambiar un solo campo.
+--   client_id NULL   -> personal de Fortex (admin u operador).
+--
+-- Solo hay dos roles internos y la diferencia es corta: el OPERADOR hace toda
+-- la operación (da de alta clientes, captura pólizas y documentos, fija líneas
+-- de crédito) y el ADMIN además maneja las cuentas de acceso y puede dar de
+-- baja empresas completas. Los dos ven a todos los fiados.
 CREATE TABLE IF NOT EXISTS users (
   id            SERIAL PRIMARY KEY,
   client_id     INTEGER REFERENCES clients(id) ON DELETE CASCADE,
@@ -35,14 +37,16 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT    UNIQUE NOT NULL,
   password_hash TEXT    NOT NULL,
   role          TEXT    NOT NULL DEFAULT 'client'
-                CHECK (role IN ('client', 'vendedor', 'admin')),
+                CHECK (role IN ('client', 'operador', 'admin')),
   activo        INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
 );
 CREATE INDEX IF NOT EXISTS idx_users_client ON users(client_id);
 
--- Quién atiende a este fiado. ON DELETE SET NULL: si se da de baja al vendedor,
--- sus clientes quedan sin asignar (solo los ve un administrador), nunca se borran.
+-- Quién atiende a este fiado. Es INFORMATIVO: sirve para saber a quién
+-- preguntarle, NO limita lo que nadie ve. Todo el personal de Fortex ve a
+-- todos los clientes; si algún día hace falta acotarlo, el filtro va en el
+-- servidor y no en este campo.
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS vendedor_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_clients_vendedor ON clients(vendedor_id);
 

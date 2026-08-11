@@ -7,7 +7,7 @@ import { slugify } from '../lib/slug.js';
 import { upload, subirArchivo, borrarArchivo } from '../lib/upload.js';
 import { TIPOS_DOC, esTipoValido, agruparPorEntidad, deEntidad } from '../lib/documentos.js';
 import { guardarDocumentoCliente, borrarDocumentoCliente } from '../services/documentos-cliente.js';
-import { esAdmin, exigirCliente, exigirEntidad, filtroCartera } from '../lib/cartera.js';
+import { exigirCliente, exigirEntidad } from '../lib/permisos.js';
 import {
   crearUsuario, actualizarUsuario, desactivarUsuario, eliminarUsuario, DOMINIO_INTERNO,
 } from '../services/usuarios.js';
@@ -15,30 +15,27 @@ import { eliminarCliente } from '../services/clientes.js';
 
 const router = Router();
 
-// Al panel entra todo el personal de Fortex, pero el vendedor solo alcanza los
-// clientes de su cartera. Cada ruta que toca un fiado lo comprueba de nuevo
-// contra la base: la lista que se le mandó a la pantalla no es una autorización.
+// Al panel entra todo el personal de Fortex, y todos ven a todos los fiados.
 router.use(requireAuth, requireInterno);
 
-// Lo que solo puede un administrador: dar de alta clientes y usuarios, mover líneas
-// de crédito y cambiar los catálogos que ven todos los fiados.
+// Lo que queda reservado al administrador es corto y deliberado: las cuentas de
+// acceso —quién puede entrar al portal— y la baja de una empresa completa, que
+// se lleva su historial y no tiene deshacer. Todo lo demás lo hace el operador.
 const soloAdmin = requireAdmin;
 
 // --- Clientes ---
 
-// GET /api/admin/clientes -> los clientes que puede ver quien pregunta
+// GET /api/admin/clientes -> todos los clientes con su estatus general
 router.get('/clientes', async (req, res) => {
-  const cartera = filtroCartera(req.user);
   const clientes = await db
     .prepare(
       `SELECT c.id, c.razon_social, c.rfc, c.vendedor_id, v.nombre AS vendedor_nombre,
               (SELECT COUNT(*)::int FROM users u WHERE u.client_id = c.id AND u.activo = 1) AS total_usuarios
        FROM clients c
        LEFT JOIN users v ON v.id = c.vendedor_id
-       WHERE 1 = 1${cartera.sql.replace('vendedor_id', 'c.vendedor_id')}
        ORDER BY c.razon_social`
     )
-    .all(...cartera.params);
+    .all();
 
   const enriquecidos = await Promise.all(clientes.map(async (c) => {
     const fianzas = await db.prepare(
@@ -83,7 +80,7 @@ router.get('/clientes', async (req, res) => {
 });
 
 // POST /api/admin/clientes -> alta de la empresa y, de una vez, su primer acceso
-router.post('/clientes', soloAdmin, async (req, res) => {
+router.post('/clientes', async (req, res) => {
   const { razon_social, rfc, telefono, vendedor_id, email, password, nombre_contacto } = req.body || {};
   if (!razon_social || !email || !password) {
     return res.status(400).json({ error: 'Razón social, correo y contraseña son obligatorios' });
@@ -121,7 +118,7 @@ router.post('/clientes', soloAdmin, async (req, res) => {
 });
 
 // PUT /api/admin/clientes/:id -> actualizar datos básicos
-router.put('/clientes/:id', soloAdmin, async (req, res) => {
+router.put('/clientes/:id', async (req, res) => {
   const { razon_social, telefono } = req.body || {};
   await db.prepare(
     `UPDATE clients SET razon_social = COALESCE(?, razon_social),
@@ -151,25 +148,27 @@ router.delete('/clientes/:id', soloAdmin, async (req, res) => {
   res.json({ ok: true, cliente: cliente.razon_social, borrado });
 });
 
-// PUT /api/admin/clientes/:id/vendedor -> mover el cliente de cartera
-// (vendedor_id null = sin asignar; a esos clientes solo llega un administrador)
-router.put('/clientes/:id/vendedor', soloAdmin, async (req, res) => {
-  const vendedorId = req.body?.vendedor_id ? Number(req.body.vendedor_id) : null;
+// PUT /api/admin/clientes/:id/vendedor -> quién atiende a este fiado
+//
+// Es INFORMATIVO: sirve para saber a quién preguntarle por ese cliente, no
+// limita lo que nadie ve. Todo el personal de Fortex ve a todos los fiados.
+router.put('/clientes/:id/vendedor', async (req, res) => {
+  const responsableId = req.body?.vendedor_id ? Number(req.body.vendedor_id) : null;
 
-  if (vendedorId) {
-    const v = await db
-      .prepare(`SELECT id FROM users WHERE id = ? AND role = 'vendedor' AND activo = 1`)
-      .get(vendedorId);
-    if (!v) return res.status(400).json({ error: 'Ese vendedor no existe o está dado de baja' });
+  if (responsableId) {
+    const u = await db
+      .prepare(`SELECT id FROM users WHERE id = ? AND client_id IS NULL AND activo = 1`)
+      .get(responsableId);
+    if (!u) return res.status(400).json({ error: 'Esa cuenta no existe o está dada de baja' });
   }
 
   await db.prepare('UPDATE clients SET vendedor_id = ? WHERE id = ?')
-    .run(vendedorId, Number(req.params.id));
+    .run(responsableId, Number(req.params.id));
   res.json({ ok: true });
 });
 
 // PUT /api/admin/clientes/:id/lineas -> fijar/actualizar la línea de una afianzadora (upsert)
-router.put('/clientes/:id/lineas', soloAdmin, async (req, res) => {
+router.put('/clientes/:id/lineas', async (req, res) => {
   const clientId = Number(req.params.id);
   const { afianzadora_id, linea_credito } = req.body || {};
   if (!afianzadora_id) return res.status(400).json({ error: 'afianzadora_id requerido' });
@@ -183,7 +182,7 @@ router.put('/clientes/:id/lineas', soloAdmin, async (req, res) => {
 });
 
 // DELETE /api/admin/clientes/:id/lineas/:afianzadoraId -> quitar línea de una afianzadora
-router.delete('/clientes/:id/lineas/:afianzadoraId', soloAdmin, async (req, res) => {
+router.delete('/clientes/:id/lineas/:afianzadoraId', async (req, res) => {
   await db.prepare(
     'DELETE FROM client_credit_lines WHERE client_id = ? AND afianzadora_id = ?'
   ).run(Number(req.params.id), Number(req.params.afianzadoraId));
@@ -197,7 +196,7 @@ router.get('/afianzadoras', async (req, res) => {
 });
 
 // POST /api/admin/afianzadoras -> agregar nueva afianzadora (escalable)
-router.post('/afianzadoras', soloAdmin, async (req, res) => {
+router.post('/afianzadoras', async (req, res) => {
   const { nombre } = req.body || {};
   if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
   const slug = slugify(nombre);
@@ -218,7 +217,7 @@ router.get('/tipos-fianza', async (req, res) => {
   res.json({ tipos });
 });
 
-router.post('/tipos-fianza', soloAdmin, async (req, res) => {
+router.post('/tipos-fianza', async (req, res) => {
   const nombre = String(req.body?.nombre || '').trim();
   if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
   try {
@@ -235,7 +234,7 @@ router.post('/tipos-fianza', soloAdmin, async (req, res) => {
 });
 
 // Baja lógica: las fianzas que ya lo usan conservan su tipo.
-router.delete('/tipos-fianza/:id', soloAdmin, async (req, res) => {
+router.delete('/tipos-fianza/:id', async (req, res) => {
   await db.prepare('UPDATE tipos_fianza SET activo = 0 WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
 });
@@ -431,7 +430,6 @@ router.delete('/fianzas/:id', async (req, res) => {
 // GET /api/admin/recordatorios -> avisos internos vencidos o próximos (7 días)
 router.get('/recordatorios', async (req, res) => {
   const dias = Number(req.query.dias) || 7;
-  const cartera = filtroCartera(req.user, 'c.vendedor_id');
   const rows = await db.prepare(
     `SELECT f.id, f.numero_poliza, t.nombre AS tipo_fianza,
             f.fecha_recordatorio, f.nota_recordatorio,
@@ -443,9 +441,9 @@ router.get('/recordatorios', async (req, res) => {
      LEFT JOIN tipos_fianza t ON t.id = f.tipo_fianza_id
      LEFT JOIN proyectos p ON p.id = f.proyecto_id
      WHERE f.fecha_recordatorio IS NOT NULL
-       AND f.recordatorio_atendido_el IS NULL${cartera.sql}
+       AND f.recordatorio_atendido_el IS NULL
      ORDER BY f.fecha_recordatorio`
-  ).all(...cartera.params);
+  ).all();
 
   const recordatorios = rows
     .map((r) => ({ ...r, dias_restantes: daysUntil(r.fecha_recordatorio) }))
@@ -575,7 +573,7 @@ function periodicidad(valor) {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
-router.post('/documentos-requeridos', soloAdmin, async (req, res) => {
+router.post('/documentos-requeridos', async (req, res) => {
   const nombre = String(req.body?.nombre || '').trim();
   if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
 
@@ -591,7 +589,7 @@ router.post('/documentos-requeridos', soloAdmin, async (req, res) => {
   }
 });
 
-router.put('/documentos-requeridos/:id', soloAdmin, async (req, res) => {
+router.put('/documentos-requeridos/:id', async (req, res) => {
   const id = Number(req.params.id);
   const nombre = String(req.body?.nombre || '').trim();
   if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
@@ -609,7 +607,7 @@ router.put('/documentos-requeridos/:id', soloAdmin, async (req, res) => {
 
 // Solo se puede quitar un tipo que nadie haya usado: si ya hay archivos
 // colgados, borrarlo se los llevaría sin avisar.
-router.delete('/documentos-requeridos/:id', soloAdmin, async (req, res) => {
+router.delete('/documentos-requeridos/:id', async (req, res) => {
   const id = Number(req.params.id);
   const { c } = await db.prepare(
     'SELECT COUNT(*)::int c FROM client_documents WHERE document_type_id = ?'
@@ -759,7 +757,7 @@ router.get('/clientes/:id/detalle', async (req, res) => {
 // GET /api/admin/descargar?path=<url> -> redirige al archivo
 //
 // Antes redirigía a CUALQUIER https que le pasaran. Con un solo admin eso era
-// nada más feo; con vendedores en el sistema sería la puerta para bajarse el
+// nada más feo; con operadores en el sistema sería la puerta para bajarse el
 // expediente de un fiado ajeno con solo tener su URL. Ahora el archivo tiene
 // que estar registrado y quien lo pide, alcanzar a su dueño.
 router.get('/descargar', async (req, res) => {
@@ -786,10 +784,10 @@ router.get('/descargar', async (req, res) => {
 //
 // Una empresa puede tener varias personas entrando (el director, el contador,
 // el residente de obra), y todas ven lo mismo de su fiado. Las cuentas de
-// Fortex (admin y vendedor) no cuelgan de ninguna empresa.
+// Fortex (admin y operador) no cuelgan de ninguna empresa.
 
 // GET /api/admin/usuarios/internos -> el personal de Fortex
-router.get('/usuarios/internos', soloAdmin, async (req, res) => {
+router.get('/usuarios/internos', async (req, res) => {
   const usuarios = await db.prepare(
     `SELECT u.id, u.nombre, u.email, u.role, u.activo,
             (SELECT COUNT(*)::int FROM clients c WHERE c.vendedor_id = u.id) AS clientes_asignados

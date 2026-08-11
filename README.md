@@ -105,12 +105,17 @@ distintas:
 - Una constructora puede tener varias personas dadas de alta (dirección,
   contabilidad, residencia de obra). Cada una entra con su correo y **todas ven
   lo mismo** de su empresa.
-- Las cuentas de Fortex no pertenecen a ninguna empresa. Hay dos roles:
-  - **admin**: todo. Da de alta clientes y usuarios, autoriza
-    líneas de crédito y edita los catálogos que ven todos los fiados.
-  - **vendedor**: solo los clientes que tenga asignados (`clients.vendedor_id`).
-    Puede capturar proyectos, fianzas y documentos de su cartera; **no** puede
-    crear clientes, mover líneas ni tocar catálogos.
+- Las cuentas de Fortex no pertenecen a ninguna empresa. Hay dos roles, y la
+  diferencia entre ellos es corta:
+  - **operador**: toda la operación sobre **todos** los fiados. Da de alta
+    clientes, captura proyectos, pólizas y documentos, fija líneas de crédito y
+    mantiene los catálogos.
+  - **admin**: lo mismo, y además las **cuentas de acceso** —quién entra al
+    portal— y la **baja de una empresa** completa, que se lleva su historial y
+    no tiene deshacer.
+
+  La columna `clients.vendedor_id` guarda quién atiende a cada fiado, pero es
+  **informativa**: sirve para saber a quién preguntarle, no limita lo que nadie ve.
 - El correo de las cuentas de Fortex tiene que ser del dominio de la casa
   (`DOMINIO_INTERNO`, por omisión `fortex.mx`). A los fiados **no** se les exige
   dominio a propósito: muchos contratistas usan Gmail o el correo personal del
@@ -120,7 +125,7 @@ Se entra con el **correo**. El RFC se sigue aceptando como atajo, pero solo
 cuando la empresa tiene una sola cuenta activa: con varias personas, el RFC ya
 no identifica a nadie en particular.
 
-> El permiso se comprueba en el servidor en **cada** ruta (`lib/cartera.js`), no
+> El permiso se comprueba en el servidor en **cada** ruta (`lib/permisos.js`), no
 > escondiendo botones: ocultar algo en la pantalla no impide cambiar el id en la
 > URL, y por estas rutas pasan estados financieros de terceros.
 
@@ -131,7 +136,7 @@ no identifica a nadie en particular.
 | Cliente  | cliente@demo.mx         | demo123      |
 | Cliente  | contabilidad@bajio.mx   | demo123      |
 | Cliente  | norte@demo.mx           | demo123      |
-| Vendedor | mariana@fortex.mx       | vendedor123  |
+| Operador | mariana@fortex.mx       | operador123  |
 | Admin    | francisco@fortex.mx     | admin123     |
 
 Las dos primeras son de la **misma** empresa: sirven para ver que varias

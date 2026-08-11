@@ -70,19 +70,20 @@ export async function seed() {
 
   // Personal de Fortex: no cuelgan de ninguna empresa.
   await insUsuario.get(null, 'Francisco Kuri', 'francisco@fortex.mx', hash('admin123'), 'admin');
-  const vendedor = (await insUsuario.get(
-    null, 'Mariana Ruiz', 'mariana@fortex.mx', hash('vendedor123'), 'vendedor'
+  const operador = (await insUsuario.get(
+    null, 'Mariana Ruiz', 'mariana@fortex.mx', hash('operador123'), 'operador'
   )).id;
 
   // Cliente demo 1, con tres accesos: así se ve para qué sirve tener varios.
   const c1 = (await insClient.get(
-    'Constructora del Bajío SA de CV', 'CBA120315ABC', '5551234567', vendedor
+    'Constructora del Bajío SA de CV', 'CBA120315ABC', '5551234567', operador
   )).id;
   await insUsuario.get(c1, 'Dirección', 'cliente@demo.mx', hash('demo123'), 'client');
   await insUsuario.get(c1, 'Contabilidad', 'contabilidad@bajio.mx', hash('demo123'), 'client');
   await insUsuario.get(c1, 'Residencia de obra', 'obra@bajio.mx', hash('demo123'), 'client');
 
-  // Cliente demo 2, todavía sin vendedor asignado: solo lo ve un administrador.
+  // Cliente demo 2, todavía sin responsable asignado (se ve igual, el campo
+  // es informativo).
   const c2 = (await insClient.get(
     'Ingeniería Aplicada del Norte SA', 'IAN980720XYZ', '5559876543', null
   )).id;
@@ -182,7 +183,7 @@ export async function seed() {
 // Deja el portal listo para operar de verdad: borra TODOS los datos de
 // clientes y no siembra nada de demostración.
 //
-// Conserva: las cuentas de Fortex (admin y vendedores, con su contraseña
+// Conserva: las cuentas de Fortex (admin y operadores, con su contraseña
 // actual), las afianzadoras y los catálogos. Borra: empresas fiadas con sus
 // usuarios, proyectos, fianzas, líneas, documentos, papelería y avisos.
 export async function reiniciarVacio() {
@@ -243,7 +244,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     .then((r) => {
       console.log(`✅ Listo (${r.clientes} empresas, ${r.usuarios} usuarios, ${r.afianzadoras} afianzadoras).`);
       console.log('   Admin    -> francisco@fortex.mx / admin123');
-      console.log('   Vendedor -> mariana@fortex.mx / vendedor123');
+      console.log('   Operador -> mariana@fortex.mx / operador123');
       console.log('   Cliente  -> cliente@demo.mx (RFC CBA120315ABC) / demo123');
       console.log('   Cliente  -> contabilidad@bajio.mx / demo123  (misma empresa)');
       console.log('   Cliente  -> norte@demo.mx / demo123');

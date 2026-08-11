@@ -144,13 +144,13 @@ test('el admin agrega otra persona a una empresa que ya existe', async () => {
 
 test('una cuenta de Fortex exige correo del dominio de Fortex', async () => {
   const fuera = await crear({
-    nombre: 'Vendedor pirata', email: 'vendedor@gmail.com', password: CLAVE, role: 'vendedor',
+    nombre: 'Operador pirata', email: 'operador@gmail.com', password: CLAVE, role: 'operador',
   });
   assert.equal(fuera.status, 400);
   assert.match((await fuera.json()).error, /@fortex\.mx/);
 
   const dentro = await crear({
-    nombre: 'Mariana', email: 'mariana@fortex.mx', password: CLAVE, role: 'vendedor',
+    nombre: 'Mariana', email: 'mariana@fortex.mx', password: CLAVE, role: 'operador',
   });
   assert.equal(dentro.status, 200);
 });
@@ -168,7 +168,7 @@ test('no se crea un usuario de fiado sin empresa, ni uno de Fortex con empresa',
   assert.match((await huerfano.json()).error, /de qué cliente/i);
 
   const confundido = await crear({
-    nombre: 'Y', email: 'y@fortex.mx', password: CLAVE, role: 'vendedor', client_id: 1,
+    nombre: 'Y', email: 'y@fortex.mx', password: CLAVE, role: 'operador', client_id: 1,
   });
   assert.equal(confundido.status, 400);
 });
@@ -229,7 +229,7 @@ const borrarDefinitivo = (id, token = admin) =>
 
 test('una cuenta que nunca debió existir se borra de la lista', async () => {
   const { id } = await (await crear({
-    nombre: 'Demo', email: 'demo@fortex.mx', password: CLAVE, role: 'vendedor',
+    nombre: 'Demo', email: 'demo@fortex.mx', password: CLAVE, role: 'operador',
   })).json();
 
   assert.equal((await borrarDefinitivo(id)).status, 200);
@@ -239,16 +239,16 @@ test('una cuenta que nunca debió existir se borra de la lista', async () => {
   assert.equal((await entrar('demo@fortex.mx')).status, 401);
 });
 
-test('al borrar un vendedor sus clientes quedan sin asignar, no se pierden', async () => {
+test('al borrar un operador sus clientes quedan sin responsable, no se pierden', async () => {
   const { id } = await (await crear({
-    nombre: 'Vendedor efímero', email: 'efimero@fortex.mx', password: CLAVE, role: 'vendedor',
+    nombre: 'Operador efímero', email: 'efimero@fortex.mx', password: CLAVE, role: 'operador',
   })).json();
   await memoria.query('UPDATE clients SET vendedor_id = ? WHERE id = 1', [id]);
 
   assert.equal((await borrarDefinitivo(id)).status, 200);
 
   const c = await memoria.prepare('SELECT razon_social, vendedor_id FROM clients WHERE id = 1').get();
-  assert.equal(c.razon_social, 'Constructora del Bajío', 'la empresa no debió irse con el vendedor');
+  assert.equal(c.razon_social, 'Constructora del Bajío', 'la empresa no debió irse con el operador');
   assert.equal(c.vendedor_id, null);
 });
 

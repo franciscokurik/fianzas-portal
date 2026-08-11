@@ -41,16 +41,17 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
-// Personal de Fortex: admin o vendedor. Los dos entran al panel; lo que el
-// vendedor alcanza lo acota su cartera (ver lib/cartera.js).
+// Personal de Fortex: admin u operador. Los dos entran al panel y ven a todos
+// los fiados; el operador solo no maneja cuentas de acceso ni da de baja
+// empresas (ver el soloAdmin de routes/admin.js).
 export function requireInterno(req, res, next) {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'vendedor') {
+  if (req.user?.role !== 'admin' && req.user?.role !== 'operador') {
     return res.status(403).json({ error: 'Requiere una cuenta de Fortex' });
   }
   next();
 }
 
-// Rutas del portal del fiado. Un admin o un vendedor no tienen empresa propia,
+// Rutas del portal del fiado. El personal de Fortex no tiene empresa propia,
 // así que aquí no van: sin esto, sus consultas saldrían vacías y parecería que
 // el fiado no tiene nada, en vez de decir que se equivocaron de pantalla.
 export function requireCliente(req, res, next) {

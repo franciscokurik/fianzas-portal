@@ -1,7 +1,7 @@
 // Alta y baja de las cuentas de acceso.
 //
 // Hay dos familias de usuarios y no se mezclan: los del fiado (client_id lleno,
-// rol 'client') y los de Fortex (client_id nulo, rol 'vendedor' o 'admin').
+// rol 'client') y los de Fortex (client_id nulo, rol 'operador' o 'admin').
 import bcrypt from 'bcryptjs';
 import db from '../db.js';
 import { invalidarEnlaces } from './recuperacion.js';
@@ -11,7 +11,7 @@ import { invalidarEnlaces } from './recuperacion.js';
 // personal del dueño, y amarrarlos dejaría fuera a clientes legítimos.
 export const DOMINIO_INTERNO = (process.env.DOMINIO_INTERNO || 'fortex.mx').toLowerCase();
 
-export const ROLES_INTERNOS = ['vendedor', 'admin'];
+export const ROLES_INTERNOS = ['operador', 'admin'];
 
 function fallo(mensaje, status = 400) {
   const e = new Error(mensaje);
@@ -28,7 +28,7 @@ export function validarCorreo(email, role) {
   if (ROLES_INTERNOS.includes(role) && !limpio.endsWith(`@${DOMINIO_INTERNO}`)) {
     throw fallo(
       `Las cuentas de Fortex deben usar un correo @${DOMINIO_INTERNO}. `
-      + 'Así nadie se da de alta como vendedor con un correo de fuera.'
+      + 'Así nadie se da de alta como operador con un correo de fuera.'
     );
   }
   return limpio;
@@ -47,7 +47,7 @@ export async function crearUsuario({ nombre, email, password, role = 'client', c
   if (!String(nombre || '').trim()) throw fallo('El nombre es obligatorio');
   if (!['client', ...ROLES_INTERNOS].includes(role)) throw fallo('Rol no válido');
 
-  // Un usuario de fiado sin empresa no vería nada, y un vendedor amarrado a una
+  // Un usuario de fiado sin empresa no vería nada, y un operador amarrado a una
   // empresa vería su portal en vez del panel. Ninguno de los dos tiene sentido.
   if (role === 'client' && !clientId) throw fallo('Falta indicar de qué cliente es el usuario');
   if (role !== 'client' && clientId) throw fallo('Las cuentas de Fortex no pertenecen a un cliente');
@@ -79,7 +79,7 @@ async function exigirQueQuedeUnAdmin(usuario) {
 
 // Cambia el nombre, el correo, repone la contraseña o reactiva la cuenta. El
 // rol y la empresa NO se tocan: mover a alguien de un fiado a otro (o volverlo
-// vendedor) cambiaría de golpe todo lo que ve, y es más claro darlo de baja y
+// operador) cambiaría de golpe todo lo que ve, y es más claro darlo de baja y
 // crearlo de nuevo que arriesgarse a dejarlo viendo lo que no le toca.
 export async function actualizarUsuario(id, { nombre, email, password, activo }) {
   const usuario = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(Number(id));
@@ -138,7 +138,7 @@ export async function desactivarUsuario(id) {
 // o una creada con el correo equivocado). Desactivarlas las deja estorbando en
 // la lista para siempre.
 //
-// Si era vendedor, sus clientes quedan sin asignar en vez de perderse
+// Si atendía clientes, quedan sin responsable asignado en vez de perderse
 // (clients.vendedor_id es ON DELETE SET NULL).
 export async function eliminarUsuario(id, { solicitanteId } = {}) {
   const usuario = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(Number(id));
