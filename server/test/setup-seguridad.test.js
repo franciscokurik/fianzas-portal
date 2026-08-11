@@ -113,3 +113,24 @@ test('con SETUP_KEY correcta y confirmación, sí borra y conserva al admin', as
     .prepare(`SELECT COUNT(*)::int AS total FROM users WHERE role = 'admin'`).get();
   assert.equal(total, 1, 'la cuenta de administrador debe seguir ahí');
 });
+
+test('con cuentas de Fortex pero sin clientes, el setup NO siembra demo', async () => {
+  // Es el estado de un portal en operación al que le dieron de baja a todos sus
+  // fiados. Antes esto se leía como "base nueva" y sembrar borraba las cuentas
+  // de administrador reales (seed() hace TRUNCATE de users), dejando en su
+  // lugar las de demostración con su contraseña publicada.
+  delete process.env.SETUP_KEY;
+  await memoria.query('DELETE FROM clients'); // se van los fiados y sus usuarios
+  await memoria.exec(`
+    INSERT INTO users (client_id, nombre, email, password_hash, role)
+      VALUES (NULL, 'Real', 'real@fortex.mx', 'hash-que-no-se-debe-perder', 'admin');
+  `);
+
+  const res = await pedir('');
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).seeded, false, 'no debió sembrar datos de demostración');
+
+  const admin = await memoria.prepare('SELECT password_hash FROM users WHERE email = ?').get('real@fortex.mx');
+  assert.equal(admin.password_hash, 'hash-que-no-se-debe-perder', 'la cuenta real debió quedar intacta');
+  assert.equal(await cuantosClientes(), 0, 'tampoco debió inventar empresas');
+});

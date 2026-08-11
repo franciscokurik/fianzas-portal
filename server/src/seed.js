@@ -217,10 +217,20 @@ export async function reiniciarVacio() {
   return { ...borrados, admins_conservados: admins };
 }
 
-// Siembra solo si la base está vacía (sin clientes). Devuelve true si sembró.
+// Siembra SOLO si nadie ha usado todavía la base. Devuelve true si sembró.
+//
+// "Vacía" se medía únicamente por la tabla de clientes, y eso volvió peligroso
+// a /api/setup: un portal en operación al que le dieron de baja a todos sus
+// fiados sigue teniendo cuentas de Fortex reales, y seed() hace TRUNCATE de
+// users. Llamar al setup en ese estado borraba las cuentas de administrador y
+// las reemplazaba por las de demostración, con su contraseña publicada.
+//
+// Basta UNA cuenta para saber que alguien ya configuró esto.
 export async function seedIfEmpty() {
   await initSchema();
-  const { total } = await db.prepare('SELECT COUNT(*)::int AS total FROM clients').get();
+  const { total } = await db.prepare(
+    `SELECT ((SELECT COUNT(*) FROM clients) + (SELECT COUNT(*) FROM users))::int AS total`
+  ).get();
   if (total > 0) return false;
   await seed();
   return true;
