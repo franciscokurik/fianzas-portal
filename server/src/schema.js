@@ -120,6 +120,16 @@ CREATE TABLE IF NOT EXISTS fianzas (
   afianzadora_id INTEGER NOT NULL REFERENCES afianzadoras(id),
   numero_poliza  TEXT    NOT NULL,
   tipo_fianza_id INTEGER REFERENCES tipos_fianza(id),
+  -- 'fianza' = póliza emitida. 'previo' = el mismo registro, con los mismos
+  -- datos, pero antes de que la afianzadora la emita. Se captura igual porque
+  -- es lo que se cotizó, y con el mismo renglón se convierte a fianza el día
+  -- que sale: solo se cambia esta columna.
+  --
+  -- Un previo NO es un pasivo: no suma en el monto afianzado, no consume línea
+  -- de crédito ni dispara avisos de vencimiento (ver routes/dashboard.js,
+  -- routes/admin.js y services/alerts.js, que filtran por esta columna).
+  clase          TEXT    NOT NULL DEFAULT 'fianza'
+                 CHECK (clase IN ('fianza', 'previo')),
   -- Dos primas y no una: la NETA es la tarifa de la afianzadora y la TOTAL es
   -- lo que el fiado acaba pagando (neta + derecho de póliza + IVA). El fiado
   -- reclama por la total y la afianzadora reporta la neta, así que hacen falta
@@ -138,6 +148,12 @@ CREATE INDEX IF NOT EXISTS idx_fianzas_client ON fianzas(client_id);
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS proyecto_id INTEGER REFERENCES proyectos(id) ON DELETE RESTRICT;
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS tipo_fianza_id INTEGER REFERENCES tipos_fianza(id);
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS prima_total BIGINT NOT NULL DEFAULT 0;
+-- Las que ya estaban capturadas son pólizas emitidas: el DEFAULT las deja como
+-- 'fianza' sin necesidad de migración aparte. La restricción se rehace en cada
+-- /api/setup (el DROP primero) para que volver a correr esto no truene.
+ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS clase TEXT NOT NULL DEFAULT 'fianza';
+ALTER TABLE fianzas DROP CONSTRAINT IF EXISTS fianzas_clase_check;
+ALTER TABLE fianzas ADD CONSTRAINT fianzas_clase_check CHECK (clase IN ('fianza', 'previo'));
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS fecha_recordatorio TEXT;
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS nota_recordatorio TEXT;
 ALTER TABLE fianzas ADD COLUMN IF NOT EXISTS recordatorio_atendido_el TEXT;

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Briefcase, Paperclip, FileDown } from 'lucide-react';
 import { api, getToken } from '../api.js';
-import { mxn, mxnCents, fmtDate, EstadoBadge } from '../lib.jsx';
+import { mxn, mxnCents, fmtDate, EstadoBadge, ClaseBadge } from '../lib.jsx';
 
 // La descarga pasa por la API (que comprueba que el archivo sea de este
 // cliente), así que hay que mandar el token: un <a href> no lo llevaría.
@@ -40,6 +40,8 @@ function Documentos({ documentos = [], vacio = '—' }) {
 const filaCls = (estado) =>
   estado === 'vencida' ? 'bg-rose-50/40'
   : estado === 'por_vencer' ? 'bg-amber-50/40'
+  // El previo no es un problema, solo algo que todavía no existe como póliza.
+  : estado === 'previo' ? 'bg-violet-50/30'
   : '';
 
 const chipCls = (activo) =>
@@ -81,16 +83,21 @@ export default function MisFianzas() {
       }
       porProyecto.get(clave).fianzas.push(f);
     }
-    return [...porProyecto.values()].map((g) => ({
-      ...g,
-      // El afianzado del proyecto solo cuenta lo que sigue vigente.
-      monto_afianzado: g.fianzas
-        .filter((f) => f.estado !== 'vencida')
-        .reduce((s, f) => s + (f.monto_afianzado || 0), 0),
-      // Las primas suman todas: lo pagado no se devuelve porque la fianza venza.
-      suma_prima_neta: g.fianzas.reduce((s, f) => s + (f.prima_neta || 0), 0),
-      suma_prima_total: g.fianzas.reduce((s, f) => s + (f.prima_total || 0), 0),
-    }));
+    return [...porProyecto.values()].map((g) => {
+      // Los previos se listan pero no suman: son lo que se pidió, no lo que la
+      // afianzadora emitió. Nada de lo que está aquí se ha pagado todavía.
+      const emitidas = g.fianzas.filter((f) => f.clase !== 'previo');
+      return {
+        ...g,
+        // El afianzado del proyecto solo cuenta lo que sigue vigente.
+        monto_afianzado: emitidas
+          .filter((f) => f.estado !== 'vencida')
+          .reduce((s, f) => s + (f.monto_afianzado || 0), 0),
+        // Las primas suman todas: lo pagado no se devuelve porque la fianza venza.
+        suma_prima_neta: emitidas.reduce((s, f) => s + (f.prima_neta || 0), 0),
+        suma_prima_total: emitidas.reduce((s, f) => s + (f.prima_total || 0), 0),
+      };
+    });
   }, [fianzas]);
 
   if (!afianzadoras.length) {
@@ -168,7 +175,12 @@ export default function MisFianzas() {
                 <tbody className="divide-y divide-slate-100">
                   {g.fianzas.map((f) => (
                     <tr key={f.id} className={`hover:bg-slate-50/40 ${filaCls(f.estado)}`}>
-                      <td className="px-3 py-1.5 font-mono text-slate-700">{f.numero_poliza}</td>
+                      <td className="px-3 py-1.5 text-slate-700">
+                        <span className="flex items-center gap-1.5">
+                          <span className="font-mono">{f.numero_poliza}</span>
+                          <ClaseBadge clase={f.clase} />
+                        </span>
+                      </td>
                       <td className="px-3 py-1.5 text-slate-600">{f.afianzadora_nombre}</td>
                       <td className="px-3 py-1.5 text-slate-700 font-medium">{f.tipo_fianza}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-slate-800">

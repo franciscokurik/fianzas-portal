@@ -161,6 +161,30 @@ no identifica a nadie en particular.
 > escondiendo botones: ocultar algo en la pantalla no impide cambiar el id en la
 > URL, y por estas rutas pasan estados financieros de terceros.
 
+## Fianzas y previos
+
+Al capturar una póliza se elige si es **fianza** o **previo**. Son el **mismo
+registro con los mismos campos**: un previo es lo que se cotizó y todavía no
+emite la afianzadora. El día que emite, se abre el renglón y se cambia esa
+opción — no se recaptura nada (`fianzas.clase`).
+
+La diferencia es una sola, y es de números: **un previo no es un pasivo**, así
+que queda fuera de
+
+- el monto afianzado y las sumas de primas (panel y portal del fiado),
+- el **comprometido** de la línea de crédito (no aparta capacidad),
+- los avisos de vencimiento por correo.
+
+Se cuenta aparte ("1 previo(s)" en la lista de clientes, "Previos" en las cifras
+del cliente) para que no parezca que falta algo capturado. En las tablas sale
+marcado con una etiqueta violeta, y su estado **es** "Previo": juzgarle vigencia
+no significa nada, porque sus fechas son las estimadas de la solicitud.
+
+> Si mañana se decide que un previo **sí** debe apartar línea de crédito, es un
+> cambio de una línea en `routes/dashboard.js` y `routes/admin.js` (los dos
+> lugares que calculan el comprometido). La prueba que fija el comportamiento de
+> hoy es `server/test/previos.test.js`.
+
 ## Cuentas de prueba
 
 | Rol      | Usuario                 | Contraseña   |

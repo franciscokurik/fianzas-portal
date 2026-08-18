@@ -73,8 +73,10 @@ router.get('/', requireAuth, requireCliente, async (req, res) => {
     const { fecha_recordatorio, nota_recordatorio, recordatorio_atendido_el, ...f } = row;
     return {
       ...f,
-      estado: estadoFianza(f.fecha_vigencia),
-      dias_para_vencer: daysUntil(f.fecha_vigencia),
+      // El previo se le muestra al fiado marcado como tal: sus fechas son las
+      // estimadas de la solicitud, así que juzgarle vigencia no significa nada.
+      estado: f.clase === 'previo' ? 'previo' : estadoFianza(f.fecha_vigencia),
+      dias_para_vencer: f.clase === 'previo' ? null : daysUntil(f.fecha_vigencia),
       // Sin la URL del blob: se descarga por /api/fianzas/documentos/:id,
       // que comprueba que el archivo sea de este cliente.
       documentos: deEntidad(porEntidad, 'fianza', f.id).map(({ url, ...d }) => d),

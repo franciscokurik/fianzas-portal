@@ -44,8 +44,11 @@ export async function correrAlertas() {
 
     // 1) Fianzas que vencen en <= 30 días
     const fianzas = await db.prepare(
-      'SELECT id, numero_poliza, fecha_vigencia FROM fianzas WHERE client_id = ?'
+      `SELECT id, numero_poliza, fecha_vigencia
+       FROM fianzas WHERE client_id = ? AND clase = 'fianza'`
     ).all(c.id);
+    // Solo las emitidas: avisarle al fiado que "vence" un previo que ni existe
+    // como póliza es un correo que no puede atender.
     for (const f of fianzas) {
       const d = daysUntil(f.fecha_vigencia);
       if (d !== null && d >= 0 && d <= 30) {

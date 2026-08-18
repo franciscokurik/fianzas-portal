@@ -14,10 +14,17 @@ router.get('/', requireAuth, requireCliente, async (req, res) => {
     .get(clientId);
   if (!client) return res.status(404).json({ error: 'Cliente no encontrado' });
 
+  // Solo pólizas emitidas: un previo todavía no cubre nada, no se ha pagado y no
+  // aparta línea de crédito, así que no puede entrar en ninguna de estas cifras.
+  // Se cuentan aparte para poder decir cuántos hay en trámite.
   const fianzas = await db
     .prepare(`SELECT afianzadora_id, prima_neta, prima_total, monto_afianzado, fecha_vigencia
-              FROM fianzas WHERE client_id = ?`)
+              FROM fianzas WHERE client_id = ? AND clase = 'fianza'`)
     .all(clientId);
+
+  const previos = (await db
+    .prepare(`SELECT COUNT(*)::int c FROM fianzas WHERE client_id = ? AND clase = 'previo'`)
+    .get(clientId)).c;
 
   let activas = 0;
   let porVencer30 = 0;
@@ -92,6 +99,7 @@ router.get('/', requireAuth, requireCliente, async (req, res) => {
       linea_credito_total: lineaCreditoTotal,
       lineas,
       fianzas_activas: activas,
+      previos_en_tramite: previos,
       monto_afianzado_total: montoAfianzadoTotal,
       suma_prima_neta: sumaPrimaNeta,
       suma_prima_total: sumaPrimaTotal,

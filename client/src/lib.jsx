@@ -107,6 +107,10 @@ const ESTADOS = {
   vencido:    { label: 'Vencido',    cls: 'bg-rose-100 text-rose-700' },
   pendiente:  { label: 'Pendiente',  cls: 'bg-rose-100 text-rose-700' },
   entregado:  { label: 'Entregado',  cls: 'bg-emerald-100 text-emerald-700' },
+  // Un previo no tiene vigencia que juzgar: la API manda este estado en su
+  // lugar (ver routes/fianzas.js). En violeta para que no se confunda con las
+  // emitidas ni parezca un problema.
+  previo:     { label: 'Previo',     cls: 'bg-violet-100 text-violet-700' },
 };
 
 export function EstadoBadge({ estado }) {
@@ -114,6 +118,21 @@ export function EstadoBadge({ estado }) {
   return (
     <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${e.cls}`}>
       {e.label}
+    </span>
+  );
+}
+
+// Marca de clase junto al número de póliza. Solo se pinta para los previos: en
+// una tabla que casi siempre son fianzas, etiquetar cada renglón con "FIANZA"
+// nada más hace ruido.
+export function ClaseBadge({ clase }) {
+  if (clase !== 'previo') return null;
+  return (
+    <span
+      className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-violet-100 text-violet-700 whitespace-nowrap"
+      title="Previo: capturado antes de que la afianzadora emita la póliza"
+    >
+      Previo
     </span>
   );
 }

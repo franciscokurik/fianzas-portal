@@ -8,7 +8,7 @@ import {
 import { api, getToken, subirACloudinary } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import {
-  mxn, mxnCents, fmtDate, yaVencio, EstadoBadge, InputPesos,
+  mxn, mxnCents, fmtDate, yaVencio, EstadoBadge, ClaseBadge, InputPesos,
   ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, pesoArchivo, revisarArchivo,
 } from '../lib.jsx';
 
@@ -213,6 +213,9 @@ export default function Admin() {
                       </div>
                       <p className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
                         {c.total_proyectos} proyectos · {c.total_fianzas} fianzas · {c.fianzas_vencidas} vencidas
+                        {c.total_previos > 0 && (
+                          <span className="text-violet-600"> · {c.total_previos} previo(s)</span>
+                        )}
                         {c.recordatorios_pendientes > 0 && (
                           <span className="text-amber-600"> · {c.recordatorios_pendientes} recordatorio(s)</span>
                         )}
@@ -303,9 +306,12 @@ function Recordatorios({ recordatorios, onAbrirCliente, onAtendido }) {
             >
               {r.razon_social}
             </button>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-slate-500 flex items-center gap-1.5">
+              <ClaseBadge clase={r.clase} />
               <span className="font-mono">{r.numero_poliza}</span>
-              {r.proyecto_nombre && ` · ${r.proyecto_nombre}`} · {r.afianzadora_nombre}
+              <span>
+                {r.proyecto_nombre && `· ${r.proyecto_nombre} `}· {r.afianzadora_nombre}
+              </span>
             </span>
             {r.nota_recordatorio && (
               <span className="text-xs text-slate-600 basis-full sm:basis-auto flex-1">{r.nota_recordatorio}</span>
@@ -561,11 +567,16 @@ function DetalleCliente({
   const [errorBaja, setErrorBaja] = useState('');
   const lineaTotal = lineas.reduce((s, l) => s + (l.linea_credito || 0), 0);
   const disponibleTotal = lineas.reduce((s, l) => s + (l.disponible || 0), 0);
-  const afianzadoTotal = fianzas
+  // Los previos quedan fuera de todas las cifras de dinero: son lo que se
+  // cotizó, no lo que la afianzadora emitió. Se cuentan aparte para saber
+  // cuántos están en trámite.
+  const emitidas = fianzas.filter((f) => f.clase !== 'previo');
+  const previos = fianzas.length - emitidas.length;
+  const afianzadoTotal = emitidas
     .filter((f) => f.estado !== 'vencida')
     .reduce((s, f) => s + (f.monto_afianzado || 0), 0);
-  const sumaPrimaNeta = fianzas.reduce((s, f) => s + (f.prima_neta || 0), 0);
-  const sumaPrimaTotal = fianzas.reduce((s, f) => s + (f.prima_total || 0), 0);
+  const sumaPrimaNeta = emitidas.reduce((s, f) => s + (f.prima_neta || 0), 0);
+  const sumaPrimaTotal = emitidas.reduce((s, f) => s + (f.prima_total || 0), 0);
 
   async function descargar(rel) {
     const res = await fetch(`/api/admin/descargar?path=${encodeURIComponent(rel)}`, {
@@ -654,11 +665,15 @@ function DetalleCliente({
           <Pill label="Línea total" valor={mxn(lineaTotal)} />
           <Pill label="Disponible" valor={mxn(disponibleTotal)} tono="emerald" />
           <Pill label="Monto afianzado" valor={mxn(afianzadoTotal)} tono="sky"
-                ayuda="Suma de lo que cubren las fianzas vigentes" />
+                ayuda="Suma de lo que cubren las fianzas vigentes. No incluye previos: todavía no se emiten." />
           <Pill label="Prima total" valor={mxn(sumaPrimaTotal)} tono="violet"
-                ayuda="Lo que el fiado paga: prima neta + derecho de póliza + IVA" />
+                ayuda="Lo que el fiado paga: prima neta + derecho de póliza + IVA. Sin previos." />
           <Pill label="Prima neta" valor={mxn(sumaPrimaNeta)}
                 ayuda="La tarifa de la afianzadora, sin derecho de póliza ni IVA" />
+          {previos > 0 && (
+            <Pill label="Previos" valor={String(previos)}
+                  ayuda="Capturados pero sin emitir: no cuentan en las cifras de arriba" />
+          )}
         </div>
       </div>
 
@@ -1538,7 +1553,7 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, tipo
           />
           <div className="px-4 py-2.5 border-t border-slate-100">
             <button onClick={() => setNuevaFianza((n) => !n)} className={btnSecondary}>
-              <Plus className={`h-3.5 w-3.5 transition-transform ${nuevaFianza ? 'rotate-45' : ''}`} /> Agregar fianza a este proyecto
+              <Plus className={`h-3.5 w-3.5 transition-transform ${nuevaFianza ? 'rotate-45' : ''}`} /> Agregar fianza o previo a este proyecto
             </button>
           </div>
           {nuevaFianza && (
@@ -1552,7 +1567,7 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, tipo
                 await api.post('/admin/fianzas', { client_id: clienteId, ...datos });
                 setNuevaFianza(false);
                 onChange();
-                flash('Fianza agregada');
+                flash(datos.clase === 'previo' ? 'Previo agregado' : 'Fianza agregada');
               }}
             />
           )}
@@ -1567,13 +1582,13 @@ function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tipo
   const [docsAbiertos, setDocsAbiertos] = useState(null);
 
   if (!fianzas.length) {
-    return <div className="px-4 py-5 text-center text-xs text-slate-400">Sin fianzas en este proyecto.</div>;
+    return <div className="px-4 py-5 text-center text-xs text-slate-400">Sin fianzas ni previos en este proyecto.</div>;
   }
 
-  async function borrar(id) {
-    await api.del(`/admin/fianzas/${id}`);
+  async function borrar(f) {
+    await api.del(`/admin/fianzas/${f.id}`);
     onChange();
-    flash('Fianza eliminada');
+    flash(f.clase === 'previo' ? 'Previo eliminado' : 'Fianza eliminada');
   }
 
   return (
@@ -1612,14 +1627,19 @@ function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tipo
                       await api.put(`/admin/fianzas/${f.id}`, datos);
                       setEditandoId(null);
                       onChange();
-                      flash('Fianza actualizada');
+                      flash(datos.clase === 'previo' ? 'Previo actualizado' : 'Fianza actualizada');
                     }}
                   />
                 </td>
               </tr>
             ) : (
               <tr key={f.id} className="hover:bg-white/70">
-                <td className="px-3 py-1.5 font-mono text-slate-700">{f.numero_poliza}</td>
+                <td className="px-3 py-1.5 text-slate-700">
+                  <span className="flex items-center gap-1.5">
+                    <span className="font-mono">{f.numero_poliza}</span>
+                    <ClaseBadge clase={f.clase} />
+                  </span>
+                </td>
                 <td className="px-3 py-1.5 text-slate-600">{f.afianzadora_nombre}</td>
                 <td className="px-3 py-1.5 text-slate-700 font-medium">{f.tipo_fianza}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-slate-800">{mxnCents(f.monto_afianzado)}</td>
@@ -1659,10 +1679,10 @@ function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tipo
                 </td>
                 <td className="px-3 py-1.5">
                   <div className="flex items-center justify-end gap-1.5">
-                    <button onClick={() => setEditandoId(f.id)} className={btnSecondary} title="Editar fianza">
+                    <button onClick={() => setEditandoId(f.id)} className={btnSecondary} title={f.clase === 'previo' ? 'Editar previo' : 'Editar fianza'}>
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
-                    <button onClick={() => borrar(f.id)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Eliminar fianza">
+                    <button onClick={() => borrar(f)} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title={f.clase === 'previo' ? 'Eliminar previo' : 'Eliminar fianza'}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -1676,7 +1696,8 @@ function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tipo
               <tr key={`docs-${f.id}`} className="bg-indigo-50/20">
                 <td colSpan={10} className="px-4 py-3">
                   <p className="text-xs font-medium text-slate-600 mb-2">
-                    Documentos de la fianza <span className="font-mono text-slate-400">{f.numero_poliza}</span>
+                    {f.clase === 'previo' ? 'Documentos del previo' : 'Documentos de la fianza'}{' '}
+                    <span className="font-mono text-slate-400">{f.numero_poliza}</span>
                   </p>
                   <DocsEntidad
                     clienteId={clienteId}
@@ -1925,8 +1946,43 @@ function ChecklistTipos({ tipos, valor, onChange }) {
   );
 }
 
+// Fianza emitida o previo: los MISMOS campos: un previo es lo que se cotizó y
+// el día que la afianzadora emite se pasa a fianza sin recapturar nada (solo
+// cambia esta opción). Lo único que cambia es que el previo no entra en las
+// cifras de dinero ni en los avisos de vencimiento.
+const CLASES = [
+  ['fianza', 'Fianza', 'Póliza ya emitida por la afianzadora'],
+  ['previo', 'Previo', 'Todavía no se emite: no suma en montos ni línea de crédito'],
+];
+
+function SelectorClase({ valor, onChange }) {
+  return (
+    <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+      {CLASES.map(([clave, etiqueta, ayuda]) => (
+        <button
+          key={clave}
+          type="button"
+          onClick={() => onChange(clave)}
+          title={ayuda}
+          className={`px-3 py-1.5 text-xs rounded-md font-medium transition-colors ${
+            valor === clave
+              ? clave === 'previo'
+                ? 'bg-violet-600 text-white'
+                : 'bg-indigo-600 text-white'
+              : 'text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          {etiqueta}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSubmit, onCancel }) {
   const [f, setF] = useState({
+    // Lo que se captura casi siempre es una póliza; el previo se marca a mano.
+    clase: inicial?.clase || 'fianza',
     proyecto_id: inicial?.proyecto_id ?? proyectoId ?? '',
     afianzadora_id: inicial?.afianzadora_id ?? '',
     numero_poliza: inicial?.numero_poliza || '',
@@ -1942,12 +1998,17 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const esPrevio = f.clase === 'previo';
 
   async function guardar() {
     setError('');
     if (!f.proyecto_id) return setError('Selecciona el proyecto al que pertenece la fianza.');
     if (!f.afianzadora_id) return setError('Selecciona la afianzadora.');
-    if (!f.numero_poliza.trim()) return setError('Captura el número de póliza.');
+    if (!f.numero_poliza.trim()) {
+      return setError(esPrevio
+        ? 'Captura el número del previo (o la referencia con la que lo pediste).'
+        : 'Captura el número de póliza.');
+    }
     if (!f.tipo_fianza_id) return setError('Marca el tipo de fianza.');
     // La total incluye a la neta más el derecho de póliza y el IVA, así que no
     // puede quedar por debajo. Casi siempre es que se invirtieron los campos.
@@ -1972,9 +2033,19 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
 
   return (
     <div className="border-t border-slate-200 bg-indigo-50/30 px-4 py-3">
-      <p className="text-xs font-medium text-slate-600 mb-2">
-        {inicial ? `Editar fianza ${inicial.numero_poliza}` : 'Nueva fianza'}
-      </p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
+        <p className="text-xs font-medium text-slate-600">
+          {inicial
+            ? `Editar ${esPrevio ? 'previo' : 'fianza'} ${inicial.numero_poliza}`
+            : esPrevio ? 'Nuevo previo' : 'Nueva fianza'}
+        </p>
+        <SelectorClase valor={f.clase} onChange={(clase) => setF((s) => ({ ...s, clase }))} />
+        <span className="text-[11px] text-slate-500">
+          {esPrevio
+            ? 'Se capturan los mismos datos; el previo no suma en montos, línea de crédito ni avisos.'
+            : 'Póliza emitida: suma en montos, línea de crédito y avisos de vencimiento.'}
+        </span>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* Datos de la póliza */}
@@ -1994,7 +2065,10 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
             </select>
           </div>
           <div>
-            <label className="text-[11px] text-slate-500 mb-1 block">N° de póliza<Req /></label>
+            <label className="text-[11px] text-slate-500 mb-1 block">
+              N° de póliza<Req />
+              {esPrevio && <span className="text-slate-400 font-normal"> · o la referencia del previo</span>}
+            </label>
             <input value={f.numero_poliza} onChange={set('numero_poliza')} className={inputCls} />
           </div>
           <div>
@@ -2074,7 +2148,7 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
       )}
       <div className="flex gap-2 mt-3">
         <button onClick={guardar} disabled={busy} className={btnPrimary}>
-          <Save className="w-4 h-4" /> {busy ? 'Guardando…' : 'Guardar fianza'}
+          <Save className="w-4 h-4" /> {busy ? 'Guardando…' : esPrevio ? 'Guardar previo' : 'Guardar fianza'}
         </button>
         <button onClick={onCancel} className={btnSecondary}><X className="h-3.5 w-3.5" /> Cancelar</button>
       </div>

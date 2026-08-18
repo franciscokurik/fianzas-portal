@@ -51,13 +51,19 @@ router.get('/clientes', async (req, res) => {
     .all(...cartera.params);
 
   const enriquecidos = await Promise.all(clientes.map(async (c) => {
-    const fianzas = await db.prepare(
-      `SELECT fecha_vigencia, fecha_recordatorio, recordatorio_atendido_el
+    const registros = await db.prepare(
+      `SELECT clase, fecha_vigencia, fecha_recordatorio, recordatorio_atendido_el
        FROM fianzas WHERE client_id = ?`
     ).all(c.id);
+    // Los previos se cuentan aparte: todavía no son pólizas, así que no tiene
+    // sentido decir que uno está "vencido" ni sumarlos con las emitidas.
+    const fianzas = registros.filter((f) => f.clase !== 'previo');
+    const previos = registros.filter((f) => f.clase === 'previo');
     const porVencer = fianzas.filter((f) => estadoFianza(f.fecha_vigencia) === 'por_vencer').length;
     const vencidas = fianzas.filter((f) => estadoFianza(f.fecha_vigencia) === 'vencida').length;
-    const recordatorios = fianzas.filter((f) => {
+    // El recordatorio sí aplica a los dos: el previo es justo lo que hay que
+    // perseguir para que se emita.
+    const recordatorios = registros.filter((f) => {
       if (!f.fecha_recordatorio || f.recordatorio_atendido_el) return false;
       const d = daysUntil(f.fecha_recordatorio);
       return d !== null && d <= 7;
@@ -81,6 +87,7 @@ router.get('/clientes', async (req, res) => {
       ...c,
       total_proyectos: proyectos,
       total_fianzas: fianzas.length,
+      total_previos: previos.length,
       fianzas_por_vencer: porVencer,
       fianzas_vencidas: vencidas,
       recordatorios_pendientes: recordatorios,
@@ -308,13 +315,16 @@ router.delete('/proyectos/:id', async (req, res) => {
 
 // --- Fianzas (pólizas) ---
 
-const CAMPOS_FIANZA = ['proyecto_id', 'afianzadora_id', 'numero_poliza', 'tipo_fianza_id',
+const CAMPOS_FIANZA = ['clase', 'proyecto_id', 'afianzadora_id', 'numero_poliza', 'tipo_fianza_id',
                        'prima_neta', 'prima_total', 'monto_afianzado',
                        'fecha_inicio', 'fecha_vigencia',
                        'fecha_recordatorio', 'nota_recordatorio'];
 
 // Todo lo que es dinero y puede venir en el body de una fianza.
 const MONTOS_FIANZA = ['prima_neta', 'prima_total', 'monto_afianzado'];
+
+// Tiene que coincidir con el CHECK de la columna 'clase' (schema.js).
+const CLASES_FIANZA = ['fianza', 'previo'];
 
 // Construye el SET de un UPDATE solo con los campos que vienen en el body.
 // A diferencia de COALESCE, esto sí permite vaciar un campo mandando null.
@@ -348,9 +358,17 @@ async function tipoExiste(tipoId) {
   return Boolean(t);
 }
 
-// POST /api/admin/fianzas -> alta de póliza dentro de un proyecto
+// Fianza emitida o previo (lo mismo, pero antes de que la afianzadora emita).
+// Se captura igual; lo que cambia es que el previo no cuenta como pasivo. Si no
+// viene nada, es fianza: así se comportaba todo lo que ya está capturado.
+function claseValida(clase) {
+  if (clase == null || clase === '') return 'fianza';
+  return CLASES_FIANZA.includes(clase) ? clase : null;
+}
+
+// POST /api/admin/fianzas -> alta de póliza (o previo) dentro de un proyecto
 router.post('/fianzas', async (req, res) => {
-  const { client_id, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza_id,
+  const { client_id, clase, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza_id,
           prima_neta, prima_total, monto_afianzado, fecha_inicio, fecha_vigencia,
           fecha_recordatorio, nota_recordatorio } = req.body || {};
 
@@ -358,6 +376,9 @@ router.post('/fianzas', async (req, res) => {
     return res.status(400).json({ error: 'Cliente, afianzadora y número de póliza son obligatorios' });
   }
   await exigirCliente(req.user, client_id);
+
+  const claseFinal = claseValida(clase);
+  if (!claseFinal) return res.status(400).json({ error: 'La clase debe ser fianza o previo' });
 
   const errProyecto = await validarProyecto(proyecto_id, client_id);
   if (errProyecto) return res.status(400).json({ error: errProyecto });
@@ -368,11 +389,12 @@ router.post('/fianzas', async (req, res) => {
 
   const row = await db.prepare(
     `INSERT INTO fianzas
-       (client_id, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza_id,
+       (client_id, clase, proyecto_id, afianzadora_id, numero_poliza, tipo_fianza_id,
         prima_neta, prima_total, monto_afianzado, fecha_inicio, fecha_vigencia,
         fecha_recordatorio, nota_recordatorio)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
-  ).get(Number(client_id), Number(proyecto_id), Number(afianzadora_id), numero_poliza,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+  ).get(Number(client_id), claseFinal,
+        Number(proyecto_id), Number(afianzadora_id), numero_poliza,
         Number(tipo_fianza_id),
         centavos(prima_neta), centavos(prima_total), centavos(monto_afianzado),
         fecha_inicio || null, fecha_vigencia || null,
@@ -403,6 +425,15 @@ router.put('/fianzas/:id', async (req, res) => {
       return res.status(400).json({ error: 'Selecciona un tipo de fianza del catálogo' });
     }
     body.tipo_fianza_id = Number(body.tipo_fianza_id);
+  }
+
+  // Pasar un previo a fianza (o al revés) es cambiar solo esta columna: el
+  // renglón capturado se conserva tal cual, que es justo lo que se quiere el
+  // día que la afianzadora emite.
+  if ('clase' in body) {
+    const claseFinal = claseValida(body.clase);
+    if (!claseFinal) return res.status(400).json({ error: 'La clase debe ser fianza o previo' });
+    body.clase = claseFinal;
   }
 
   // Los montos llegan en centavos; se normalizan a entero por si acaso.
@@ -446,7 +477,7 @@ router.get('/recordatorios', async (req, res) => {
   const dias = Number(req.query.dias) || 7;
   const cartera = filtroCartera(req.user, 'c.vendedor_id');
   const rows = await db.prepare(
-    `SELECT f.id, f.numero_poliza, t.nombre AS tipo_fianza,
+    `SELECT f.id, f.clase, f.numero_poliza, t.nombre AS tipo_fianza,
             f.fecha_recordatorio, f.nota_recordatorio,
             f.monto_afianzado, c.id AS client_id, c.razon_social,
             a.nombre AS afianzadora_nombre, p.nombre AS proyecto_nombre
@@ -703,17 +734,22 @@ router.get('/clientes/:id/detalle', async (req, res) => {
   ).all(id);
   const porEntidad = agruparPorEntidad(archivos);
 
+  // Un previo no tiene vigencia que juzgar: su 'estado' ES ser previo. Sin esto
+  // saldría pintado en rojo como "vencida" nada más porque se le capturó una
+  // fecha estimada que ya pasó.
   const fianzas = fianzasRows.map((f) => ({
     ...f,
-    estado: estadoFianza(f.fecha_vigencia),
+    estado: f.clase === 'previo' ? 'previo' : estadoFianza(f.fecha_vigencia),
     dias_para_recordatorio: daysUntil(f.fecha_recordatorio),
     documentos: deEntidad(porEntidad, 'fianza', f.id),
   }));
 
-  // Comprometido por afianzadora (fianzas no vencidas)
+  // Comprometido por afianzadora (fianzas no vencidas). Un previo no compromete
+  // nada: la afianzadora todavía no emitió, así que no hay pasivo que descontar
+  // de la línea de crédito.
   const comprometidoPorAfi = new Map();
   for (const f of fianzas) {
-    if (f.estado === 'vencida') continue;
+    if (f.clase === 'previo' || f.estado === 'vencida') continue;
     comprometidoPorAfi.set(
       f.afianzadora_id,
       (comprometidoPorAfi.get(f.afianzadora_id) || 0) + (f.monto_afianzado || 0)
@@ -759,20 +795,24 @@ router.get('/clientes/:id/detalle', async (req, res) => {
   ).all(id);
 
   const proyectos = proyectosRows.map((p) => {
+    // 'suyas' lleva todo lo capturado (fianzas y previos), porque la tabla del
+    // panel los muestra juntos; los totales de dinero solo cuentan las emitidas.
     const suyas = fianzas.filter((f) => f.proyecto_id === p.id);
-    const afianzado = suyas
+    const emitidas = suyas.filter((f) => f.clase !== 'previo');
+    const afianzado = emitidas
       .filter((f) => f.estado !== 'vencida')
       .reduce((s, f) => s + (f.monto_afianzado || 0), 0);
     return {
       ...p,
       fianzas: suyas,
       documentos: deEntidad(porEntidad, 'proyecto', p.id),
-      total_fianzas: suyas.length,
+      total_fianzas: emitidas.length,
+      total_previos: suyas.length - emitidas.length,
       monto_afianzado: afianzado,
       // Las dos primas del proyecto. Cuidado al leerlas: 'suma_prima_total' es
       // la suma de las primas TOTALES de sus fianzas, no el total de las netas.
-      suma_prima_neta: suyas.reduce((s, f) => s + (f.prima_neta || 0), 0),
-      suma_prima_total: suyas.reduce((s, f) => s + (f.prima_total || 0), 0),
+      suma_prima_neta: emitidas.reduce((s, f) => s + (f.prima_neta || 0), 0),
+      suma_prima_total: emitidas.reduce((s, f) => s + (f.prima_total || 0), 0),
       // Qué tanto del contrato está respaldado por fianzas vigentes.
       pct_contrato_afianzado: p.monto_contrato > 0
         ? Math.round((afianzado / p.monto_contrato) * 100)

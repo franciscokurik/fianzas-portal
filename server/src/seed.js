@@ -136,8 +136,8 @@ export async function seed() {
     `INSERT INTO fianzas (client_id, proyecto_id, afianzadora_id, numero_poliza,
                           tipo_fianza_id, prima_neta, prima_total, monto_afianzado,
                           fecha_inicio, fecha_vigencia,
-                          fecha_recordatorio, nota_recordatorio)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                          fecha_recordatorio, nota_recordatorio, clase)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   // Lo que el fiado acaba pagando: prima neta + derecho de póliza + IVA. Los
   // datos de demo lo calculan; en la operación real el admin lo captura del
@@ -146,9 +146,10 @@ export async function seed() {
   const IVA = 1.16;
   const primaTotalDe = (neta) => Math.round((neta + DERECHO_POLIZA) * IVA);
 
-  const fianza = (clientId, proyectoId, afiSlug, poliza, tipo, prima, monto, ini, fin, rec = null, nota = null) =>
+  const fianza = (clientId, proyectoId, afiSlug, poliza, tipo, prima, monto, ini, fin, rec = null, nota = null,
+                  clase = 'fianza') =>
     insFianza.run(clientId, proyectoId, afiIds[afiSlug], poliza, tipoIdPorNombre.get(tipo) ?? null,
-                  pesos(prima), pesos(primaTotalDe(prima)), pesos(monto), ini, fin, rec, nota);
+                  pesos(prima), pesos(primaTotalDe(prima)), pesos(monto), ini, fin, rec, nota, clase);
 
   await fianza(c1, pAcueducto, 'aserta', 'ASE-2024-0012', 'Cumplimiento', 18500, 1200000,
     addMonths(hoy, -10), addMonths(hoy, 8),
@@ -160,6 +161,14 @@ export async function seed() {
     addMonths(hoy, -1), 'Obra ya entregada: solicitar liberación a Berkley.');
   await fianza(c1, pHospital, 'tokio-marine', 'TKM-2025-0033', 'Cumplimiento', 21000, 1500000,
     addMonths(hoy, -2), addMonths(hoy, 10));
+
+  // Un PREVIO: los mismos datos que una fianza, pero sin emitir. En la demo
+  // sirve para ver que no suma en montos, primas ni línea de crédito, y que el
+  // día que Tokio Marine emita basta cambiarle la clase.
+  await fianza(c1, pHospital, 'tokio-marine', 'PREV-2025-0104', 'Anticipo', 12400, 3700000,
+    addMonths(hoy, 0), addMonths(hoy, 12),
+    addMonths(hoy, 0), 'Dar seguimiento a la emisión del previo con Tokio Marine.',
+    'previo');
 
   // Fianza del cliente 2
   await fianza(c2, pSubestacion, 'chubb', 'CHB-2024-1190', 'Cumplimiento', 7600, 450000,
