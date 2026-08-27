@@ -10,11 +10,14 @@ import { TIPOS_DOC, esTipoValido, agruparPorEntidad, deEntidad } from '../lib/do
 import {
   guardarDocumentoCliente, borrarDocumentoCliente, exigirTipoDocumento,
 } from '../services/documentos-cliente.js';
-import { exigirCliente, exigirEntidad, filtroCartera } from '../lib/permisos.js';
+import {
+  exigirCliente, exigirEntidad, filtroCartera, ALCANCE, JOIN_PADRON,
+} from '../lib/permisos.js';
 import {
   crearUsuario, actualizarUsuario, desactivarUsuario, eliminarUsuario, DOMINIO_INTERNO,
 } from '../services/usuarios.js';
 import { eliminarCliente } from '../services/clientes.js';
+import { panoramaDelContratante } from '../services/proveedores.js';
 
 const router = Router();
 
@@ -36,13 +39,48 @@ const soloOperador = requireOperador;
 
 // --- Clientes ---
 
+// Tiene que coincidir con el CHECK de la columna 'tipo' (schema.js).
+const TIPOS_CLIENTE = ['fiado', 'contratante'];
+
+// Fiado (compra fianzas) o contratante (las exige a sus proveedores). Si no
+// viene nada, es fiado: así se comportaba todo lo que ya estaba capturado.
+function tipoValido(tipo) {
+  if (tipo == null || tipo === '') return 'fiado';
+  return TIPOS_CLIENTE.includes(tipo) ? tipo : null;
+}
+
+const tipoDe = async (clientId) =>
+  (await db.prepare('SELECT tipo FROM clients WHERE id = ?').get(Number(clientId)))?.tipo ?? null;
+
+// Un contratante no ejecuta obra ni compra fianzas: la contrata y la exige. Se
+// niega en el servidor en vez de solo esconder el formulario, porque capturarle
+// una obra dejaría datos que NADIE puede ver —su portal no tiene esa pantalla—
+// y eso se descubre semanas después, cuando ya hay pólizas colgando.
+async function exigirFiado(clientId, queCosa) {
+  if ((await tipoDe(clientId)) === 'contratante') {
+    const e = new Error(
+      'Esa cuenta es de tipo contratante: no compra fianzas, así que no se le puede '
+      + `capturar ${queCosa}. Si de verdad va a comprar fianzas, cámbiale el tipo a fiado primero.`
+    );
+    e.status = 400;
+    throw e;
+  }
+}
+
 // GET /api/admin/clientes -> todos los clientes con su estatus general
 router.get('/clientes', async (req, res) => {
   const cartera = filtroCartera(req.user, 'c.vendedor_id');
   const clientes = await db
     .prepare(
-      `SELECT c.id, c.razon_social, c.rfc, c.vendedor_id, v.nombre AS vendedor_nombre,
-              (SELECT COUNT(*)::int FROM users u WHERE u.client_id = c.id AND u.activo = 1) AS total_usuarios
+      `SELECT c.id, c.razon_social, c.rfc, c.tipo, c.vendedor_id, v.nombre AS vendedor_nombre,
+              (SELECT COUNT(*)::int FROM users u WHERE u.client_id = c.id AND u.activo = 1) AS total_usuarios,
+              -- Cuántos proveedores tiene en su padrón (si es contratante) y en
+              -- cuántos padrones está él (si es fiado). Las dos leen la misma
+              -- tabla, cada una por su lado.
+              (SELECT COUNT(*)::int FROM client_proveedores cp
+                WHERE cp.contratante_id = c.id AND cp.activo = 1) AS total_proveedores,
+              (SELECT COUNT(*)::int FROM client_proveedores cp
+                WHERE cp.proveedor_id  = c.id AND cp.activo = 1) AS total_contratantes
        FROM clients c
        LEFT JOIN users v ON v.id = c.vendedor_id
        WHERE 1 = 1${cartera.sql}
@@ -50,7 +88,54 @@ router.get('/clientes', async (req, res) => {
     )
     .all(...cartera.params);
 
+  // Las obras de un contratante que hoy NO tienen fianza vigente. Es su única
+  // cifra de alarma, y es la que enciende el punto ámbar de la lista.
+  //
+  // Lleva el alcance COMPLETO —las dos mitades, JOIN_PADRON y ALCANCE— y no una
+  // copia a mano de la mitad: escrita sin el padrón, esta cifra contaba las
+  // obras de proveedores ya suspendidos, así que la lista prendía el punto
+  // ámbar por un pendiente que el detalle del cliente decía que no existía (y
+  // que el contratante, correctamente, tampoco veía).
+  //
+  // Solo pólizas emitidas: un previo no cubre nada. Y solo obras vivas:
+  // exigirle cobertura a una obra cerrada llenaría la lista de rojos de hace
+  // años (la misma regla que services/proveedores.js).
+  const obrasDescubiertas = (contratanteId) => db.prepare(
+    `SELECT COUNT(*)::int c FROM proyectos p
+     ${JOIN_PADRON}
+     WHERE ${ALCANCE}
+       AND p.estatus IN ('en_proceso', 'terminado', 'entregado')
+       AND NOT EXISTS (
+         SELECT 1 FROM fianzas f
+         WHERE f.proyecto_id = p.id AND f.clase = 'fianza'
+           -- Sin fecha capturada NO es cobertura. Es la misma regla que
+           -- estadoCumplimiento en lib/dates.js, y tiene que ser la misma:
+           -- si aquí contara y allá no, el punto ámbar de la lista diría una
+           -- cosa y el detalle del cliente otra.
+           AND f.fecha_vigencia IS NOT NULL
+           AND f.fecha_vigencia >= ?
+       )`
+  ).get(contratanteId, todayISO());
+
   const enriquecidos = await Promise.all(clientes.map(async (c) => {
+    // Un contratante no tiene fianzas, ni expediente, ni papelería. Calcularle
+    // esas cifras le pintaría "5 documento(s) faltante(s)" por papeles que
+    // nadie le va a pedir nunca, y el punto ámbar prendido para siempre.
+    if (c.tipo === 'contratante') {
+      return {
+        ...c,
+        total_proyectos: 0,
+        total_fianzas: 0,
+        total_previos: 0,
+        fianzas_por_vencer: 0,
+        fianzas_vencidas: 0,
+        recordatorios_pendientes: 0,
+        docs_pendientes: 0,
+        papeleria_pendiente: 0,
+        obras_descubiertas: (await obrasDescubiertas(c.id)).c,
+      };
+    }
+
     const registros = await db.prepare(
       `SELECT clase, fecha_vigencia, fecha_recordatorio, recordatorio_atendido_el
        FROM fianzas WHERE client_id = ?`
@@ -93,6 +178,9 @@ router.get('/clientes', async (req, res) => {
       recordatorios_pendientes: recordatorios,
       docs_pendientes: docsPendientes,
       papeleria_pendiente: papeleriaPend,
+      // Siempre presente para que las dos clases de cliente tengan la MISMA
+      // forma: al front le toca pintar, no averiguar qué campos existen.
+      obras_descubiertas: 0,
     };
   }));
 
@@ -101,17 +189,23 @@ router.get('/clientes', async (req, res) => {
 
 // POST /api/admin/clientes -> alta de la empresa y, de una vez, su primer acceso
 router.post('/clientes', soloOperador, async (req, res) => {
-  const { razon_social, rfc, telefono, vendedor_id, email, password, nombre_contacto } = req.body || {};
+  const { razon_social, rfc, telefono, tipo, vendedor_id, email, password, nombre_contacto } = req.body || {};
   if (!razon_social || !email || !password) {
     return res.status(400).json({ error: 'Razón social, correo y contraseña son obligatorios' });
   }
 
+  // El contratante se da de alta igual que el fiado —misma ficha, mismo primer
+  // acceso—; lo único distinto es el tipo, y de ahí cuelga todo lo que ve.
+  const tipoFinal = tipoValido(tipo);
+  if (!tipoFinal) return res.status(400).json({ error: 'El tipo debe ser fiado o contratante' });
+
   let clienteId;
   try {
     const row = await db.prepare(
-      `INSERT INTO clients (razon_social, rfc, telefono, vendedor_id)
-       VALUES (?, ?, ?, ?) RETURNING id`
-    ).get(razon_social, rfc || null, telefono || null, vendedor_id ? Number(vendedor_id) : null);
+      `INSERT INTO clients (razon_social, rfc, telefono, tipo, vendedor_id)
+       VALUES (?, ?, ?, ?, ?) RETURNING id`
+    ).get(razon_social, rfc || null, telefono || null, tipoFinal,
+          vendedor_id ? Number(vendedor_id) : null);
     clienteId = row.id;
   } catch (e) {
     return res.status(400).json({ error: 'No se pudo crear (¿RFC duplicado?)', detail: e.message });
@@ -188,11 +282,252 @@ router.put('/clientes/:id/vendedor', soloOperador, async (req, res) => {
   res.json({ ok: true });
 });
 
+// PUT /api/admin/clientes/:id/tipo  { tipo }
+//
+// Pasar de fiado a contratante (o al revés) cambia la pantalla COMPLETA que ve
+// esa empresa al entrar. Va por su propia ruta y con guardas, porque lo que no
+// se puede permitir es dejar información capturada del lado que no la muestra:
+// se quedaría viva en la base —cobrando línea, disparando avisos— sin que nadie
+// la volviera a ver.
+router.put('/clientes/:id/tipo', soloOperador, async (req, res) => {
+  const id = Number(req.params.id);
+  const tipo = tipoValido(req.body?.tipo);
+  if (!tipo) return res.status(400).json({ error: 'El tipo debe ser fiado o contratante' });
+
+  const actual = await db.prepare('SELECT tipo FROM clients WHERE id = ?').get(id);
+  if (!actual) return res.status(404).json({ error: 'Cliente no encontrado' });
+  if (actual.tipo === tipo) return res.json({ ok: true, tipo, sin_cambio: true });
+
+  const contar = async (sql) => (await db.prepare(sql).get(id)).c;
+
+  if (tipo === 'contratante') {
+    const proyectos = await contar('SELECT COUNT(*)::int c FROM proyectos WHERE client_id = ?');
+    const fianzas = await contar('SELECT COUNT(*)::int c FROM fianzas WHERE client_id = ?');
+    const lineas = await contar('SELECT COUNT(*)::int c FROM client_credit_lines WHERE client_id = ?');
+    const expediente = await contar('SELECT COUNT(*)::int c FROM client_documents WHERE client_id = ?');
+    const papeleria = await contar('SELECT COUNT(*)::int c FROM papeleria_requests WHERE client_id = ?');
+    if (proyectos || fianzas || lineas || expediente || papeleria) {
+      return res.status(400).json({
+        error: `No se puede: tiene ${proyectos} obra(s), ${fianzas} póliza(s), ${lineas} línea(s) de `
+             + `crédito, ${expediente} documento(s) de expediente y ${papeleria} solicitud(es) de `
+             + 'papelería. Un contratante no tiene esas pantallas, así que quedarían capturadas sin '
+             + 'que nadie las viera.',
+      });
+    }
+    // Y esto es lo que dejaría un estado imposible: un contratante no puede ser
+    // proveedor de nadie (el POST del padrón lo rechaza), así que si ya está en
+    // el padrón de alguien, cambiarle el tipo lo dejaría ahí para siempre —
+    // visible para ese contratante y sin forma de volverlo a agregar.
+    const enPadrones = await contar(
+      'SELECT COUNT(*)::int c FROM client_proveedores WHERE proveedor_id = ?'
+    );
+    if (enPadrones) {
+      return res.status(400).json({
+        error: `No se puede: es proveedor en ${enPadrones} padrón(es). Un contratante no le presenta `
+             + 'fianzas a nadie: sácalo de esos padrones primero.',
+      });
+    }
+  } else {
+    const padron = await contar('SELECT COUNT(*)::int c FROM client_proveedores WHERE contratante_id = ?');
+    const obras = await contar('SELECT COUNT(*)::int c FROM proyectos WHERE contratante_id = ?');
+    if (padron || obras) {
+      return res.status(400).json({
+        error: `No se puede: tiene ${padron} proveedor(es) en su padrón y ${obras} obra(s) ligada(s). `
+             + 'Un fiado no tiene padrón: quita esas ligas antes de cambiarle el tipo.',
+      });
+    }
+  }
+
+  await db.prepare('UPDATE clients SET tipo = ? WHERE id = ?').run(tipo, id);
+  res.json({ ok: true, tipo });
+});
+
+// --- Padrón de proveedores de un contratante ---
+//
+// Quién le tiene que presentar fianza a quién. Va soloOperador: meter a una
+// empresa en el padrón de otra es una decisión de la casa, no de quien atiende
+// la cuenta.
+//
+// Estar en el padrón NO le enseña al contratante ni una póliza: eso lo abre la
+// liga de la OBRA (proyectos.contratante_id). El padrón sirve para lo otro, que
+// es justo lo que el desarrollador quiere saber: a quién le falta presentarla.
+
+// POST /api/admin/clientes/:id/proveedores
+//   { proveedor_id, alias, notas }                          -> liga uno que ya existe
+//   { razon_social, rfc, telefono, alias, notas,
+//     email?, password?, nombre_contacto? }                 -> lo crea y lo liga
+//
+// Los dos caminos, porque en la práctica el proveedor casi nunca está dado de
+// alta, y mandar al operador a "Agregar cliente" primero le pide correo y
+// contraseña — que de un proveedor al que nada más se le vigila la fianza casi
+// nunca se tienen a la mano. Aquí el acceso al portal es OPCIONAL: un proveedor
+// puede vivir en el padrón sin que nadie de esa empresa entre nunca, con Fortex
+// capturándole la fianza.
+router.post('/clientes/:id/proveedores', soloOperador, async (req, res) => {
+  const contratanteId = Number(req.params.id);
+
+  const contratante = await db
+    .prepare('SELECT tipo, vendedor_id FROM clients WHERE id = ?')
+    .get(contratanteId);
+  if (!contratante) return res.status(404).json({ error: 'Cliente no encontrado' });
+  if (contratante.tipo !== 'contratante') {
+    return res.status(400).json({
+      error: 'Solo una cuenta de tipo contratante lleva padrón de proveedores',
+    });
+  }
+
+  let proveedorId = Number(req.body?.proveedor_id) || null;
+  let creado = false;
+
+  if (!proveedorId) {
+    const razonSocial = String(req.body?.razon_social || '').trim();
+    if (!razonSocial) {
+      return res.status(400).json({
+        error: 'Elige un cliente que ya exista o escribe la razón social del proveedor nuevo',
+      });
+    }
+
+    try {
+      const row = await db.prepare(
+        `INSERT INTO clients (razon_social, rfc, telefono, tipo, vendedor_id)
+         VALUES (?, ?, ?, 'fiado', ?) RETURNING id`
+        // Hereda el vendedor titular del contratante: quien lleva la cuenta del
+        // desarrollador es quien va a perseguir a sus proveedores —ahí está su
+        // venta—, así que el proveedor le aparece en su cartera desde el primer
+        // día en vez de quedar sin asignar.
+      ).get(razonSocial, req.body?.rfc || null, req.body?.telefono || null,
+            contratante.vendedor_id ?? null);
+      proveedorId = row.id;
+      creado = true;
+    } catch (e) {
+      return res.status(400).json({
+        error: 'No se pudo crear el proveedor (¿RFC duplicado?)', detail: e.message,
+      });
+    }
+
+    // El acceso al portal va aparte porque es opcional. Si falla (casi siempre,
+    // correo repetido) se deshace el alta: una empresa a medias con el RFC ya
+    // bloqueado es peor que ninguna. Es la misma cautela que en POST /clientes.
+    if (req.body?.email) {
+      try {
+        await crearUsuario({
+          nombre: req.body?.nombre_contacto || razonSocial,
+          email: req.body.email,
+          password: req.body.password,
+          role: 'client',
+          clientId: proveedorId,
+        });
+      } catch (e) {
+        await db.prepare('DELETE FROM clients WHERE id = ?').run(proveedorId);
+        return res.status(e.status || 400).json({ error: e.message });
+      }
+    }
+  }
+
+  if (proveedorId === contratanteId) {
+    return res.status(400).json({ error: 'Una empresa no puede ser su propio proveedor' });
+  }
+
+  // El proveedor es un fiado normal: es quien presenta la fianza. Un contratante
+  // no presenta ninguna, así que ligarlo como proveedor de otro no significaría
+  // nada y dejaría dos padrones cruzados.
+  const proveedor = await db.prepare('SELECT tipo FROM clients WHERE id = ?').get(proveedorId);
+  if (!proveedor) return res.status(404).json({ error: 'Ese proveedor no existe' });
+  if (proveedor.tipo !== 'fiado') {
+    return res.status(400).json({ error: 'El proveedor tiene que ser una cuenta de tipo fiado' });
+  }
+
+  // Volver a agregarlo lo REACTIVA: es lo que se espera al volver a contratar a
+  // alguien que se había suspendido, y aquí sí es una decisión explícita (a
+  // diferencia de asegurarEnPadron, que no des-suspende).
+  await db.prepare(
+    `INSERT INTO client_proveedores (contratante_id, proveedor_id, alias, notas)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (contratante_id, proveedor_id) DO UPDATE SET activo = 1`
+  ).run(contratanteId, proveedorId, req.body?.alias || null, req.body?.notas || null);
+
+  // El alias y las notas se actualizan APARTE, y solo los que de verdad
+  // vinieron. Con un `excluded.*` a secas, reactivar a un proveedor desde el
+  // formulario de "ya es cliente" —que no dibuja el campo de notas— le borraba
+  // al contratante la nota que tenía escrita.
+  const cambios = [];
+  const valores = [];
+  for (const campo of ['alias', 'notas']) {
+    if (campo in (req.body || {})) {
+      cambios.push(`${campo} = ?`);
+      valores.push(req.body[campo] || null);
+    }
+  }
+  if (cambios.length) {
+    await db.prepare(
+      `UPDATE client_proveedores SET ${cambios.join(', ')}
+       WHERE contratante_id = ? AND proveedor_id = ?`
+    ).run(...valores, contratanteId, proveedorId);
+  }
+
+  res.json({ ok: true, proveedor_id: proveedorId, creado });
+});
+
+// PUT /api/admin/clientes/:id/proveedores/:proveedorId  { activo, alias, notas }
+//
+// Suspender es la baja NORMAL, y es la que hay que usar: el proveedor sale del
+// padrón y el contratante deja de alcanzar sus obras en el mismo instante —el
+// activo es una de las dos condiciones del alcance, ver lib/permisos.js—, pero
+// queda el historial de lo que sí presentó.
+router.put('/clientes/:id/proveedores/:proveedorId', soloOperador, async (req, res) => {
+  const { activo, alias, notas } = req.body || {};
+  const sets = [];
+  const valores = [];
+  if (activo !== undefined) { sets.push('activo = ?'); valores.push(activo ? 1 : 0); }
+  if (alias !== undefined) { sets.push('alias = ?'); valores.push(alias || null); }
+  if (notas !== undefined) { sets.push('notas = ?'); valores.push(notas || null); }
+  if (!sets.length) return res.status(400).json({ error: 'Nada que actualizar' });
+
+  const { rows } = await db.prepare(
+    `UPDATE client_proveedores SET ${sets.join(', ')}
+     WHERE contratante_id = ? AND proveedor_id = ? RETURNING id`
+  ).run(...valores, Number(req.params.id), Number(req.params.proveedorId));
+  if (!rows.length) return res.status(404).json({ error: 'Ese proveedor no está en el padrón' });
+
+  res.json({ ok: true });
+});
+
+// DELETE /api/admin/clientes/:id/proveedores/:proveedorId
+//
+// Borra LA LIGA, no la empresa: el proveedor sigue siendo cliente de Fortex con
+// todas sus obras y pólizas. Esto es para la liga que nunca debió existir (se
+// agregó al padrón equivocado). Para dejar de trabajar con alguien, lo correcto
+// es SUSPENDERLO con el PUT de arriba, que conserva el historial.
+//
+// Se niega si todavía hay obras ligadas: quitarlo del padrón dejaría al
+// contratante viendo las fianzas de esas obras sin el proveedor en su lista, y
+// nadie sabría de quién es ese renglón. Primero se desliga la obra.
+router.delete('/clientes/:id/proveedores/:proveedorId', soloOperador, async (req, res) => {
+  const contratanteId = Number(req.params.id);
+  const proveedorId = Number(req.params.proveedorId);
+
+  const { c } = await db.prepare(
+    'SELECT COUNT(*)::int c FROM proyectos WHERE contratante_id = ? AND client_id = ?'
+  ).get(contratanteId, proveedorId);
+  if (c > 0) {
+    return res.status(400).json({
+      error: `Ese proveedor tiene ${c} obra(s) ligada(s) a este contratante. Quítale la liga en la `
+           + 'obra (el campo "Para") antes de sacarlo del padrón.',
+    });
+  }
+
+  await db.prepare(
+    'DELETE FROM client_proveedores WHERE contratante_id = ? AND proveedor_id = ?'
+  ).run(contratanteId, proveedorId);
+  res.json({ ok: true });
+});
+
 // PUT /api/admin/clientes/:id/lineas -> fijar/actualizar la línea de una afianzadora (upsert)
 router.put('/clientes/:id/lineas', soloOperador, async (req, res) => {
   const clientId = Number(req.params.id);
   const { afianzadora_id, linea_credito } = req.body || {};
   if (!afianzadora_id) return res.status(400).json({ error: 'afianzadora_id requerido' });
+  await exigirFiado(clientId, 'líneas de crédito');
   await db.prepare(
     `INSERT INTO client_credit_lines (client_id, afianzadora_id, linea_credito)
      VALUES (?, ?, ?)
@@ -263,38 +598,130 @@ router.delete('/tipos-fianza/:id', soloOperador, async (req, res) => {
 // --- Proyectos (obras) ---
 
 const CAMPOS_PROYECTO = ['nombre', 'numero_contrato', 'beneficiario', 'monto_contrato',
-                         'fecha_inicio', 'fecha_termino', 'estatus', 'notas'];
+                         'fecha_inicio', 'fecha_termino', 'estatus', 'notas', 'contratante_id'];
+
+// Ligar la obra a un contratante es lo que le abre a ESA OTRA EMPRESA las
+// pólizas de esta obra. Por eso se comprueban tres cosas y no una:
+//   - que el contratante exista;
+//   - que sea de tipo contratante — ligarla a otro fiado le enseñaría las
+//     pólizas de este cliente a un competidor suyo;
+//   - que no sea el mismo fiado que ejecuta la obra.
+async function validarContratante(contratanteId, clientId) {
+  if (!contratanteId) return null;
+  const c = await db.prepare('SELECT tipo FROM clients WHERE id = ?').get(Number(contratanteId));
+  if (!c) return 'El contratante no existe';
+  if (c.tipo !== 'contratante') {
+    return 'Esa cuenta no es de tipo contratante, y solo un contratante puede ver las fianzas '
+         + 'de sus proveedores.';
+  }
+  if (Number(contratanteId) === Number(clientId)) {
+    return 'Una obra no puede ser para el mismo fiado que la ejecuta';
+  }
+  return null;
+}
+
+// El vendedor captura la obra de su cliente, pero NO la liga a un contratante:
+// eso le abre las pólizas de su cliente a otra empresa, y una vez que el
+// contratante las vio, no hay cómo deshacerlo. Es de la casa, como las líneas
+// de crédito.
+const puedeLigarContratante = (user) => user?.role === 'admin' || user?.role === 'operador';
+
+const NO_PUEDE_LIGAR = 'Ligar la obra a un contratante le abre las pólizas de este cliente a otra '
+  + 'empresa, y eso no se deshace. Pídeselo a un operador.';
+
+// Ligar una obra mete al proveedor en el padrón del contratante si no estaba.
+// Sin esto, el desarrollador vería la fianza de la obra pero no al proveedor en
+// su lista, y quedaría un renglón sin dueño aparente.
+//
+// DO NOTHING y no un UPDATE: si al proveedor lo SUSPENDIERON del padrón, volver
+// a capturarle una obra no lo des-suspende. Eso sería reabrirle la puerta a
+// otra empresa desde una pantalla de captura de obras, sin que nadie lo
+// decidiera. Pero entonces el operador tiene que enterarse de que la obra quedó
+// ligada y aun así invisible, y para eso se devuelve el aviso.
+async function asegurarEnPadron(contratanteId, proveedorId) {
+  if (!contratanteId) return null;
+  await db.prepare(
+    `INSERT INTO client_proveedores (contratante_id, proveedor_id)
+     VALUES (?, ?) ON CONFLICT (contratante_id, proveedor_id) DO NOTHING`
+  ).run(Number(contratanteId), Number(proveedorId));
+
+  const fila = await db.prepare(
+    'SELECT activo FROM client_proveedores WHERE contratante_id = ? AND proveedor_id = ?'
+  ).get(Number(contratanteId), Number(proveedorId));
+  return fila?.activo === 1 ? null : 'padron_suspendido';
+}
+
+const AVISO_SUSPENDIDO = 'La obra quedó ligada, pero ese proveedor está SUSPENDIDO en el padrón '
+  + 'del contratante, así que el contratante todavía no la ve. Reactívalo en su padrón.';
 
 router.post('/proyectos', async (req, res) => {
-  const { client_id } = req.body || {};
+  const { client_id, contratante_id } = req.body || {};
   const nombre = String(req.body?.nombre || '').trim();
   if (!client_id || !nombre) {
     return res.status(400).json({ error: 'client_id y nombre son obligatorios' });
   }
   await exigirCliente(req.user, client_id);
+  await exigirFiado(client_id, 'obras');
+
+  if (contratante_id && !puedeLigarContratante(req.user)) {
+    return res.status(403).json({ error: NO_PUEDE_LIGAR });
+  }
+  const errContratante = await validarContratante(contratante_id, client_id);
+  if (errContratante) return res.status(400).json({ error: errContratante });
 
   const row = await db.prepare(
     `INSERT INTO proyectos (client_id, nombre, numero_contrato, beneficiario, monto_contrato,
-                            fecha_inicio, fecha_termino, estatus, notas)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+                            fecha_inicio, fecha_termino, estatus, notas, contratante_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
   ).get(Number(client_id), nombre,
         req.body.numero_contrato || null, req.body.beneficiario || null,
         centavos(req.body.monto_contrato),
         req.body.fecha_inicio || null, req.body.fecha_termino || null,
-        req.body.estatus || 'en_proceso', req.body.notas || null);
-  res.json({ ok: true, id: row.id });
+        req.body.estatus || 'en_proceso', req.body.notas || null,
+        contratante_id ? Number(contratante_id) : null);
+
+  const aviso = await asegurarEnPadron(contratante_id, client_id);
+  res.json({ ok: true, id: row.id, aviso: aviso ? AVISO_SUSPENDIDO : null });
 });
 
 router.put('/proyectos/:id', async (req, res) => {
-  await exigirEntidad(req.user, 'proyecto', req.params.id);
+  const id = Number(req.params.id);
+  const clientId = await exigirEntidad(req.user, 'proyecto', id);
 
   const body = { ...(req.body || {}) };
   if ('monto_contrato' in body) body.monto_contrato = centavos(body.monto_contrato);
+
+  // Vacío significa "para nadie del portal": la obra se desliga y el
+  // contratante deja de ver sus fianzas.
+  //
+  // La guarda compara VALORES y no la presencia del campo. Tiene que ser así
+  // porque el formulario manda `contratante_id` siempre —también vacío, que es
+  // la única forma de poder desligar—: con una guarda por presencia, un
+  // vendedor recibía 403 al guardar CUALQUIER edición de CUALQUIER obra suya,
+  // aunque no tocara ese campo y aunque la obra no tuviera contratante.
+  if ('contratante_id' in body) {
+    const pedido = body.contratante_id ? Number(body.contratante_id) : null;
+    const actual = (await db.prepare('SELECT contratante_id FROM proyectos WHERE id = ?')
+      .get(id))?.contratante_id ?? null;
+
+    if (pedido === actual) {
+      // No cambia nada: no hay nada que autorizar ni que escribir.
+      delete body.contratante_id;
+    } else {
+      if (!puedeLigarContratante(req.user)) return res.status(403).json({ error: NO_PUEDE_LIGAR });
+      const err = await validarContratante(pedido, clientId);
+      if (err) return res.status(400).json({ error: err });
+      body.contratante_id = pedido;
+    }
+  }
+
   const { sets, valores } = camposAActualizar(body, CAMPOS_PROYECTO);
   if (!sets.length) return res.status(400).json({ error: 'Nada que actualizar' });
   await db.prepare(`UPDATE proyectos SET ${sets.join(', ')} WHERE id = ?`)
-    .run(...valores, Number(req.params.id));
-  res.json({ ok: true });
+    .run(...valores, id);
+
+  const aviso = await asegurarEnPadron(body.contratante_id, clientId);
+  res.json({ ok: true, aviso: aviso ? AVISO_SUSPENDIDO : null });
 });
 
 // Solo se permite borrar proyectos sin fianzas: si tiene, hay que moverlas antes.
@@ -376,6 +803,7 @@ router.post('/fianzas', async (req, res) => {
     return res.status(400).json({ error: 'Cliente, afianzadora y número de póliza son obligatorios' });
   }
   await exigirCliente(req.user, client_id);
+  await exigirFiado(client_id, 'pólizas');
 
   const claseFinal = claseValida(clase);
   if (!claseFinal) return res.status(400).json({ error: 'La clase debe ser fianza o previo' });
@@ -704,7 +1132,7 @@ router.get('/clientes/:id/detalle', async (req, res) => {
   await exigirCliente(req.user, id);
 
   const cliente = await db.prepare(
-    `SELECT c.id, c.razon_social, c.rfc, c.telefono, c.vendedor_id, v.nombre AS vendedor_nombre
+    `SELECT c.id, c.razon_social, c.rfc, c.telefono, c.tipo, c.vendedor_id, v.nombre AS vendedor_nombre
      FROM clients c
      LEFT JOIN users v ON v.id = c.vendedor_id
      WHERE c.id = ?`
@@ -715,6 +1143,59 @@ router.get('/clientes/:id/detalle', async (req, res) => {
   const usuarios = await db.prepare(
     `SELECT id, nombre, email, activo, created_at
      FROM users WHERE client_id = ? ORDER BY activo DESC, nombre`
+  ).all(id);
+
+  // Un contratante no tiene obras propias, ni pólizas, ni expediente, ni líneas
+  // de crédito: lo que tiene es un padrón. Se contesta con la forma que le toca
+  // en vez de mandarle listas vacías que el front tendría que interpretar.
+  //
+  // Y se le contesta con EXACTAMENTE lo que el contratante ve en su propio
+  // portal (el mismo panoramaDelContratante), no con el expediente completo de
+  // sus proveedores. Es a propósito, y es lo que hace que esta pantalla sea
+  // segura para un vendedor: el vendedor que lleva la cuenta de Delta necesita
+  // saber a qué proveedor le falta la fianza —ahí está su venta—, pero sus
+  // proveedores pueden ser clientes de otro vendedor, y por aquí no se le
+  // escapan ni las primas ni las líneas de crédito de nadie.
+  if (cliente.tipo === 'contratante') {
+    const { proveedores, obras, metricas } = await panoramaDelContratante(id);
+
+    // Los suspendidos van APARTE y solo para Fortex: el contratante no los ve
+    // (SQL_PADRON los filtra), pero el operador necesita poder reactivarlos.
+    // Sin esto, suspender era una puerta de un solo sentido.
+    const suspendidos = await db.prepare(
+      `SELECT cp.proveedor_id AS id, c.razon_social, c.rfc, cp.alias, cp.notas,
+              (SELECT COUNT(*)::int FROM proyectos p
+               WHERE p.contratante_id = cp.contratante_id
+                 AND p.client_id = cp.proveedor_id) AS obras_ligadas
+       FROM client_proveedores cp
+       JOIN clients c ON c.id = cp.proveedor_id
+       WHERE cp.contratante_id = ? AND cp.activo = 0
+       ORDER BY c.razon_social`
+    ).all(id);
+
+    return res.json({
+      cliente, usuarios, proveedores, suspendidos, obras, metricas,
+      lineas: [], proyectos: [], fianzas: [], documentos: [], papeleria: [],
+    });
+  }
+
+  // Del lado del fiado, en qué padrones está: a qué desarrolladores les surte y
+  // por lo tanto quién le está viendo las fianzas de qué obras. Conviene tenerlo
+  // a la vista antes de ligar una obra más.
+  // Se traen TAMBIÉN los padrones suspendidos, con su `activo`, en vez de
+  // filtrarlos: una obra que sigue ligada a un contratante que ya suspendió a
+  // este fiado es justo lo que el operador tiene que ver (queda colgada, y el
+  // DELETE del padrón se niega mientras exista). Lo que no puede pasar es que
+  // el panel afirme que ese contratante está viendo las fianzas, porque no las
+  // ve: de eso se encarga la etiqueta del front.
+  const contratantes = await db.prepare(
+    `SELECT cp.contratante_id AS id, c.razon_social, cp.alias, cp.activo,
+            (SELECT COUNT(*)::int FROM proyectos p
+             WHERE p.contratante_id = cp.contratante_id AND p.client_id = cp.proveedor_id) AS obras_ligadas
+     FROM client_proveedores cp
+     JOIN clients c ON c.id = cp.contratante_id
+     WHERE cp.proveedor_id = ?
+     ORDER BY c.razon_social`
   ).all(id);
 
   const fianzasRows = await db.prepare(
@@ -790,8 +1271,14 @@ router.get('/clientes/:id/detalle', async (req, res) => {
   ).all(id);
 
   // Proyectos con sus fianzas dentro. Es la agrupación que ve el admin.
+  //
+  // Se trae el nombre del contratante ligado: es lo que le dice al operador
+  // "ojo, las pólizas de esta obra las está viendo Desarrollos Delta".
   const proyectosRows = await db.prepare(
-    `SELECT * FROM proyectos WHERE client_id = ? ORDER BY estatus, nombre`
+    `SELECT p.*, ct.razon_social AS contratante_nombre
+     FROM proyectos p
+     LEFT JOIN clients ct ON ct.id = p.contratante_id
+     WHERE p.client_id = ? ORDER BY p.estatus, p.nombre`
   ).all(id);
 
   const proyectos = proyectosRows.map((p) => {
@@ -820,7 +1307,7 @@ router.get('/clientes/:id/detalle', async (req, res) => {
     };
   });
 
-  res.json({ cliente, usuarios, lineas, proyectos, fianzas, documentos, papeleria });
+  res.json({ cliente, usuarios, contratantes, lineas, proyectos, fianzas, documentos, papeleria });
 });
 
 // GET /api/admin/descargar?path=<url> -> redirige al archivo

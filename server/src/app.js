@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import authRoutes from './routes/auth.js';
 import dashboardRoutes from './routes/dashboard.js';
 import fianzasRoutes from './routes/fianzas.js';
+import proveedoresRoutes from './routes/proveedores.js';
 import documentosRoutes from './routes/documentos.js';
 import subidasRoutes from './routes/subidas.js';
 import adminRoutes from './routes/admin.js';
@@ -108,6 +109,10 @@ app.get('/api/setup', async (req, res) => {
 app.use('/api/auth', capturarAsync(authRoutes));
 app.use('/api/dashboard', capturarAsync(dashboardRoutes));
 app.use('/api/fianzas', capturarAsync(fianzasRoutes));
+// El portal del contratante. Va aparte de /api/fianzas a propósito: ahí se
+// contesta "tus fianzas" y aquí "las de tus proveedores", que son datos de otra
+// empresa y se acotan de otra forma.
+app.use('/api/proveedores', capturarAsync(proveedoresRoutes));
 app.use('/api/documentos', capturarAsync(documentosRoutes));
 app.use('/api/subidas', capturarAsync(subidasRoutes));
 app.use('/api/admin', capturarAsync(adminRoutes));

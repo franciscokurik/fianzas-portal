@@ -280,7 +280,9 @@ test('el personal de Fortex no entra al portal del fiado', async () => {
   for (const token of [admin, luisa, carlos]) {
     const res = await pedir('/api/dashboard', token);
     assert.equal(res.status, 403);
-    assert.match((await res.json()).error, /para usuarios de un fiado/i);
+    // Dice "cliente" y no "fiado" desde que hay dos clases de cliente: el
+    // fiado que compra fianzas y el contratante que las exige.
+    assert.match((await res.json()).error, /para usuarios de un cliente/i);
   }
 });
 

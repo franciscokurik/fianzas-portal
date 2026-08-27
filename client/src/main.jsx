@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './auth.jsx';
 import Login from './pages/Login.jsx';
 import Recuperar from './pages/Recuperar.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import Proveedores from './pages/Proveedores.jsx';
 import Admin from './pages/Admin.jsx';
 import './index.css';
 
@@ -26,7 +27,13 @@ function Home() {
   const { user, loading } = useAuth();
   if (loading) return <div className="p-10 text-white/60">Cargando…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  return esInterno(user) ? <Navigate to="/admin" replace /> : <Dashboard />;
+  if (esInterno(user)) return <Navigate to="/admin" replace />;
+  // Las dos clases de cliente entran por la misma puerta y a pantallas
+  // distintas: el FIADO a sus fianzas, el CONTRATANTE al padrón de las que le
+  // presentaron sus proveedores. Quien decide de verdad es el servidor, que
+  // vuelve a preguntar el tipo en cada ruta (auth/middleware.js); esto es nada
+  // más para no mandar a nadie a una pantalla que le va a contestar 403.
+  return user.cliente_tipo === 'contratante' ? <Proveedores /> : <Dashboard />;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(

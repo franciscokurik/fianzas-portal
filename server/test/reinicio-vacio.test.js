@@ -2,7 +2,11 @@
 //  - que no se lleve entre las patas la cuenta admin (es un renglón de
 //    clients: perderla deja el portal sin forma de entrar);
 //  - que no truene con fianzas.proyecto_id, que es ON DELETE RESTRICT;
-//  - que sí borre TODO lo del cliente, sin dejar huérfanos.
+//  - que sí borre TODO lo del cliente, sin dejar huérfanos;
+//  - que se lleve también a los CONTRATANTES y su padrón de proveedores, que
+//    cuelga de clients por los dos lados y se va por CASCADE (no hay un DELETE
+//    explícito, así que si alguien cambiara esas llaves foráneas nada más lo
+//    delataría esta prueba).
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -44,6 +48,14 @@ before(async () => {
               (SELECT id FROM tipos_fianza WHERE nombre='Cumplimiento'), 1850000, 120000000);
     INSERT INTO papeleria_requests (client_id, descripcion) VALUES (1, 'Carta de no adeudo');
     INSERT INTO notifications (client_id, tipo, ref_key) VALUES (1, 'fianza_30', 'fianza:1');
+
+    -- Un contratante con su padrón, y una obra de 'Otra SA' ligada a él: es la
+    -- combinación en la que el borrado podría dejar basura o abortar.
+    INSERT INTO clients (razon_social, rfc, tipo)
+      VALUES ('Desarrollos Delta', 'DDE150610QR3', 'contratante');
+    INSERT INTO client_proveedores (contratante_id, proveedor_id) VALUES (3, 2);
+    INSERT INTO proyectos (client_id, contratante_id, nombre, monto_contrato)
+      VALUES (2, 3, 'Obra para Delta', 50000000);
   `);
 });
 
@@ -51,7 +63,8 @@ test('borra los clientes y todo lo que cuelga de ellos', async () => {
   const resumen = await reiniciarVacio();
 
   assert.deepEqual(resumen, {
-    clientes: 2, proyectos: 1, fianzas: 1, admins_conservados: 1,
+    clientes: 2, contratantes: 1, padron: 1, proyectos: 2, fianzas: 1,
+    admins_conservados: 1,
   });
 
   assert.equal(await contar('proyectos'), 0);
@@ -59,7 +72,8 @@ test('borra los clientes y todo lo que cuelga de ellos', async () => {
   assert.equal(await contar('client_credit_lines'), 0, 'quedaron líneas huérfanas');
   assert.equal(await contar('papeleria_requests'), 0, 'quedó papelería huérfana');
   assert.equal(await contar('notifications'), 0, 'quedaron notificaciones huérfanas');
-  assert.equal(await contar('clients'), 0, 'las empresas fiadas debieron irse todas');
+  assert.equal(await contar('client_proveedores'), 0, 'quedó padrón huérfano');
+  assert.equal(await contar('clients'), 0, 'las empresas debieron irse todas, contratantes incluidos');
 });
 
 test('conserva al personal de Fortex, con su contraseña', async () => {
@@ -89,7 +103,8 @@ test('conserva afianzadoras y catálogos', async () => {
 test('correrlo dos veces no falla ni borra de más', async () => {
   const resumen = await reiniciarVacio();
   assert.deepEqual(resumen, {
-    clientes: 0, proyectos: 0, fianzas: 0, admins_conservados: 1,
+    clientes: 0, contratantes: 0, padron: 0, proyectos: 0, fianzas: 0,
+    admins_conservados: 1,
   });
   assert.equal(await contar('clients'), 0);
 });

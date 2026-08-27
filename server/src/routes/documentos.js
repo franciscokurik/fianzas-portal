@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireAuth, requireCliente } from '../auth/middleware.js';
+import { requireAuth, requireFiado } from '../auth/middleware.js';
 import { borrarArchivo } from '../lib/upload.js';
 import { adoptarArchivo } from '../services/subidas.js';
 import { guardarDocumentoCliente, exigirTipoDocumento } from '../services/documentos-cliente.js';
@@ -9,7 +9,7 @@ import { estadoDocumento, todayISO, daysUntil } from '../lib/dates.js';
 const router = Router();
 
 // GET /api/documentos -> lista de documentos estándar + estatus del cliente
-router.get('/', requireAuth, requireCliente, async (req, res) => {
+router.get('/', requireAuth, requireFiado, async (req, res) => {
   const clientId = req.user.client_id;
 
   const tipos = await db
@@ -55,7 +55,7 @@ router.get('/', requireAuth, requireCliente, async (req, res) => {
 // de /api/subidas/firma y aquí solo llega dónde quedó. El mismo trabajo lo hace
 // el admin desde /api/admin/clientes/:id/documentos/:typeId, así que la lógica
 // vive en el servicio y aquí solo se fija de quién es el archivo.
-router.post('/:typeId', requireAuth, requireCliente, async (req, res) => {
+router.post('/:typeId', requireAuth, requireFiado, async (req, res) => {
   // Primero lo barato: si el tipo no existe, se rechaza sin haber adoptado el
   // archivo, que ya está en Cloudinary y habría que ir a borrar.
   await exigirTipoDocumento(Number(req.params.typeId));
@@ -78,7 +78,7 @@ router.post('/:typeId', requireAuth, requireCliente, async (req, res) => {
 // --- Papelería específica por afianzadora/póliza ---
 
 // GET /api/documentos/papeleria -> solicitudes para el cliente
-router.get('/papeleria', requireAuth, requireCliente, async (req, res) => {
+router.get('/papeleria', requireAuth, requireFiado, async (req, res) => {
   const rows = await db
     .prepare(
       `SELECT p.*, a.nombre AS afianzadora_nombre, f.numero_poliza
@@ -93,7 +93,7 @@ router.get('/papeleria', requireAuth, requireCliente, async (req, res) => {
 });
 
 // POST /api/documentos/papeleria/:id  { public_id, nombre } -> el fiado responde
-router.post('/papeleria/:id', requireAuth, requireCliente, async (req, res) => {
+router.post('/papeleria/:id', requireAuth, requireFiado, async (req, res) => {
   const id = Number(req.params.id);
   const sol = await db
     .prepare('SELECT * FROM papeleria_requests WHERE id = ? AND client_id = ?')
@@ -120,7 +120,7 @@ router.post('/papeleria/:id', requireAuth, requireCliente, async (req, res) => {
 });
 
 // GET /api/documentos/descargar/:typeId -> redirige al archivo público del cliente
-router.get('/descargar/:typeId', requireAuth, requireCliente, async (req, res) => {
+router.get('/descargar/:typeId', requireAuth, requireFiado, async (req, res) => {
   const doc = await db
     .prepare('SELECT * FROM client_documents WHERE client_id = ? AND document_type_id = ?')
     .get(req.user.client_id, Number(req.params.typeId));

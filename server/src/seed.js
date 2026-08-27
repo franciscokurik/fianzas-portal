@@ -18,8 +18,12 @@ export async function seed() {
   // Limpia datos existentes (respeta las llaves foráneas con CASCADE/orden).
   // tipos_fianza NO se limpia: es un catálogo que siembra el propio esquema y
   // que el admin va ampliando, no datos de demostración.
+  // client_proveedores se lista aunque el CASCADE de clients ya la vaciaría:
+  // listarla es lo que hace que RESTART IDENTITY reinicie SU secuencia, y esta
+  // lista es la documentación de facto de qué se borra.
   await db.query(`TRUNCATE notifications, papeleria_requests, client_documents,
-    client_credit_lines, fianzas, proyectos, users, clients, document_types, afianzadoras
+    client_proveedores, documentos, client_credit_lines, fianzas, proyectos,
+    users, clients, document_types, afianzadoras
     RESTART IDENTITY CASCADE`);
 
   // --- Afianzadoras ---
@@ -93,6 +97,48 @@ export async function seed() {
   )).id;
   await insUsuario.get(c2, 'Dirección', 'norte@demo.mx', hash('demo123'), 'client');
 
+  // --- Un CONTRATANTE y su padrón de proveedores ---
+  //
+  // Desarrollos Delta no compra fianzas: se las presentan sus proveedores. Por
+  // eso no lleva línea de crédito ni expediente, y su gente entra a una pantalla
+  // distinta —el padrón— en vez de a "Mis fianzas".
+  const insContratante = db.prepare(
+    `INSERT INTO clients (razon_social, rfc, telefono, vendedor_id, tipo)
+     VALUES (?, ?, ?, ?, 'contratante') RETURNING id`
+  );
+  const delta = (await insContratante.get(
+    'Desarrollos Delta SA de CV', 'DDE150610QR3', '5544332211', operador
+  )).id;
+  await insUsuario.get(delta, 'Control de contratistas', 'delta@demo.mx', hash('demo123'), 'client');
+
+  // Los proveedores son fiados NORMALES: no tienen nada especial, y de hecho
+  // pueden ser clientes directos de Fortex al mismo tiempo. Lo único que los
+  // hace proveedores de Delta es el renglón del padrón.
+  const pVega = (await insClient.get(
+    'Cimentaciones Vega SA de CV', 'CVE110228LM4', '8112345678', operador
+  )).id;
+  await insUsuario.get(pVega, 'Dirección', 'vega@demo.mx', hash('demo123'), 'client');
+
+  const pHerrera = (await insClient.get(
+    'Instalaciones Herrera SA de CV', 'IHE170905TY8', '8187654321', vendedor
+  )).id;
+  await insUsuario.get(pHerrera, 'Dirección', 'herrera@demo.mx', hash('demo123'), 'client');
+
+  // Sin usuario A PROPÓSITO: un proveedor puede vivir en el padrón sin que nadie
+  // de esa empresa entre nunca al portal. Fortex le captura la fianza y Delta la
+  // ve; el proveedor ni se enteró de que existe este sistema.
+  const pSolis = (await insClient.get(
+    'Acabados Solís SA de CV', 'ASO190412RW1', '8199887766', operador
+  )).id;
+
+  const insPadron = db.prepare(
+    `INSERT INTO client_proveedores (contratante_id, proveedor_id, alias, notas)
+     VALUES (?, ?, ?, ?)`
+  );
+  await insPadron.run(delta, pVega, 'Estructura', 'Cimentación y estructura de la torre.');
+  await insPadron.run(delta, pHerrera, 'Electromecánica', 'Instalaciones hidrosanitarias y eléctricas.');
+  await insPadron.run(delta, pSolis, 'Acabados', 'Sin acceso al portal: la fianza la carga Fortex.');
+
   // --- Líneas de crédito por afianzadora ---
   const insLinea = db.prepare(
     `INSERT INTO client_credit_lines (client_id, afianzadora_id, linea_credito) VALUES (?, ?, ?)`
@@ -129,6 +175,38 @@ export async function seed() {
   const pSubestacion = (await insProyecto.get(
     c2, 'Subestación eléctrica Apodaca', 'CFE-2024-1102', 'Comisión Federal de Electricidad',
     pesos(9800000), addMonths(hoy, -10), addMonths(hoy, 3), 'en_proceso'
+  )).id;
+
+  // Las obras que los proveedores ejecutan PARA Delta. contratante_id es lo que
+  // le abre a Delta las fianzas de esta obra; 'beneficiario' se llena igual
+  // porque es el respaldo legible, pero el texto no autoriza nada.
+  const insObraPara = db.prepare(
+    `INSERT INTO proyectos (client_id, contratante_id, nombre, numero_contrato, beneficiario,
+                            monto_contrato, fecha_inicio, fecha_termino, estatus)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+  );
+  const DELTA = 'Desarrollos Delta SA de CV';
+  const oVega = (await insObraPara.get(
+    pVega, delta, 'Torre Delta Poniente – Cimentación', 'DD-2025-014', DELTA,
+    pesos(12500000), addMonths(hoy, -6), addMonths(hoy, 9), 'en_proceso'
+  )).id;
+  const oHerrera = (await insObraPara.get(
+    pHerrera, delta, 'Torre Delta Poniente – Instalaciones', 'DD-2025-021', DELTA,
+    pesos(8300000), addMonths(hoy, -4), addMonths(hoy, 10), 'en_proceso'
+  )).id;
+  // Obra en proceso y SIN NINGUNA FIANZA: es el renglón que Delta quiere cazar,
+  // y la razón de ser de toda esta pantalla.
+  await insObraPara.get(
+    pSolis, delta, 'Torre Delta Poniente – Acabados', 'DD-2025-033', DELTA,
+    pesos(4100000), addMonths(hoy, -1), addMonths(hoy, 11), 'en_proceso'
+  );
+
+  // Y la misma constructora trabajando para OTRO, sin ligar a ningún contratante
+  // del portal. Es lo que hace demostrable el aislamiento: Delta NO debe ver
+  // esta obra ni su póliza, aunque Cimentaciones Vega sí esté en su padrón.
+  const oVegaCFE = (await insProyecto.get(
+    pVega, 'Piloteado Planta CFE Escobedo', 'CFE-2025-0455', 'Comisión Federal de Electricidad',
+    pesos(5200000), addMonths(hoy, -5), addMonths(hoy, 4), 'en_proceso'
   )).id;
 
   // --- Fianzas (variando vigencias para ver los estados) ---
@@ -174,6 +252,44 @@ export async function seed() {
   await fianza(c2, pSubestacion, 'chubb', 'CHB-2024-1190', 'Cumplimiento', 7600, 450000,
     addMonths(hoy, -9), addMonths(hoy, 1));
 
+  // --- Fianzas de los proveedores de Delta ---
+  //
+  // Una por estado, para que el padrón se vea con los tres colores:
+  //   Vega    -> vigente a 9 meses           => obra CUBIERTA
+  //   Herrera -> vence en 1 mes              => obra POR VENCER
+  //   Solís   -> no tiene ninguna            => obra SIN FIANZA
+  // Veinte días: bien dentro de la ventana de "por vencer" (30 días o menos).
+  // Sumar UN MES caería justo en el borde —28 a 31 días según el mes— y la demo
+  // se vería de un color distinto según el día en que se sembrara.
+  const en20Dias = new Date(new Date(`${hoy}T00:00:00Z`).getTime() + 20 * 86400000)
+    .toISOString().slice(0, 10);
+
+  await fianza(pVega, oVega, 'aserta', 'ASE-2025-1140', 'Cumplimiento', 22000, 1250000,
+    addMonths(hoy, -6), addMonths(hoy, 9));
+  await fianza(pHerrera, oHerrera, 'chubb', 'CHB-2025-0771', 'Cumplimiento', 15400, 830000,
+    addMonths(hoy, -4), en20Dias);
+
+  // La de la obra que Vega hace para CFE. Delta NO la ve: su obra no está
+  // ligada a él. Si algún día se ve, es que se rompió el alcance.
+  await fianza(pVega, oVegaCFE, 'berkley', 'BRK-2025-3390', 'Anticipo', 31000, 5200000,
+    addMonths(hoy, -5), addMonths(hoy, 4));
+
+  // Dos archivos sobre la MISMA fianza de Vega, y es a propósito: Delta ve la
+  // carátula (acredita la garantía) y NO ve el recibo de prima (dice cuánto le
+  // costó a su proveedor). La lista blanca vive en lib/permisos.js.
+  const fVega = (await db.prepare(
+    `SELECT id FROM fianzas WHERE numero_poliza = 'ASE-2025-1140'`
+  ).get()).id;
+  const insDocEntidad = db.prepare(
+    `INSERT INTO documentos (client_id, entidad_tipo, entidad_id, tipo_doc, url,
+                             nombre_archivo, mime_type, size_bytes)
+     VALUES (?, 'fianza', ?, ?, ?, ?, 'application/pdf', ?)`
+  );
+  await insDocEntidad.run(pVega, fVega, 'caratula',
+    'demo/caratula-ase-2025-1140.pdf', 'caratula.pdf', 190000);
+  await insDocEntidad.run(pVega, fVega, 'recibo_prima',
+    'demo/recibo-ase-2025-1140.pdf', 'recibo_prima.pdf', 64000);
+
   // --- Documentos del cliente 1 (algunos subidos, otros pendientes) ---
   const insDoc = db.prepare(
     `INSERT INTO client_documents (client_id, document_type_id, file_path, original_name, mime_type, size_bytes, uploaded_at, vencimiento, subido_por)
@@ -190,7 +306,7 @@ export async function seed() {
     `INSERT INTO papeleria_requests (client_id, afianzadora_id, fianza_id, descripcion) VALUES (?, ?, ?, ?)`
   ).run(c1, afiIds['aserta'], null, 'Aserta requiere carta de no adeudo del SAT (formato 32-D) para renovar la línea.');
 
-  return { clientes: 2, usuarios: 7, afianzadoras: afianzadoras.length };
+  return { clientes: 5, contratantes: 1, usuarios: 10, afianzadoras: afianzadoras.length };
 }
 
 // Deja el portal listo para operar de verdad: borra TODOS los datos de
@@ -198,7 +314,9 @@ export async function seed() {
 //
 // Conserva: las cuentas de Fortex (admin y operadores, con su contraseña
 // actual), las afianzadoras y los catálogos. Borra: empresas fiadas con sus
-// usuarios, proyectos, fianzas, líneas, documentos, papelería y avisos.
+// usuarios, proyectos, fianzas, líneas, documentos, papelería y avisos — y
+// también los CONTRATANTES con su padrón de proveedores, que cuelga de clients
+// por los dos lados y se va por CASCADE.
 export async function reiniciarVacio() {
   await initSchema();
 
@@ -215,7 +333,11 @@ export async function reiniciarVacio() {
   const contar = async (tabla) =>
     (await db.prepare(`SELECT COUNT(*)::int AS total FROM ${tabla}`).get()).total;
   const borrados = {
-    clientes: await contar('clients'),
+    // Los contratantes se cuentan aparte: quien aprieta este botón necesita
+    // saber que también se va el padrón de proveedores, que no es obvio.
+    clientes: (await db.prepare(`SELECT COUNT(*)::int AS total FROM clients WHERE tipo = 'fiado'`).get()).total,
+    contratantes: (await db.prepare(`SELECT COUNT(*)::int AS total FROM clients WHERE tipo = 'contratante'`).get()).total,
+    padron: await contar('client_proveedores'),
     proyectos: await contar('proyectos'),
     fianzas: await contar('fianzas'),
   };
@@ -255,13 +377,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log('🌱 Sembrando datos en Postgres...');
   seed()
     .then((r) => {
-      console.log(`✅ Listo (${r.clientes} empresas, ${r.usuarios} usuarios, ${r.afianzadoras} afianzadoras).`);
+      console.log(`✅ Listo (${r.clientes} empresas —${r.contratantes} contratante—, ${r.usuarios} usuarios, ${r.afianzadoras} afianzadoras).`);
       console.log('   Admin    -> francisco@fortex.mx / admin123');
       console.log('   Operador -> mariana@fortex.mx / operador123');
       console.log('   Vendedor -> carlos@fortex.mx / vendedor123  (solo ve un cliente)');
       console.log('   Cliente  -> cliente@demo.mx (RFC CBA120315ABC) / demo123');
       console.log('   Cliente  -> contabilidad@bajio.mx / demo123  (misma empresa)');
       console.log('   Cliente  -> norte@demo.mx / demo123');
+      console.log('   Contratante -> delta@demo.mx / demo123  (ve el padrón de proveedores, no compra fianzas)');
+      console.log('   Proveedor   -> vega@demo.mx / demo123    (le surte a Delta y también trabaja para CFE)');
       process.exit(0);
     })
     .catch((e) => {

@@ -3,12 +3,13 @@ import {
   LogOut, Building2, Plus, Save, Download,
   Users, FileText, Files, CheckCircle2, UserPlus, AlertTriangle,
   CreditCard, Trash2, Briefcase, Pencil, X, Bell, ListChecks, Check,
-  Paperclip, Upload, FileDown, Mail, KeyRound, UserCog,
+  Paperclip, Upload, FileDown, Mail, KeyRound, UserCog, ShieldCheck, Link2,
 } from 'lucide-react';
 import { api, getToken, subirACloudinary } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import {
   mxn, mxnCents, fmtDate, yaVencio, EstadoBadge, ClaseBadge, InputPesos,
+  CumplimientoBadge, TipoClienteBadge, ESTATUS_PROYECTO, etiquetaEstatus,
   ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, pesoArchivo, revisarArchivo,
 } from '../lib.jsx';
 
@@ -18,15 +19,6 @@ const btnPrimary =
   'flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50';
 const btnSecondary =
   'flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300';
-
-const ESTATUS_PROYECTO = [
-  ['en_proceso', 'En proceso'],
-  ['terminado', 'Terminado'],
-  ['entregado', 'Entregado'],
-  ['cerrado', 'Cerrado'],
-  ['cancelado', 'Cancelado'],
-];
-const etiquetaEstatus = (v) => (ESTATUS_PROYECTO.find(([k]) => k === v) || [, v])[1];
 
 export default function Admin() {
   const { user, logout } = useAuth();
@@ -198,9 +190,15 @@ export default function Admin() {
               </div>
               <div className="divide-y divide-slate-100 max-h-[65vh] overflow-y-auto">
                 {clientes.map((c) => {
-                  const alerta = c.fianzas_vencidas > 0 || c.docs_pendientes > 0
-                    || c.papeleria_pendiente > 0 || c.fianzas_por_vencer > 0
-                    || c.recordatorios_pendientes > 0;
+                  const esContratante = c.tipo === 'contratante';
+                  // Al contratante lo único que se le alarma es que alguno de
+                  // sus proveedores tenga una obra sin fianza vigente: no tiene
+                  // pólizas propias, ni expediente, ni papelería.
+                  const alerta = esContratante
+                    ? c.obras_descubiertas > 0
+                    : c.fianzas_vencidas > 0 || c.docs_pendientes > 0
+                      || c.papeleria_pendiente > 0 || c.fianzas_por_vencer > 0
+                      || c.recordatorios_pendientes > 0;
                   return (
                     <button
                       key={c.id}
@@ -208,16 +206,33 @@ export default function Admin() {
                       className={`w-full text-left px-4 py-2.5 hover:bg-slate-50/60 ${sel === c.id ? 'bg-indigo-50/60' : ''}`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-slate-700">{c.razon_social}</span>
+                        <span className="text-sm font-medium text-slate-700 flex items-center gap-1.5 min-w-0">
+                          <span className="truncate">{c.razon_social}</span>
+                          <TipoClienteBadge tipo={c.tipo} />
+                        </span>
                         {alerta && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />}
                       </div>
                       <p className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
-                        {c.total_proyectos} proyectos · {c.total_fianzas} fianzas · {c.fianzas_vencidas} vencidas
-                        {c.total_previos > 0 && (
-                          <span className="text-violet-600"> · {c.total_previos} previo(s)</span>
-                        )}
-                        {c.recordatorios_pendientes > 0 && (
-                          <span className="text-amber-600"> · {c.recordatorios_pendientes} recordatorio(s)</span>
+                        {esContratante ? (
+                          <>
+                            {c.total_proveedores} proveedor(es) en su padrón
+                            {c.obras_descubiertas > 0 && (
+                              <span className="text-rose-600"> · {c.obras_descubiertas} obra(s) sin fianza vigente</span>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {c.total_proyectos} proyectos · {c.total_fianzas} fianzas · {c.fianzas_vencidas} vencidas
+                            {c.total_previos > 0 && (
+                              <span className="text-violet-600"> · {c.total_previos} previo(s)</span>
+                            )}
+                            {c.recordatorios_pendientes > 0 && (
+                              <span className="text-amber-600"> · {c.recordatorios_pendientes} recordatorio(s)</span>
+                            )}
+                            {c.total_contratantes > 0 && (
+                              <span className="text-sky-600"> · le surte a {c.total_contratantes} contratante(s)</span>
+                            )}
+                          </>
                         )}
                       </p>
                       {/* El vendedor titular de la cuenta. */}
@@ -246,10 +261,17 @@ export default function Admin() {
               </div>
             ) : (
               <DetalleCliente
+                // Remonta el detalle al cambiar de cliente. Sin esto, el
+                // formulario "Agregar proveedor" del padrón se queda abierto y
+                // con lo tecleado: se empieza a capturar un proveedor para
+                // Delta, se hace clic en otro contratante, y al guardar el alta
+                // se va al padrón equivocado.
+                key={detalle.cliente.id}
                 detalle={detalle}
                 esAdmin={esAdmin}
                 puedeOperar={puedeOperar}
                 vendedores={vendedores}
+                clientes={clientes}
                 onEliminado={() => {
                   setSel(null);
                   setDetalle(null);
@@ -558,12 +580,22 @@ function CatalogoDocumentos({ tipos, onChange, flash }) {
    -------------------------------------------------------------------------- */
 
 function DetalleCliente({
-  detalle, esAdmin, puedeOperar, vendedores, afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
+  detalle, esAdmin, puedeOperar, vendedores, clientes = [],
+  afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
 }) {
   const {
     cliente, usuarios = [], lineas = [], proyectos = [],
     fianzas = [], documentos, papeleria,
+    // Solo vienen cuando es un contratante (la API contesta con la forma que le
+    // toca a cada tipo, no con listas vacías; ver routes/admin.js).
+    proveedores = [], suspendidos = [], obras = [], metricas,
+    // Y solo cuando es un fiado: a qué contratantes les surte.
+    contratantes = [],
   } = detalle;
+  const esContratante = cliente.tipo === 'contratante';
+  // Los contratantes que se le pueden ligar a una obra. Sale de la lista que ya
+  // está cargada: no hace falta otra ruta.
+  const contratantesDisponibles = clientes.filter((c) => c.tipo === 'contratante');
   const [errorBaja, setErrorBaja] = useState('');
   const lineaTotal = lineas.reduce((s, l) => s + (l.linea_credito || 0), 0);
   const disponibleTotal = lineas.reduce((s, l) => s + (l.disponible || 0), 0);
@@ -599,12 +631,22 @@ function DetalleCliente({
   async function eliminar() {
     setErrorBaja('');
     const escrito = prompt(
-      `Esto elimina a "${cliente.razon_social}" con TODO su historial:\n`
-      + `· ${proyectos.length} proyecto(s)\n`
-      + `· ${fianzas.length} fianza(s)\n`
-      + `· ${usuarios.length} acceso(s) al portal\n`
-      + '· su expediente, papelería y archivos\n\n'
-      + 'No se puede deshacer. Para confirmar, escribe la razón social exacta:'
+      esContratante
+        // Lo que hay que decirle es lo que se lleva de OTROS: las obras de sus
+        // proveedores no se borran, pero quedan desligadas y esas empresas
+        // dejan de tener quién les vigile la fianza.
+        ? `Esto elimina a "${cliente.razon_social}":\n`
+          + `· su padrón de ${proveedores.length} proveedor(es)\n`
+          + `· ${usuarios.length} acceso(s) al portal\n`
+          + `· la liga de ${obras.length} obra(s) de sus proveedores (las obras y sus `
+          + 'pólizas NO se borran: son de ellos y se quedan)\n\n'
+          + 'No se puede deshacer. Para confirmar, escribe la razón social exacta:'
+        : `Esto elimina a "${cliente.razon_social}" con TODO su historial:\n`
+          + `· ${proyectos.length} proyecto(s)\n`
+          + `· ${fianzas.length} fianza(s)\n`
+          + `· ${usuarios.length} acceso(s) al portal\n`
+          + '· su expediente, papelería y archivos\n\n'
+          + 'No se puede deshacer. Para confirmar, escribe la razón social exacta:'
     );
     if (!escrito) return;
 
@@ -623,10 +665,14 @@ function DetalleCliente({
       <div className="bg-white border border-slate-200 rounded-lg p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-slate-800">{cliente.razon_social}</h2>
+            <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
+              {cliente.razon_social}
+              <TipoClienteBadge tipo={cliente.tipo} />
+            </h2>
             <p className="text-xs text-slate-500 mt-0.5">
               {cliente.rfc || 'Sin RFC'}
               {cliente.telefono && ` · ${cliente.telefono}`}
+              {esContratante && ' · no compra fianzas: se las exige a sus proveedores'}
             </p>
           </div>
           <div className="flex items-end gap-2">
@@ -662,19 +708,69 @@ function DetalleCliente({
           </div>
         )}
         <div className="mt-2 flex flex-wrap gap-2">
-          <Pill label="Línea total" valor={mxn(lineaTotal)} />
-          <Pill label="Disponible" valor={mxn(disponibleTotal)} tono="emerald" />
-          <Pill label="Monto afianzado" valor={mxn(afianzadoTotal)} tono="sky"
-                ayuda="Suma de lo que cubren las fianzas vigentes. No incluye previos: todavía no se emiten." />
-          <Pill label="Prima total" valor={mxn(sumaPrimaTotal)} tono="violet"
-                ayuda="Lo que el fiado paga: prima neta + derecho de póliza + IVA. Sin previos." />
-          <Pill label="Prima neta" valor={mxn(sumaPrimaNeta)}
-                ayuda="La tarifa de la afianzadora, sin derecho de póliza ni IVA" />
-          {previos > 0 && (
-            <Pill label="Previos" valor={String(previos)}
-                  ayuda="Capturados pero sin emitir: no cuentan en las cifras de arriba" />
+          {esContratante ? (
+            <>
+              <Pill label="Proveedores" valor={String(metricas?.proveedores ?? 0)}
+                    ayuda="Empresas en su padrón: a quién le exige fianza" />
+              <Pill label="Obras vigentes" valor={String(metricas?.obras_vivas ?? 0)}
+                    ayuda="Obras de sus proveedores ligadas a él que todavía se juzgan (en proceso, terminadas o entregadas). Las cerradas y canceladas se listan pero no cuentan." />
+              <Pill label="Sin fianza vigente" valor={String(metricas?.obras_descubiertas ?? 0)}
+                    tono={metricas?.obras_descubiertas ? 'rose' : 'emerald'}
+                    ayuda="Obras sin ninguna póliza vigente registrada en Fortex. Es su lista de pendientes —y la de venta." />
+              <Pill label="Cobertura a su favor" valor={mxn(metricas?.monto_afianzado)} tono="sky"
+                    ayuda="Suma de lo que cubren hoy las fianzas de sus proveedores" />
+            </>
+          ) : (
+            <>
+              <Pill label="Línea total" valor={mxn(lineaTotal)} />
+              <Pill label="Disponible" valor={mxn(disponibleTotal)} tono="emerald" />
+              <Pill label="Monto afianzado" valor={mxn(afianzadoTotal)} tono="sky"
+                    ayuda="Suma de lo que cubren las fianzas vigentes. No incluye previos: todavía no se emiten." />
+              <Pill label="Prima total" valor={mxn(sumaPrimaTotal)} tono="violet"
+                    ayuda="Lo que el fiado paga: prima neta + derecho de póliza + IVA. Sin previos." />
+              <Pill label="Prima neta" valor={mxn(sumaPrimaNeta)}
+                    ayuda="La tarifa de la afianzadora, sin derecho de póliza ni IVA" />
+              {previos > 0 && (
+                <Pill label="Previos" valor={String(previos)}
+                      ayuda="Capturados pero sin emitir: no cuentan en las cifras de arriba" />
+              )}
+            </>
           )}
         </div>
+
+        {/* A qué desarrolladores le surte este fiado, y por lo tanto quién le
+            está viendo las fianzas de qué obras. Conviene tenerlo a la vista
+            ANTES de ligarle otra obra. */}
+        {!esContratante && contratantes.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-500">Le surte a:</span>
+            {contratantes.map((ct) => {
+              // Un padrón suspendido con obras todavía ligadas es un estado
+              // real y hay que verlo, pero NO se puede pintar como si el
+              // contratante estuviera viendo esas fianzas: no las ve.
+              const activo = ct.activo === 1;
+              return (
+                <span
+                  key={ct.id}
+                  className={`text-[11px] px-1.5 py-0.5 rounded border ${
+                    activo
+                      ? 'bg-sky-50 text-sky-700 border-sky-100'
+                      : 'bg-slate-50 text-slate-500 border-slate-200'
+                  }`}
+                  title={activo
+                    ? `Ve las fianzas de ${ct.obras_ligadas} obra(s) de este fiado`
+                    : `Suspendió a este fiado de su padrón: hoy NO ve nada, aunque `
+                      + `${ct.obras_ligadas} obra(s) sigan ligadas`}
+                >
+                  {ct.razon_social}
+                  <span className={activo ? 'text-sky-400 tabular-nums' : 'text-slate-400 tabular-nums'}>
+                    {' '}· {ct.obras_ligadas} obra(s){activo ? '' : ' · suspendido'}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Quiénes pueden entrar por este fiado */}
@@ -686,6 +782,21 @@ function DetalleCliente({
         flash={flash}
       />
 
+      {esContratante && (
+        <PadronProveedores
+          contratanteId={cliente.id}
+          proveedores={proveedores}
+          suspendidos={suspendidos}
+          obras={obras}
+          clientes={clientes}
+          puedeOperar={puedeOperar}
+          onChange={onChange}
+          flash={flash}
+        />
+      )}
+
+      {!esContratante && (
+      <>
       {/* Líneas de crédito por afianzadora */}
       <LineasCredito
         clienteId={cliente.id}
@@ -702,6 +813,8 @@ function DetalleCliente({
         afianzadoras={afianzadoras}
         tipos={tipos}
         tiposDoc={tiposDoc}
+        contratantes={contratantesDisponibles}
+        puedeLigarContratante={puedeOperar}
         onChange={onChange}
         flash={flash}
       />
@@ -740,7 +853,371 @@ function DetalleCliente({
         </div>
         <NuevaPapeleria clienteId={cliente.id} afianzadoras={afianzadoras} onDone={() => { onChange(); flash('Solicitud creada'); }} />
       </div>
+      </>
+      )}
     </>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Padrón de proveedores de un contratante
+   --------------------------------------------------------------------------
+   Fortex ve EXACTAMENTE lo que ve el contratante en su portal: la misma
+   consulta (panoramaDelContratante) alimenta las dos pantallas. Es a propósito,
+   y es lo que hace que esta sección sea segura también para un vendedor: el que
+   lleva la cuenta del desarrollador necesita saber a qué proveedor le falta la
+   fianza —ahí está su venta—, pero sus proveedores pueden ser clientes de otro
+   vendedor, y por aquí no se le escapan primas ni líneas de crédito de nadie. */
+
+function PadronProveedores({
+  contratanteId, proveedores, suspendidos = [], obras, clientes, puedeOperar, onChange, flash,
+}) {
+  const [agregando, setAgregando] = useState(false);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState(null);
+
+  const enFalta = proveedores.filter((p) => p.obras_descubiertas > 0).length;
+
+  async function suspender(proveedorId, activo) {
+    setError('');
+    setBusyId(proveedorId);
+    try {
+      await api.put(`/admin/clientes/${contratanteId}/proveedores/${proveedorId}`, { activo });
+      onChange();
+      flash(activo ? 'Proveedor reactivado' : 'Proveedor suspendido del padrón');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function quitar(proveedorId, nombre) {
+    setError('');
+    if (!confirm(
+      `Quitar a "${nombre}" del padrón. Esto NO borra la empresa ni sus pólizas: solo `
+      + 'deshace la liga con este contratante.\n\nSi lo que quieres es dejar de trabajar '
+      + 'con él conservando el historial, usa Suspender.'
+    )) return;
+    setBusyId(proveedorId);
+    try {
+      await api.del(`/admin/clientes/${contratanteId}/proveedores/${proveedorId}`);
+      onChange();
+      flash('Proveedor quitado del padrón');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <ShieldCheck className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700">
+          Padrón de proveedores ({proveedores.length})
+        </h3>
+        {enFalta > 0 && (
+          <span className="text-[11px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-medium">
+            {enFalta} en falta
+          </span>
+        )}
+        {puedeOperar && (
+          <button onClick={() => setAgregando((a) => !a)} className={`${btnSecondary} ml-auto`}>
+            <Plus className={`h-3.5 w-3.5 transition-transform ${agregando ? 'rotate-45' : ''}`} />
+            Agregar proveedor
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="mx-4 mt-3 rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+
+      {agregando && (
+        <NuevoProveedor
+          contratanteId={contratanteId}
+          clientes={clientes}
+          // Los suspendidos se reactivan con su botón, no volviéndolos a
+          // agregar: así no se pierde de vista que ya estuvieron.
+          yaEnPadron={[...proveedores, ...suspendidos].map((p) => p.id)}
+          onCancel={() => setAgregando(false)}
+          onDone={(msg) => { setAgregando(false); onChange(); flash(msg); }}
+        />
+      )}
+
+      <div className="divide-y divide-slate-100">
+        {proveedores.map((p) => {
+          const suyas = obras.filter((o) => o.client_id === p.id);
+          return (
+            <div key={p.id} className="px-4 py-2.5">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div className="min-w-0">
+                  <span className="text-sm font-medium text-slate-700">{p.razon_social}</span>
+                  <p className="text-[11px] text-slate-500">
+                    {p.alias && <span className="text-slate-600">{p.alias} · </span>}
+                    {p.rfc || 'Sin RFC'}
+                    {p.notas && <span className="text-slate-400"> · {p.notas}</span>}
+                  </p>
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                  {p.monto_afianzado > 0 && (
+                    <span className="text-[11px] text-slate-500 tabular-nums">
+                      {mxn(p.monto_afianzado)} afianzado
+                    </span>
+                  )}
+                  <CumplimientoBadge estado={p.cumplimiento} />
+                  {puedeOperar && (
+                    <>
+                      <button
+                        onClick={() => suspender(p.id, false)}
+                        disabled={busyId === p.id}
+                        className={btnSecondary}
+                        title="Suspender del padrón: deja de ver sus obras al instante, pero queda el historial"
+                      >
+                        Suspender
+                      </button>
+                      <button
+                        onClick={() => quitar(p.id, p.razon_social)}
+                        disabled={busyId === p.id}
+                        className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
+                        title="Quitar la liga (no borra la empresa)"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Las obras ligadas, con su cobertura. Es lo mismo que ve él. */}
+              {suyas.length > 0 && (
+                <div className="mt-1.5 pl-3 border-l-2 border-slate-100 space-y-1">
+                  {suyas.map((o) => (
+                    <div key={o.id} className="flex flex-wrap items-center gap-2 text-[11px]">
+                      <Briefcase className="w-3 h-3 text-slate-300 shrink-0" />
+                      <span className="text-slate-600">{o.nombre}</span>
+                      <span className="text-slate-400">{etiquetaEstatus(o.estatus)}</span>
+                      <CumplimientoBadge estado={o.estado_cobertura} />
+                      <span className="text-slate-400 tabular-nums">
+                        {o.fianzas.length} póliza(s){o.total_previos > 0 && ` · ${o.total_previos} previo(s)`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!suyas.length && (
+                <p className="mt-1 pl-3 text-[11px] text-slate-400">
+                  Sin obras ligadas. Ligar la obra se hace en el detalle del proveedor,
+                  en el campo "Para" del proyecto.
+                </p>
+              )}
+            </div>
+          );
+        })}
+        {!proveedores.length && !agregando && (
+          <div className="px-4 py-8 text-center text-sm text-slate-400">
+            Este contratante no tiene proveedores activos todavía. Agrégalos para que
+            pueda ver quién le presentó fianza y quién no.
+          </div>
+        )}
+      </div>
+
+      {/* Los suspendidos, aparte y atenuados. El contratante NO los ve; están
+          aquí para poder reactivarlos, porque sin esta sección suspender era una
+          puerta de un solo sentido. */}
+      {suspendidos.length > 0 && (
+        <div className="border-t border-slate-200 bg-slate-50/60">
+          <p className="px-4 pt-2.5 text-[11px] font-medium text-slate-500">
+            Suspendidos ({suspendidos.length})
+            <span className="font-normal text-slate-400">
+              {' '}· el contratante no los ve, y sus obras ligadas tampoco
+            </span>
+          </p>
+          <div className="divide-y divide-slate-100">
+            {suspendidos.map((p) => (
+              <div key={p.id} className="px-4 py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div className="min-w-0">
+                  <span className="text-sm text-slate-500">{p.razon_social}</span>
+                  <p className="text-[11px] text-slate-400">
+                    {p.alias && <span>{p.alias} · </span>}
+                    {p.rfc || 'Sin RFC'}
+                    {p.obras_ligadas > 0 && (
+                      <span className="text-amber-600">
+                        {' '}· {p.obras_ligadas} obra(s) siguen ligadas
+                      </span>
+                    )}
+                  </p>
+                </div>
+                {puedeOperar && (
+                  <button
+                    onClick={() => suspender(p.id, true)}
+                    disabled={busyId === p.id}
+                    className={`${btnSecondary} ml-auto`}
+                    title="Volver a ponerlo en el padrón: el contratante vuelve a ver sus obras ligadas"
+                  >
+                    Reactivar
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Un proveedor se liga eligiéndolo de los clientes que ya existen, o se crea
+// aquí mismo. Lo segundo es el caso normal: casi nunca está dado de alta, y
+// mandar al operador a "Agregar cliente" le pediría un correo y una contraseña
+// que de un proveedor al que solo se le vigila la fianza casi nunca se tienen.
+function NuevoProveedor({ contratanteId, clientes, yaEnPadron, onCancel, onDone }) {
+  const [modo, setModo] = useState('nuevo'); // 'nuevo' | 'existente'
+  const [f, setF] = useState({
+    proveedor_id: '', razon_social: '', rfc: '', telefono: '',
+    alias: '', notas: '', email: '', password: '', nombre_contacto: '',
+  });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  // Solo fiados, y solo los que no estén ya en el padrón.
+  const candidatos = clientes.filter(
+    (c) => c.tipo !== 'contratante' && c.id !== contratanteId && !yaEnPadron.includes(c.id)
+  );
+
+  async function guardar() {
+    setError('');
+    if (modo === 'existente' && !f.proveedor_id) return setError('Elige un cliente.');
+    if (modo === 'nuevo' && !f.razon_social.trim()) {
+      return setError('La razón social del proveedor es obligatoria.');
+    }
+    if (modo === 'nuevo' && f.email && f.password.length < 8) {
+      return setError('Si le vas a dar acceso, la contraseña inicial debe tener al menos 8 caracteres.');
+    }
+    setBusy(true);
+    try {
+      // Solo se mandan las llaves que este modo de verdad captura. Mandar
+      // `notas: ''` desde una pestaña que no dibuja ese campo le borraba al
+      // contratante la nota que tenía escrita.
+      const cuerpo = modo === 'existente'
+        ? { proveedor_id: f.proveedor_id, ...(f.alias.trim() ? { alias: f.alias } : {}) }
+        : f;
+      const r = await api.post(`/admin/clientes/${contratanteId}/proveedores`, cuerpo);
+      onDone(r.creado ? 'Proveedor creado y agregado al padrón' : 'Proveedor agregado al padrón');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="border-b border-slate-200 bg-indigo-50/30 px-4 py-3">
+      <div className="flex items-center gap-1 mb-3">
+        {[['nuevo', 'Proveedor nuevo'], ['existente', 'Ya es cliente']].map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setModo(k)}
+            className={`text-xs px-2.5 py-1 rounded-md border ${
+              modo === k
+                ? 'bg-indigo-600 border-indigo-600 text-white'
+                : 'border-slate-200 text-slate-600 hover:bg-white'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {modo === 'existente' ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <div className="md:col-span-2">
+            <label className="text-[11px] text-slate-500 mb-1 block">Cliente<Req /></label>
+            <select value={f.proveedor_id} onChange={set('proveedor_id')} className={inputCls}>
+              <option value="">Elige…</option>
+              {candidatos.map((c) => (
+                <option key={c.id} value={c.id}>{c.razon_social}</option>
+              ))}
+            </select>
+            {!candidatos.length && (
+              <p className="text-[11px] text-slate-400 mt-1">
+                No hay clientes disponibles: o ya están todos en el padrón, o hay que crearlos.
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Qué le surte</label>
+            <input value={f.alias} onChange={set('alias')} placeholder="Estructura, acabados…" className={inputCls} />
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <div className="md:col-span-2">
+              <label className="text-[11px] text-slate-500 mb-1 block">Razón social<Req /></label>
+              <input value={f.razon_social} onChange={set('razon_social')} className={inputCls} />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">Qué le surte</label>
+              <input value={f.alias} onChange={set('alias')} placeholder="Estructura, acabados…" className={inputCls} />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">RFC</label>
+              <input value={f.rfc} onChange={set('rfc')} className={inputCls} />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">Teléfono</label>
+              <input value={f.telefono} onChange={set('telefono')} className={inputCls} />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 mb-1 block">Notas</label>
+              <input value={f.notas} onChange={set('notas')} className={inputCls} />
+            </div>
+          </div>
+
+          <div className="border-t border-slate-200 mt-3 pt-2.5">
+            <p className="text-[11px] font-medium text-slate-600">
+              Acceso al portal <span className="font-normal text-slate-400">· opcional</span>
+            </p>
+            <p className="text-[11px] text-slate-400 mb-2">
+              Déjalo vacío si el proveedor no va a entrar. Su fianza la captura Fortex
+              y el contratante la ve igual.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <div>
+                <label className="text-[11px] text-slate-500 mb-1 block">Nombre o puesto</label>
+                <input value={f.nombre_contacto} onChange={set('nombre_contacto')} className={inputCls} />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-500 mb-1 block">Correo</label>
+                <input type="email" value={f.email} onChange={set('email')} className={inputCls} />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-500 mb-1 block">Contraseña inicial</label>
+                <input type="text" value={f.password} onChange={set('password')} placeholder="mínimo 8 caracteres" className={inputCls} />
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {error && (
+        <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+      <div className="flex gap-2 mt-3">
+        <button onClick={guardar} disabled={busy} className={btnPrimary}>
+          <Save className="w-4 h-4" /> {busy ? 'Guardando…' : 'Agregar al padrón'}
+        </button>
+        <button onClick={onCancel} className={btnSecondary}><X className="h-3.5 w-3.5" /> Cancelar</button>
+      </div>
+    </div>
   );
 }
 
@@ -1261,6 +1738,7 @@ function Pill({ label, valor, tono = 'slate', ayuda }) {
     emerald: 'bg-emerald-50 text-emerald-700',
     sky: 'bg-sky-50 text-sky-700',
     violet: 'bg-violet-50 text-violet-700',
+    rose: 'bg-rose-50 text-rose-700',
   };
   return (
     <div className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md ${tonos[tono]}`} title={ayuda}>
@@ -1388,7 +1866,10 @@ function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange 
    Proyectos y sus fianzas
    -------------------------------------------------------------------------- */
 
-function Proyectos({ clienteId, proyectos, afianzadoras, tipos, tiposDoc, onChange, flash }) {
+function Proyectos({
+  clienteId, proyectos, afianzadoras, tipos, tiposDoc,
+  contratantes = [], puedeLigarContratante, onChange, flash,
+}) {
   const [creando, setCreando] = useState(false);
 
   return (
@@ -1403,12 +1884,16 @@ function Proyectos({ clienteId, proyectos, afianzadoras, tipos, tiposDoc, onChan
 
       {creando && (
         <FormProyecto
+          contratantes={contratantes}
+          puedeLigarContratante={puedeLigarContratante}
           onCancel={() => setCreando(false)}
           onSubmit={async (datos) => {
-            await api.post('/admin/proyectos', { client_id: clienteId, ...datos });
+            const r = await api.post('/admin/proyectos', { client_id: clienteId, ...datos });
             setCreando(false);
             onChange();
-            flash('Proyecto creado');
+            // El servidor avisa si la obra quedó ligada a un contratante que
+            // tiene suspendido a este proveedor: se ligó, pero todavía no la ve.
+            flash(r.aviso || 'Proyecto creado');
           }}
         />
       )}
@@ -1423,6 +1908,8 @@ function Proyectos({ clienteId, proyectos, afianzadoras, tipos, tiposDoc, onChan
             afianzadoras={afianzadoras}
             tipos={tipos}
             tiposDoc={tiposDoc}
+            contratantes={contratantes}
+            puedeLigarContratante={puedeLigarContratante}
             onChange={onChange}
             flash={flash}
           />
@@ -1437,7 +1924,10 @@ function Proyectos({ clienteId, proyectos, afianzadoras, tipos, tiposDoc, onChan
   );
 }
 
-function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, tiposDoc, onChange, flash }) {
+function Proyecto({
+  proyecto: p, proyectos, clienteId, afianzadoras, tipos, tiposDoc,
+  contratantes = [], puedeLigarContratante, onChange, flash,
+}) {
   const [abierto, setAbierto] = useState(true);
   const [editando, setEditando] = useState(false);
   const [nuevaFianza, setNuevaFianza] = useState(false);
@@ -1473,6 +1963,14 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, tipo
               {p.beneficiario && <span> · {p.beneficiario}</span>}
               {p.fecha_termino && <span> · termina {fmtDate(p.fecha_termino)}</span>}
             </p>
+            {/* Que se vea sin abrir nada: las pólizas de esta obra las está
+                viendo otra empresa. */}
+            {p.contratante_nombre && (
+              <p className="text-[11px] mt-0.5 inline-flex items-center gap-1 text-sky-700">
+                <Link2 className="h-3 w-3" />
+                Las ve <span className="font-medium">{p.contratante_nombre}</span>
+              </p>
+            )}
           </button>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -1529,12 +2027,14 @@ function Proyecto({ proyecto: p, proyectos, clienteId, afianzadoras, tipos, tipo
       {editando && (
         <FormProyecto
           inicial={p}
+          contratantes={contratantes}
+          puedeLigarContratante={puedeLigarContratante}
           onCancel={() => setEditando(false)}
           onSubmit={async (datos) => {
-            await api.put(`/admin/proyectos/${p.id}`, datos);
+            const r = await api.put(`/admin/proyectos/${p.id}`, datos);
             setEditando(false);
             onChange();
-            flash('Proyecto actualizado');
+            flash(r.aviso || 'Proyecto actualizado');
           }}
         />
       )}
@@ -1820,7 +2320,9 @@ function DocsEntidad({ clienteId, entidad, id, documentos = [], tipos = [], onCh
    Formularios
    -------------------------------------------------------------------------- */
 
-function FormProyecto({ inicial, onSubmit, onCancel }) {
+function FormProyecto({
+  inicial, contratantes = [], puedeLigarContratante, onSubmit, onCancel,
+}) {
   const [f, setF] = useState({
     nombre: inicial?.nombre || '',
     numero_contrato: inicial?.numero_contrato || '',
@@ -1830,6 +2332,11 @@ function FormProyecto({ inicial, onSubmit, onCancel }) {
     fecha_termino: inicial?.fecha_termino || '',
     estatus: inicial?.estatus || 'en_proceso',
     notas: inicial?.notas || '',
+    // Vacío = la obra no es para ningún contratante del portal, que es el caso
+    // normal (CFE, el IMSS, un municipio). Se manda siempre, incluso vacío, para
+    // poder DESLIGAR una obra: el servidor distingue "no vino el campo" de
+    // "vino vacío" (ver camposAActualizar en routes/admin.js).
+    contratante_id: inicial?.contratante_id ?? '',
   });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1871,6 +2378,44 @@ function FormProyecto({ inicial, onSubmit, onCancel }) {
         <div>
           <label className="text-[11px] text-slate-500 mb-1 block">Beneficiario</label>
           <input value={f.beneficiario} onChange={set('beneficiario')} placeholder="CFE, IMSS, municipio…" className={inputCls} />
+        </div>
+        {/* Distinto del beneficiario de texto libre, y a propósito: el
+            beneficiario es quién aparece en la póliza (casi siempre CFE, el
+            IMSS o un municipio, que no entran al portal). ESTO es quién va a
+            VER estas fianzas desde su cuenta. */}
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">
+            Para (contratante del portal)
+          </label>
+          {puedeLigarContratante ? (
+            <>
+              <select
+                value={f.contratante_id ?? ''}
+                onChange={(e) => setF((s) => ({ ...s, contratante_id: e.target.value }))}
+                className={inputCls}
+                disabled={!contratantes.length}
+              >
+                <option value="">No es para un contratante del portal</option>
+                {contratantes.map((c) => (
+                  <option key={c.id} value={c.id}>{c.razon_social}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {contratantes.length
+                  ? (f.contratante_id
+                    ? 'Ese contratante va a ver las pólizas de ESTA obra (no las demás de este cliente).'
+                    : 'Déjalo así si la obra no es para un contratante dado de alta en el portal.')
+                  : 'Todavía no hay ninguna cuenta de tipo contratante.'}
+              </p>
+            </>
+          ) : (
+            <p className="text-[11px] text-slate-400 py-2">
+              {inicial?.contratante_nombre
+                ? `${inicial.contratante_nombre} ve las fianzas de esta obra.`
+                : 'Sin contratante.'}
+              {' '}Solo un operador puede cambiarlo: le abre las pólizas a otra empresa.
+            </p>
+          )}
         </div>
         <div>
           <label className="text-[11px] text-slate-500 mb-1 block">Monto del contrato</label>
@@ -2163,7 +2708,7 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
 function NuevoCliente({ vendedores = [], onDone }) {
   const [open, setOpen] = useState(false);
   const empty = {
-    razon_social: '', rfc: '', telefono: '', vendedor_id: '',
+    razon_social: '', rfc: '', telefono: '', tipo: 'fiado', vendedor_id: '',
     nombre_contacto: '', email: '', password: '',
   };
   const [f, setF] = useState(empty);
@@ -2220,6 +2765,19 @@ function NuevoCliente({ vendedores = [], onDone }) {
             </div>
           </div>
           <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Tipo de cuenta<Req /></label>
+            <select value={f.tipo} onChange={set('tipo')} className={inputCls}>
+              <option value="fiado">Fiado — compra fianzas</option>
+              <option value="contratante">Contratante — se las exige a sus proveedores</option>
+            </select>
+            <p className="text-[11px] text-slate-400 mt-1">
+              {f.tipo === 'contratante'
+                ? 'No tendrá pólizas, líneas de crédito ni expediente. Al entrar verá el '
+                  + 'padrón de sus proveedores y qué fianza presentó cada uno.'
+                : 'Lo de siempre: obras, pólizas, líneas de crédito y expediente.'}
+            </p>
+          </div>
+          <div>
             <label className="text-[11px] text-slate-500 mb-1 block">Vendedor</label>
             <select value={f.vendedor_id} onChange={set('vendedor_id')} className={inputCls}>
               <option value="">Sin asignar</option>
@@ -2249,8 +2807,11 @@ function NuevoCliente({ vendedores = [], onDone }) {
           </div>
 
           <p className="text-[11px] text-slate-400">
-            Después puedes agregarle más personas desde el detalle del cliente. Las líneas
-            de crédito se asignan por afianzadora, también desde ahí.
+            {f.tipo === 'contratante'
+              ? 'Después, desde su detalle, le armas el padrón de proveedores. Ahí mismo '
+                + 'puedes dar de alta a un proveedor que todavía no sea cliente.'
+              : 'Después puedes agregarle más personas desde el detalle del cliente. Las líneas '
+                + 'de crédito se asignan por afianzadora, también desde ahí.'}
           </p>
           {error && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-700 flex items-start gap-2">

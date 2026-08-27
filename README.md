@@ -1,7 +1,11 @@
 # Portal de Fianzas · Fortex
 
-Portal web para que los clientes (fiados) de Fortex consulten y gestionen sus fianzas,
-con panel de administración para el equipo de Fortex.
+Portal web para que los clientes de Fortex consulten y gestionen sus fianzas, con
+panel de administración para el equipo de Fortex.
+
+Hay **dos clases de cliente**: el **fiado**, que compra fianzas, y el
+**contratante** —un desarrollador— que no compra ninguna y entra a vigilar la
+fianza que le presentan sus proveedores.
 
 ## Stack (MVP)
 
@@ -82,7 +86,7 @@ Detalles que conviene saber:
 fianzas-portal/
   server/          API Express
     src/
-      routes/      auth, dashboard, fianzas, documentos, admin
+      routes/      auth, dashboard, fianzas, documentos, proveedores, admin
       services/    email, alerts
       lib/         dates, upload
       db.js        capa SQLite (node:sqlite)
@@ -90,7 +94,7 @@ fianzas-portal/
       seed.js      datos de demo
   client/          App React (Vite)
     src/
-      pages/       Login, Dashboard, Admin
+      pages/       Login, Dashboard, Proveedores, Admin
       components/   MisFianzas, Documentos
 ```
 
@@ -120,7 +124,7 @@ Abre http://localhost:5173
 
 ## Usuarios, clientes y carteras
 
-Una **empresa fiada** (`clients`) y una **cuenta de acceso** (`users`) son cosas
+Una **empresa** (`clients`) y una **cuenta de acceso** (`users`) son cosas
 distintas:
 
 - Una constructora puede tener varias personas dadas de alta (dirección,
@@ -185,21 +189,178 @@ no significa nada, porque sus fechas son las estimadas de la solicitud.
 > lugares que calculan el comprometido). La prueba que fija el comportamiento de
 > hoy es `server/test/previos.test.js`.
 
+## Contratantes y padrón de proveedores
+
+No todos los clientes compran fianzas. Un desarrollador —Desarrollos Delta, en
+los datos de demostración— no compra ninguna: **las exige**. Quien las presenta
+es su proveedor, y lo que el desarrollador necesita del portal es una sola
+respuesta, proveedor por proveedor: ¿ya presentó la fianza o no?
+
+Eso es `clients.tipo`, y son dos negocios, no dos niveles de permiso:
+
+| | fiado | contratante |
+|---|---|---|
+| Compra fianzas | ✅ | ❌ |
+| Obras propias, pólizas, líneas de crédito, expediente | ✅ | ❌ (el servidor las rechaza) |
+| Padrón de proveedores | ❌ | ✅ |
+| Al entrar ve | "Mis fianzas" | "Mis proveedores" |
+
+Va como una columna sobre la misma tabla, y no como una tabla aparte, porque un
+contratante tiene la **misma ficha** que un fiado (razón social, RFC, teléfono,
+vendedor titular) y sus accesos se dan igual. Lo único que cambia es qué ve.
+
+### Un proveedor es un fiado normal
+
+No tiene nada especial: es una fila de `clients` con `tipo = 'fiado'`. Puede
+además ser cliente directo de Fortex, y **puede estar en el padrón de varios
+desarrolladores a la vez** — el subcontratista eléctrico le trabaja a todo el
+mundo. Por eso la liga es una tabla puente (`client_proveedores`) y no una
+columna "empresa padre": con una columna habría que dar de alta al mismo
+proveedor una vez por desarrollador, y duplicarlo significa duplicarle el
+expediente y las pólizas.
+
+El acceso al portal del proveedor es **opcional**. Se le puede dar de alta desde
+el padrón con solo su razón social: Fortex le captura la fianza, el contratante
+la ve, y en esa empresa nadie tiene que enterarse de que este sistema existe.
+
+### Qué ve el contratante, y qué no
+
+La unidad de permiso **no es el proveedor: es la obra**. Lo que le abre a un
+contratante las fianzas de una obra es `proyectos.contratante_id`.
+
+Es la decisión de diseño que más importa de todo esto. Si bastara con estar en el
+padrón, el día que el mismo eléctrico le trabaje a dos desarrollos, cada uno
+vería la obra del otro —con el monto del contrato de su competencia dentro—.
+Ligando por obra, cada uno ve la suya.
+
+Y hacen falta **las dos** condiciones a la vez, siempre (`JOIN_PADRON` +
+`ALCANCE` en `lib/permisos.js`): la obra ligada **y** el proveedor activo en el
+padrón. Con solo la primera, suspender a un proveedor no le cerraría nada; con
+solo la segunda, se abrirían todas sus obras.
+
+| Dato | ¿Lo ve el contratante? |
+|---|---|
+| Razón social y RFC del proveedor | ✅ |
+| Obra ligada a él: nombre, contrato, monto, fechas, estatus | ✅ |
+| Fianza: n° de póliza, tipo, afianzadora, monto afianzado, vigencia, estado | ✅ |
+| Carátula, endoso y carta de liberación | ✅ |
+| **Prima neta y prima total** | ❌ es lo que le costó a su proveedor |
+| **Recibo de prima** (el archivo) | ❌ dice lo mismo, en PDF |
+| Línea de crédito del proveedor | ❌ |
+| Expediente del proveedor (estados financieros, acta) | ❌ |
+| Papelería y recordatorios internos de Fortex | ❌ |
+| Las **otras** obras del proveedor | ❌ ni su existencia |
+| Correos y accesos del proveedor | ❌ |
+
+Nada de esa columna derecha se selecciona y luego se borra del objeto antes de
+responder: **no se pide nunca** (`services/proveedores.js`, y la lista blanca de
+tipos de documento en `lib/permisos.js`). La prueba que lo fija —
+`server/test/contratantes.test.js` — no revisa campos sueltos: recorre el JSON
+completo y falla si aparece **cualquier** llave de una lista prohibida, así que
+el día que alguien le agregue una columna a `fianzas` se entera ahí y no en la
+pantalla de un cliente.
+
+### Suspender, no borrar
+
+Para dejar de trabajar con un proveedor se **suspende** del padrón
+(`client_proveedores.activo = 0`): el contratante deja de ver sus obras en el
+mismo instante —el `activo` es una de las dos condiciones del alcance— y queda el
+historial de lo que sí presentó. En el panel aparece en una sección aparte, con
+un botón para reactivarlo, y reactivarlo **no** le borra el alias ni las notas
+que el contratante tenía escritas.
+
+Borrar la fila es otra cosa: es para la liga que nunca debió existir (se agregó
+al padrón equivocado). Se niega mientras haya obras ligadas, y no borra la
+empresa.
+
+Ojo con el estado intermedio: suspender **no** desliga las obras. Una obra que
+sigue apuntando a un contratante que ya suspendió a ese proveedor queda colgada
+—no se ve del lado del contratante, pero existe—, y por eso en el detalle del
+fiado ese renglón se pinta en gris con la palabra "suspendido" en vez de afirmar
+que el contratante está viendo esas fianzas.
+
+### La obra que ya no se juzga
+
+Una obra **cerrada o cancelada** se le sigue mostrando al contratante, pero sin
+chip de cumplimiento y sin tinte rojo: en su lugar se dice el estatus. No hay
+cobertura que exigirle a una obra que terminó, y pintarla en rojo llenaría la
+pantalla de pendientes de hace tres años.
+
+Las **terminadas y entregadas** sí cuentan, y es deliberado: ahí es donde vive la
+fianza de vicios ocultos, que es justo la que se olvida. Por eso la pantalla dice
+"obras **vigentes**" y no "obras en curso" — el conjunto no es el mismo.
+
+Un proveedor cuyas obras con ese contratante están todas cerradas sale como
+"Obras cerradas", no como "Sin obra": lo segundo diría que falta capturar algo, y
+no falta nada.
+
+### Lo que el vendedor no puede
+
+Ligar una obra a un contratante requiere **operador**. Un vendedor captura la
+obra completa —nombre, contrato, montos, fechas— pero no ese campo: le abre las
+pólizas de su cliente a otra empresa, y eso **no se deshace**. Lo que ya vio, lo
+vio. Es la misma razón por la que las líneas de crédito tampoco son suyas.
+
+En cambio el padrón sí se le muestra completo al vendedor que lleva la cuenta del
+desarrollador, y a propósito: necesita saber a qué proveedor le falta la fianza,
+porque ahí está su venta. Puede hacerlo sin riesgo porque el panel le muestra
+**exactamente la misma proyección** que ve el contratante —la misma consulta
+alimenta las dos pantallas—, no el expediente completo de esos proveedores.
+
+### El hueco que hay que decir en voz alta
+
+El portal solo sabe de las fianzas que **colocó Fortex**. Un proveedor que
+contrató la suya con otro agente aparece igual en la lista, así que la etiqueta
+dice **"Sin registro"** y no "Sin fianza", y la pantalla lo explica al pie. La
+diferencia no es cosmética: acusar en falso a un proveedor que sí cumplió es la
+forma más rápida de que el desarrollador cierre el portal y vuelva al Excel.
+
+Registrar las fianzas colocadas por terceros es la ampliación obvia, y no es
+gratis: pide un tercer valor en `fianzas.clase` (una póliza que se vigila pero
+no es producción de Fortex) y revisar los lugares donde `clase` decide si algo
+suma. Mientras no exista, esa lista de "sin registro" es la lista de prospectos
+de Fortex.
+
+Dos cosas más que **no** hace esta primera entrega:
+
+- **No sabe qué fianza exige cada obra.** Una obra que necesita anticipo y
+  cumplimiento, y solo tiene el cumplimiento, sale en verde. Lo único que la
+  pantalla caza con certeza es "no presentó nada". Por eso el chip verde dice
+  "Con fianza" y no "Cubierta".
+- **No le avisa por correo al contratante** cuando la fianza de un proveedor está
+  por vencer. Hoy el aviso le llega solo a quien la compró, que es justo el que
+  ya lo sabe. Es probablemente lo que más valor agregaría después de esto.
+
 ## Cuentas de prueba
 
-| Rol      | Usuario                 | Contraseña   |
-|----------|-------------------------|--------------|
-| Cliente  | cliente@demo.mx         | demo123      |
-| Cliente  | contabilidad@bajio.mx   | demo123      |
-| Cliente  | norte@demo.mx           | demo123      |
-| Operador | mariana@fortex.mx       | operador123  |
-| Vendedor | carlos@fortex.mx        | vendedor123  |
-| Admin    | francisco@fortex.mx     | admin123     |
+| Rol         | Usuario                 | Contraseña   |
+|-------------|-------------------------|--------------|
+| Fiado       | cliente@demo.mx         | demo123      |
+| Fiado       | contabilidad@bajio.mx   | demo123      |
+| Fiado       | norte@demo.mx           | demo123      |
+| Contratante | delta@demo.mx           | demo123      |
+| Fiado       | vega@demo.mx            | demo123      |
+| Fiado       | herrera@demo.mx         | demo123      |
+| Operador    | mariana@fortex.mx       | operador123  |
+| Vendedor    | carlos@fortex.mx        | vendedor123  |
+| Admin       | francisco@fortex.mx     | admin123     |
 
 Las dos primeras son de la **misma** empresa: sirven para ver que varias
 personas comparten la información del fiado. `norte@demo.mx` entra también con
 su RFC (`IAN980720XYZ`) porque su empresa tiene una sola cuenta. `carlos@fortex.mx`
 solo ve a Ingeniería del Norte: sirve para comprobar el alcance del vendedor.
+
+`delta@demo.mx` es el **contratante**. Entra a otra pantalla y su padrón trae los
+tres casos de una vez: Cimentaciones Vega con fianza vigente, Instalaciones
+Herrera con una que vence en veinte días, y Acabados Solís con una obra en
+proceso y **ninguna** fianza — el renglón que el desarrollador quiere cazar.
+Acabados Solís no tiene cuenta a propósito: se ve que un proveedor puede vivir en
+el padrón sin entrar nunca al portal.
+
+Y está el caso que hace demostrable el aislamiento: **Cimentaciones Vega tiene
+además una obra para CFE** (`Piloteado Planta CFE Escobedo`, con su propia póliza
+de $5.2M) que no está ligada a ningún contratante. Delta **no la ve**, aunque
+Vega esté en su padrón. Si algún día se ve, se rompió el alcance.
 
 ## Correo saliente y recuperación de contraseña
 
@@ -256,6 +417,16 @@ Para automatizar diariamente, programa un cron que llame a ese endpoint o a `cor
 
 ## Próximos pasos sugeridos
 
+- Avisarle **al contratante** por correo que a su proveedor se le vence la fianza
+  (hoy el aviso solo le llega a quien la compró). Es lo que más valor agrega de
+  lo que falta.
+- Registrar las fianzas que el proveedor colocó con **otro agente**, para que el
+  padrón no diga "sin registro" de quien sí cumplió.
+- **Qué fianza exige cada obra** (`obra_requisitos`): hoy una obra a la que le
+  falta el anticipo pero tiene el cumplimiento sale en verde.
+- Ayudar a ligar obras viejas a su contratante a partir del campo de texto
+  `beneficiario` (proponiendo las coincidencias para que un operador las
+  confirme, nunca aplicándolas solas: ligar de más abre información).
 - Activar SendGrid y WhatsApp (Twilio) en `services/`.
 - Cron diario para alertas (hoy hay que llamar `POST /api/alertas/correr`).
 - Que cada quien pueda cambiar su propia contraseña estando dentro (hoy se

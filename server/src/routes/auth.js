@@ -19,7 +19,7 @@ function urlDelPortal(req) {
 // empresa, no de la persona: el personal de Fortex no tiene.
 const SELECT_USUARIO = `
   SELECT u.id, u.nombre, u.email, u.role, u.activo, u.password_hash,
-         u.client_id, c.razon_social, c.rfc
+         u.client_id, c.razon_social, c.rfc, c.tipo AS cliente_tipo
   FROM users u
   LEFT JOIN clients c ON c.id = u.client_id
 `;
@@ -32,6 +32,12 @@ const paraElFront = (u) => ({
   client_id: u.client_id,
   razon_social: u.razon_social,
   rfc: u.rfc,
+  // 'fiado' o 'contratante'; null para el personal de Fortex, que no tiene
+  // empresa. Es lo que le dice al front a qué portal mandar a esta persona
+  // (client/src/main.jsx). Va en la RESPUESTA y no en el token: el token vive
+  // ocho horas y el servidor vuelve a preguntar el tipo en cada ruta, así que
+  // esto es nada más para pintar la pantalla correcta.
+  cliente_tipo: u.cliente_tipo ?? null,
 });
 
 // Se entra con el correo. El RFC se sigue aceptando como atajo, pero solo

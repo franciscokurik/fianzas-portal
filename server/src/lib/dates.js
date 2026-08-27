@@ -32,6 +32,21 @@ export function estadoFianza(fechaVigencia) {
   return 'activa';
 }
 
+// Igual que estadoFianza, pero para la pantalla del CONTRATANTE, donde "sin
+// fecha capturada" no puede leerse como "vigente".
+//
+// estadoFianza devuelve 'activa' cuando no hay fecha, y para el fiado está bien:
+// es su propia captura incompleta, y él sabe lo que tiene. En la pantalla con la
+// que un desarrollador decide si deja entrar a un proveedor a la obra, ese mismo
+// silencio pintado de verde es el falso positivo más caro que hay.
+//
+// No se cambia estadoFianza porque de ella cuelgan el panel, el portal del fiado
+// y el mapa de estados del front.
+export function estadoCumplimiento(fechaVigencia) {
+  if (!fechaVigencia) return 'sin_vigencia';
+  return estadoFianza(fechaVigencia);
+}
+
 // Estado de un documento según vencimiento y si fue subido
 //   pendiente  -> no se ha subido
 //   al_dia     -> subido y (sin vencimiento o vence más allá de la ventana de alerta)

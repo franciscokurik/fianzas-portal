@@ -6,7 +6,7 @@
 // propias guardas.
 import { Router } from 'express';
 import { requireAuth } from '../auth/middleware.js';
-import { exigirCliente } from '../lib/permisos.js';
+import { exigirCliente, tipoDeCliente } from '../lib/permisos.js';
 import {
   firmarSubida, esFormatoPermitido, FORMATOS_PERMITIDOS, MAXIMO_MB,
 } from '../lib/upload.js';
@@ -24,6 +24,14 @@ router.post('/firma', requireAuth, async (req, res) => {
   if (req.user.client_id) {
     if (req.user.client_id !== clientId) {
       return res.status(403).json({ error: 'No puedes subir archivos de otro cliente' });
+    }
+    // Un contratante no tiene expediente ni papelería: no hay una sola ruta que
+    // acepte un archivo suyo. Si se le firmara la subida igual, podría llenar la
+    // cuota de Cloudinary con archivos que nada apunta y que nadie vería.
+    if ((await tipoDeCliente(clientId)) === 'contratante') {
+      return res.status(403).json({
+        error: 'Tu cuenta es de un contratante: aquí no se suben archivos.',
+      });
     }
   } else {
     await exigirCliente(req.user, clientId);

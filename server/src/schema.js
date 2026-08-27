@@ -19,6 +19,18 @@ CREATE TABLE IF NOT EXISTS clients (
   rfc           TEXT    UNIQUE,
   linea_credito BIGINT  NOT NULL DEFAULT 0,
   telefono      TEXT,
+  -- Qué es esta empresa PARA EL PORTAL. Son dos negocios distintos, no dos
+  -- niveles de permiso:
+  --   'fiado'       -> compra fianzas. Todo lo de siempre.
+  --   'contratante' -> NO compra ninguna. Es el desarrollador que EXIGE la
+  --                    fianza a sus proveedores y entra nada más a ver quién
+  --                    cumplió (ver routes/proveedores.js).
+  --
+  -- Va como columna y no como tabla aparte porque un contratante tiene la
+  -- misma ficha que un fiado —razón social, RFC, teléfono, vendedor titular— y
+  -- sus accesos se dan igual. Lo único que cambia es qué ve al entrar.
+  tipo          TEXT    NOT NULL DEFAULT 'fiado'
+                CHECK (tipo IN ('fiado', 'contratante')),
   created_at    TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
 );
 
@@ -54,6 +66,51 @@ CREATE INDEX IF NOT EXISTS idx_users_client ON users(client_id);
 -- asignar y lo siguen viendo los admins y operadores. Nunca se borra con él.
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS vendedor_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_clients_vendedor ON clients(vendedor_id);
+
+-- El tipo de empresa sobre bases que ya existen. El DEFAULT deja como 'fiado'
+-- todo lo que ya estaba capturado, que es exactamente lo que es. La
+-- restricción se rehace en cada /api/setup (el DROP primero) para que volver a
+-- correr esto no truene.
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'fiado';
+ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_tipo_check;
+ALTER TABLE clients ADD CONSTRAINT clients_tipo_check CHECK (tipo IN ('fiado', 'contratante'));
+
+-- El PADRÓN de proveedores de un contratante: a quién le exige fianza.
+--
+-- Tabla puente y NO una columna 'padre_id' en clients, porque un
+-- subcontratista —el eléctrico, el de estructuras— le trabaja a varios
+-- desarrolladores a la vez, y a veces además es cliente directo de Fortex. Con
+-- una columna habría que darlo de alta una vez por cada desarrollador, y eso
+-- significa duplicarle el expediente y las pólizas.
+--
+-- Estar en el padrón NO abre por sí solo ninguna información: nada más dice
+-- que ese proveedor le tiene que presentar fianza a este contratante, y sirve
+-- para poder decir "todavía no ha presentado ninguna". Lo que el contratante
+-- alcanza a VER se decide por OBRA (proyectos.contratante_id), en
+-- lib/permisos.js.
+CREATE TABLE IF NOT EXISTS client_proveedores (
+  id             SERIAL PRIMARY KEY,
+  contratante_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  proveedor_id   INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  -- Cómo le llama el contratante y qué le surte. Es SU nota, no un dato del
+  -- proveedor: dos desarrolladores pueden anotar cosas distintas del mismo.
+  alias          TEXT,
+  notas          TEXT,
+  -- Se SUSPENDE, no se borra: un proveedor al que el desarrollador ya no le
+  -- compra tiene un historial de fianzas presentadas que no hay por qué perder.
+  -- Y este 1/0 es además el interruptor de LECTURA: en 0, el contratante deja de
+  -- ver sus obras en el mismo instante, aunque sigan ligadas (ver el
+  -- JOIN_PADRON de lib/permisos.js). Baja lógica, igual que en tipos_fianza.
+  activo         INTEGER NOT NULL DEFAULT 1,
+  created_at     TEXT    NOT NULL DEFAULT ${TS_DEFAULT},
+  UNIQUE(contratante_id, proveedor_id),
+  -- Nadie es su propio proveedor. Sin esto, ligarse a sí mismo dejaría a un
+  -- contratante viéndose en su propio padrón.
+  CHECK (contratante_id <> proveedor_id)
+);
+ALTER TABLE client_proveedores ADD COLUMN IF NOT EXISTS activo INTEGER NOT NULL DEFAULT 1;
+CREATE INDEX IF NOT EXISTS idx_proveedores_contratante ON client_proveedores(contratante_id);
+CREATE INDEX IF NOT EXISTS idx_proveedores_proveedor ON client_proveedores(proveedor_id);
 
 -- Enlaces para reponer la contraseña olvidada.
 --
@@ -110,6 +167,24 @@ CREATE TABLE IF NOT EXISTS proyectos (
   created_at      TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
 );
 CREATE INDEX IF NOT EXISTS idx_proyectos_client ON proyectos(client_id);
+
+-- PARA QUIÉN es la obra, cuando ese alguien también entra al portal. Es LO
+-- ÚNICO que le abre a un contratante la puerta a ver las fianzas de esta obra.
+--
+-- No sustituye a 'beneficiario' (texto libre) ni lo va a sustituir: la mayoría
+-- de las obras son para CFE, el IMSS o un municipio, que no tienen cuenta aquí
+-- y nunca la van a tener. Esta columna es para el caso en que el beneficiario
+-- SÍ es cliente del portal.
+--
+-- Se liga la OBRA y no el proveedor a propósito. Si bastara con estar en el
+-- padrón, el día que el mismo eléctrico le trabaje a dos desarrolladores cada
+-- uno vería la obra del otro —incluido el monto del contrato de su
+-- competencia—. Ligando por obra, cada uno ve la suya.
+--
+-- ON DELETE SET NULL: si se da de baja al contratante, la obra del proveedor
+-- se queda (es suya); nada más deja de estar ligada.
+ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS contratante_id INTEGER REFERENCES clients(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_proyectos_contratante ON proyectos(contratante_id);
 
 -- El tipo lo manda tipos_fianza. En bases viejas todavía existe la columna de
 -- texto libre 'tipo_fianza'; la migración 003 la tira una vez respaldada.

@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import db from '../db.js';
-import { requireAuth, requireCliente } from '../auth/middleware.js';
+import { requireAuth, requireFiado } from '../auth/middleware.js';
 import { estadoFianza, daysUntil } from '../lib/dates.js';
 import { agruparPorEntidad, deEntidad } from '../lib/documentos.js';
 
 const router = Router();
 
 // GET /api/fianzas/afianzadoras -> afianzadoras que tienen fianzas del cliente
-router.get('/afianzadoras', requireAuth, requireCliente, async (req, res) => {
+router.get('/afianzadoras', requireAuth, requireFiado, async (req, res) => {
   const rows = await db
     .prepare(
       `SELECT a.id, a.nombre, a.slug, COUNT(f.id) AS total
@@ -22,7 +22,7 @@ router.get('/afianzadoras', requireAuth, requireCliente, async (req, res) => {
 });
 
 // GET /api/fianzas/proyectos -> proyectos del cliente con su total afianzado
-router.get('/proyectos', requireAuth, requireCliente, async (req, res) => {
+router.get('/proyectos', requireAuth, requireFiado, async (req, res) => {
   const proyectos = await db
     .prepare(
       `SELECT p.id, p.nombre, p.numero_contrato, p.beneficiario, p.monto_contrato,
@@ -39,7 +39,7 @@ router.get('/proyectos', requireAuth, requireCliente, async (req, res) => {
 });
 
 // GET /api/fianzas?afianzadora_id=#&proyecto_id=#  -> fianzas del cliente
-router.get('/', requireAuth, requireCliente, async (req, res) => {
+router.get('/', requireAuth, requireFiado, async (req, res) => {
   const { afianzadora_id, proyecto_id } = req.query;
   let sql = `SELECT f.*, a.nombre AS afianzadora_nombre, a.slug AS afianzadora_slug,
                     t.nombre AS tipo_fianza,
@@ -92,7 +92,7 @@ router.get('/', requireAuth, requireCliente, async (req, res) => {
 // GET /api/fianzas/documentos/:id -> descarga un contrato o carátula.
 // La comprobación de dueño es la que importa: sin ella, cambiar el id en la
 // URL dejaría ver los documentos de otro fiado.
-router.get('/documentos/:id', requireAuth, requireCliente, async (req, res) => {
+router.get('/documentos/:id', requireAuth, requireFiado, async (req, res) => {
   const doc = await db
     .prepare('SELECT url FROM documentos WHERE id = ? AND client_id = ?')
     .get(Number(req.params.id), req.user.client_id);

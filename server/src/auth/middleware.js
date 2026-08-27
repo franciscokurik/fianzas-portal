@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { tipoDeCliente } from '../lib/permisos.js';
 
 const SECRET = process.env.JWT_SECRET || 'dev-secret-cambiar';
 
@@ -65,14 +66,38 @@ export function requireOperador(req, res, next) {
   next();
 }
 
-// Rutas del portal del fiado. El personal de Fortex no tiene empresa propia,
-// así que aquí no van: sin esto, sus consultas saldrían vacías y parecería que
-// el fiado no tiene nada, en vez de decir que se equivocaron de pantalla.
-export function requireCliente(req, res, next) {
-  if (!req.user?.client_id) {
-    return res.status(403).json({
-      error: 'Esta sección es para usuarios de un fiado. Entra al panel de Fortex.',
-    });
-  }
-  next();
+// Las dos mitades del portal del cliente. Un fiado y un contratante entran por
+// la misma puerta pero a pantallas distintas, y sus rutas NO se cruzan: sin
+// esto, un contratante que abriera /api/dashboard vería todo en ceros y
+// parecería que se le perdió la información, en vez de decirle que se equivocó
+// de pantalla.
+//
+// El personal de Fortex tampoco va aquí: no tiene empresa propia.
+//
+// El tipo se pregunta a la base en cada petición y no se lee del token, que
+// vive ocho horas: de esto depende qué se puede leer.
+function exigirTipoDeCliente(esperado, siNoEs) {
+  return async function (req, res, next) {
+    if (!req.user?.client_id) {
+      return res.status(403).json({
+        error: 'Esta sección es para usuarios de un cliente. Entra al panel de Fortex.',
+      });
+    }
+    if ((await tipoDeCliente(req.user.client_id)) !== esperado) {
+      return res.status(403).json({ error: siNoEs });
+    }
+    next();
+  };
 }
+
+// El portal de siempre: sus fianzas, su expediente, su papelería.
+export const requireFiado = exigirTipoDeCliente(
+  'fiado',
+  'Tu cuenta es de un contratante. Tus fianzas no están aquí: entra a "Mis proveedores".'
+);
+
+// El portal del desarrollador: el padrón de proveedores y su cumplimiento.
+export const requireContratante = exigirTipoDeCliente(
+  'contratante',
+  'Esta sección es para contratantes que vigilan la fianza de sus proveedores.'
+);

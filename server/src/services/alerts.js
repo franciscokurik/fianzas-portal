@@ -27,7 +27,13 @@ async function destinatarios(clientId) {
 }
 
 export async function correrAlertas() {
-  const clientes = await db.prepare('SELECT id, razon_social FROM clients').all();
+  // Solo fiados. Un contratante no compra fianzas ni tiene expediente, así que
+  // no hay nada que avisarle por aquí: recorrerlo sería un montón de consultas
+  // para no mandar nada. (El aviso que SÍ tendría sentido para él —que a su
+  // proveedor se le vence la fianza— todavía no existe; ver el README.)
+  const clientes = await db
+    .prepare(`SELECT id, razon_social FROM clients WHERE tipo = 'fiado'`)
+    .all();
   let enviadas = 0;
 
   for (const c of clientes) {

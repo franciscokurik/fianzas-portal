@@ -98,6 +98,17 @@ export const pesoArchivo = (bytes) =>
     ? `${Math.round(bytes / 1024)} KB`
     : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
+// Estatus de una obra. Vive aquí y no en una pantalla porque lo usan las dos:
+// el panel de Fortex y el portal del contratante.
+export const ESTATUS_PROYECTO = [
+  ['en_proceso', 'En proceso'],
+  ['terminado', 'Terminado'],
+  ['entregado', 'Entregado'],
+  ['cerrado', 'Cerrado'],
+  ['cancelado', 'Cancelado'],
+];
+export const etiquetaEstatus = (v) => (ESTATUS_PROYECTO.find(([k]) => k === v) || [, v])[1];
+
 // Estado -> chip (paleta: emerald=ok, amber=por vencer, rose=vencido/pendiente)
 const ESTADOS = {
   activa:     { label: 'Activa',     cls: 'bg-emerald-100 text-emerald-700' },
@@ -111,7 +122,72 @@ const ESTADOS = {
   // lugar (ver routes/fianzas.js). En violeta para que no se confunda con las
   // emitidas ni parezca un problema.
   previo:     { label: 'Previo',     cls: 'bg-violet-100 text-violet-700' },
+  // Hay fianza, pero nadie le capturó hasta cuándo cubre. En ámbar y NUNCA en
+  // verde: en la pantalla del contratante, dar eso por bueno es decirle que su
+  // proveedor está cubierto sin saberlo (ver estadoCumplimiento en lib/dates.js).
+  sin_vigencia: { label: 'Sin fecha', cls: 'bg-amber-100 text-amber-700' },
 };
+
+// Cumplimiento de una obra o de un proveedor, en la pantalla del contratante.
+//
+// 'sin_fianza' dice "Sin registro en Fortex" y no "Sin fianza", y la diferencia
+// importa: el portal solo sabe de las fianzas que colocó Fortex, así que un
+// proveedor que compró la suya con otro agente saldría acusado en falso. Lo que
+// el portal puede afirmar es que no tiene registro, no que el proveedor no
+// cumplió.
+const CUMPLIMIENTO = {
+  cubierta:     { label: 'Con fianza',   cls: 'bg-emerald-100 text-emerald-700',
+                  ayuda: 'Tiene fianza emitida y vigente para esta obra.' },
+  por_vencer:   { label: 'Por vencer',   cls: 'bg-amber-100 text-amber-700',
+                  ayuda: 'La fianza vigente vence en 30 días o menos.' },
+  sin_vigencia: { label: 'Sin fecha',    cls: 'bg-amber-100 text-amber-700',
+                  ayuda: 'Hay fianza, pero sin fecha de vigencia capturada. Pídesela a Fortex.' },
+  vencida:      { label: 'Vencida',      cls: 'bg-rose-100 text-rose-700',
+                  ayuda: 'Presentó fianza, pero hoy ninguna está vigente.' },
+  sin_fianza:   { label: 'Sin registro', cls: 'bg-rose-100 text-rose-700',
+                  ayuda: 'No hay ninguna fianza registrada en Fortex para esta obra. '
+                       + 'Puede que exista y se haya colocado con otro agente.' },
+  sin_obra:     { label: 'Sin obra',     cls: 'bg-slate-100 text-slate-600',
+                  ayuda: 'Está en el padrón, pero todavía no se le ha ligado ninguna obra. '
+                       + 'No es un incumplimiento: falta la captura.' },
+  // Distinto de 'sin_obra', y la diferencia importa: aquí la captura SÍ está
+  // hecha, lo que pasa es que el trabajo terminó. Decirle "falta la captura"
+  // mandaría al operador a buscar algo que no falta.
+  sin_obras_vivas: { label: 'Obras cerradas', cls: 'bg-slate-100 text-slate-600',
+                  ayuda: 'Sus obras con esta cuenta están cerradas o canceladas: ya no hay '
+                       + 'cobertura que exigirle.' },
+};
+
+export function CumplimientoBadge({ estado }) {
+  const e = CUMPLIMIENTO[estado] || { label: estado, cls: 'bg-slate-100 text-slate-600' };
+  return (
+    <span
+      className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${e.cls}`}
+      title={e.ayuda}
+    >
+      {e.label}
+    </span>
+  );
+}
+
+// ¿Este estado significa que la obra NO está respaldada hoy? Tiene que coincidir
+// con DESCUBIERTA de server/src/services/proveedores.js.
+export const estaDescubierta = (estado) =>
+  ['sin_fianza', 'vencida', 'sin_vigencia'].includes(estado);
+
+// Marca de qué clase de cliente es. Solo se pinta para el contratante: en una
+// lista que casi toda es de fiados, etiquetar cada renglón hace ruido.
+export function TipoClienteBadge({ tipo }) {
+  if (tipo !== 'contratante') return null;
+  return (
+    <span
+      className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-sky-100 text-sky-700 whitespace-nowrap"
+      title="Contratante: no compra fianzas, las exige a sus proveedores"
+    >
+      Contratante
+    </span>
+  );
+}
 
 export function EstadoBadge({ estado }) {
   const e = ESTADOS[estado] || { label: estado, cls: 'bg-slate-100 text-slate-600' };
