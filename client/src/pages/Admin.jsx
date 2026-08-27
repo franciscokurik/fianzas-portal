@@ -594,6 +594,7 @@ function DetalleCliente({
     // Solo vienen cuando es un contratante (la API contesta con la forma que le
     // toca a cada tipo, no con listas vacías; ver routes/admin.js).
     proveedores = [], suspendidos = [], obras = [], metricas,
+    lineas_proveedores: lineasProveedores = [],
     // Y solo cuando es un fiado: a qué contratantes les surte.
     contratantes = [],
   } = detalle;
@@ -816,6 +817,18 @@ function DetalleCliente({
       />
 
       {esContratante && (
+        <ProyectosDelContratante
+          contratanteId={cliente.id}
+          proyectos={proyectos}
+          obras={obras}
+          proveedores={proveedores}
+          lineasProveedores={lineasProveedores}
+          onChange={onChange}
+          flash={flash}
+        />
+      )}
+
+      {esContratante && (
         <PadronProveedores
           contratanteId={cliente.id}
           proveedores={proveedores}
@@ -891,6 +904,306 @@ function DetalleCliente({
       </>
       )}
     </>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Los PROYECTOS de un contratante, desde el panel
+   --------------------------------------------------------------------------
+   El desarrollador los registra desde su portal —es lo que pidió— y Fortex por
+   la misma puerta, porque al dar de alta la cuenta hay que capturarlos antes de
+   que él entre por primera vez, y sin proyecto no hay a qué ligarle las obras.
+
+   Aquí se ve además lo que el portal del contratante NO le muestra: la línea de
+   crédito de cada proveedor y cuánto le queda disponible. Eso es de la empresa
+   del proveedor, no de este proyecto, y con eso se le negocia precio. */
+
+function ProyectosDelContratante({
+  contratanteId, proyectos, obras, proveedores, lineasProveedores, onChange, flash,
+}) {
+  const [creando, setCreando] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [error, setError] = useState('');
+
+  const nombreDe = (id) => proveedores.find((p) => p.id === id)?.razon_social || 'Proveedor';
+
+  async function borrar(p) {
+    setError('');
+    if (!confirm(`¿Borrar el proyecto "${p.nombre}" de este contratante? No borra ninguna obra.`)) return;
+    try {
+      await api.del(`/admin/clientes/${contratanteId}/proyectos/${p.id}`);
+      onChange();
+      flash('Proyecto borrado');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <Building2 className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700">
+          Proyectos del contratante ({proyectos.length})
+        </h3>
+        <button onClick={() => { setCreando((c) => !c); setEditando(null); }} className={`${btnSecondary} ml-auto`}>
+          <Plus className={`h-3.5 w-3.5 transition-transform ${creando ? 'rotate-45' : ''}`} />
+          Nuevo proyecto
+        </button>
+      </div>
+
+      {error && (
+        <div className="mx-4 mt-3 rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+
+      {creando && (
+        <FormProyectoContratante
+          onCancel={() => setCreando(false)}
+          onSubmit={async (datos) => {
+            await api.post(`/admin/clientes/${contratanteId}/proyectos`, datos);
+            setCreando(false);
+            onChange();
+            flash('Proyecto creado');
+          }}
+        />
+      )}
+      {editando && (
+        <FormProyectoContratante
+          inicial={editando}
+          onCancel={() => setEditando(null)}
+          onSubmit={async (datos) => {
+            await api.put(`/admin/clientes/${contratanteId}/proyectos/${editando.id}`, datos);
+            setEditando(null);
+            onChange();
+            flash('Proyecto actualizado');
+          }}
+        />
+      )}
+
+      <div className="divide-y divide-slate-100">
+        {proyectos.map((p) => {
+          const suyas = obras.filter((o) => o.desarrollo_id === p.id);
+          return (
+            <div key={p.id} className="px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div className="min-w-0">
+                  <span className="text-sm font-semibold text-slate-800">{p.nombre}</span>
+                  {p.clave && <span className="text-[11px] font-mono text-slate-500"> {p.clave}</span>}
+                  <p className="text-[11px] text-slate-500">
+                    {etiquetaEstatus(p.estatus)}
+                    {p.ubicacion && ` · ${p.ubicacion}`}
+                    {p.monto_inversion > 0 && ` · inversión ${mxn(p.monto_inversion)}`}
+                  </p>
+                  <p className="text-[11px] text-slate-500 tabular-nums">
+                    {p.total_proveedores} proveedor(es) · {p.total_obras} obra(s)
+                    {p.obras_descubiertas > 0 && (
+                      <span className="text-rose-600"> · {p.obras_descubiertas} sin fianza vigente</span>
+                    )}
+                    {p.monto_afianzado > 0 && (
+                      <span className="text-slate-400"> · {mxn(p.monto_afianzado)} afianzado</span>
+                    )}
+                  </p>
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                  <CumplimientoBadge estado={p.cumplimiento} />
+                  <button onClick={() => { setEditando(p); setCreando(false); }} className={btnSecondary} title="Editar proyecto">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => borrar(p)}
+                    className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
+                    title="Borrar proyecto"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Las obras que van adentro, por proveedor. */}
+              {suyas.length > 0 && (
+                <div className="mt-1.5 pl-3 border-l-2 border-slate-100 space-y-1">
+                  {suyas.map((o) => (
+                    <div key={o.id} className="flex flex-wrap items-center gap-2 text-[11px]">
+                      <Briefcase className="w-3 h-3 text-slate-300 shrink-0" />
+                      <span className="text-slate-600 font-medium">{nombreDe(o.client_id)}</span>
+                      <span className="text-slate-500">{o.nombre}</span>
+                      <span className="text-slate-400">{etiquetaEstatus(o.estatus)}</span>
+                      <CumplimientoBadge estado={o.estado_cobertura} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!suyas.length && (
+                <p className="mt-1 pl-3 text-[11px] text-slate-400">
+                  Sin obras adentro. Se meten desde la obra del proveedor, en
+                  "Proyecto del contratante".
+                </p>
+              )}
+
+              {/* Lo que este proyecto le aparta a cada proveedor. Es lo que el
+                  contratante también ve; la línea completa va abajo y solo aquí. */}
+              {p.consumo?.length > 0 && (
+                <div className="mt-2 pl-3 space-y-0.5">
+                  {p.consumo.map((c) => (
+                    <p key={`${c.proveedor_id}:${c.afianzadora_id}`} className="text-[11px] text-slate-500 tabular-nums">
+                      <CreditCard className="h-3 w-3 inline text-slate-300 mr-1" />
+                      {nombreDe(c.proveedor_id)} / {c.afianzadora_nombre}: aparta{' '}
+                      <span className="font-semibold text-slate-700">{mxn(c.comprometido)}</span>
+                      {' '}en {c.polizas} póliza(s)
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {!proyectos.length && !creando && (
+          <div className="px-4 py-8 text-center text-sm text-slate-400">
+            Este contratante no tiene proyectos todavía. Puede registrarlos él desde su
+            portal, o créaselos aquí para poder ligarle las obras de sus proveedores.
+          </div>
+        )}
+      </div>
+
+      {/* La línea de crédito de sus proveedores. ESTO NO LO VE EL CONTRATANTE:
+          es de la empresa del proveedor y es el dato con el que se le negocia
+          precio. Aquí sirve para contestar "¿le cabe otra fianza en esta obra?". */}
+      {lineasProveedores.length > 0 && (
+        <div className="border-t border-slate-200">
+          <div className="px-4 py-2 bg-slate-50/60 flex items-center gap-2">
+            <CreditCard className="w-3.5 h-3.5 text-slate-500" />
+            <p className="text-[11px] font-medium text-slate-600">
+              Crédito afianzable de sus proveedores
+              <span className="font-normal text-slate-400">
+                {' '}· es de la empresa, no del proyecto. El contratante NO ve esta tabla.
+              </span>
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50/60 text-slate-500 uppercase tracking-wider text-[10px]">
+                <tr>
+                  <th className="text-left px-3 py-2">Proveedor</th>
+                  <th className="text-left px-3 py-2">Afianzadora</th>
+                  <th className="text-right px-3 py-2">Línea autorizada</th>
+                  <th className="text-right px-3 py-2">Comprometido (todas sus obras)</th>
+                  <th className="text-right px-3 py-2">Disponible</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {lineasProveedores.map((l) => (
+                  <tr key={`${l.proveedor_id}:${l.afianzadora_id}`} className="hover:bg-slate-50/40">
+                    <td className="px-3 py-1.5 text-slate-700 font-medium">{nombreDe(l.proveedor_id)}</td>
+                    <td className="px-3 py-1.5 text-slate-600">{l.afianzadora_nombre}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{mxn(l.linea_credito)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxn(l.comprometido_total)}</td>
+                    <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${
+                      l.disponible < 0 ? 'text-rose-600' : 'text-emerald-700'
+                    }`}>
+                      {mxn(l.disponible)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// El formulario del proyecto de un contratante, desde el panel. Los mismos
+// campos que el del portal: es la misma tabla y el mismo servicio.
+function FormProyectoContratante({ inicial, onSubmit, onCancel }) {
+  const [f, setF] = useState({
+    nombre: inicial?.nombre || '',
+    clave: inicial?.clave || '',
+    ubicacion: inicial?.ubicacion || '',
+    monto_inversion: inicial?.monto_inversion ?? 0,
+    fecha_inicio: inicial?.fecha_inicio || '',
+    fecha_termino: inicial?.fecha_termino || '',
+    estatus: inicial?.estatus || 'en_proceso',
+    notas: inicial?.notas || '',
+  });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  async function guardar() {
+    setError('');
+    if (!f.nombre.trim()) return setError('El nombre del proyecto es obligatorio.');
+    setBusy(true);
+    try {
+      await onSubmit(f);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="border-b border-slate-200 bg-indigo-50/30 px-4 py-3">
+      <p className="text-xs font-medium text-slate-600 mb-2">
+        {inicial ? 'Editar proyecto del contratante' : 'Nuevo proyecto del contratante'}
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <div className="md:col-span-2">
+          <label className="text-[11px] text-slate-500 mb-1 block">Nombre<Req /></label>
+          <input value={f.nombre} onChange={set('nombre')} placeholder="Torre Delta Poniente" className={inputCls} />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Clave</label>
+          <input value={f.clave} onChange={set('clave')} placeholder="TDP-01" className={inputCls} />
+        </div>
+        <div className="md:col-span-2">
+          <label className="text-[11px] text-slate-500 mb-1 block">Ubicación</label>
+          <input value={f.ubicacion} onChange={set('ubicacion')} className={inputCls} />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Estatus</label>
+          <select value={f.estatus} onChange={set('estatus')} className={inputCls}>
+            {ESTATUS_PROYECTO.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Monto de inversión</label>
+          <InputPesos
+            valor={f.monto_inversion}
+            onChange={(centavos) => setF((s) => ({ ...s, monto_inversion: centavos }))}
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Fecha de inicio</label>
+          <input type="date" value={f.fecha_inicio} onChange={set('fecha_inicio')} className={inputCls} />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Fecha de término</label>
+          <input type="date" value={f.fecha_termino} onChange={set('fecha_termino')} className={inputCls} />
+        </div>
+        <div className="md:col-span-3">
+          <label className="text-[11px] text-slate-500 mb-1 block">Notas</label>
+          <input value={f.notas} onChange={set('notas')} className={inputCls} />
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+      <div className="flex gap-2 mt-3">
+        <button onClick={guardar} disabled={busy} className={btnPrimary}>
+          <Save className="w-4 h-4" /> {busy ? 'Guardando…' : 'Guardar proyecto'}
+        </button>
+        <button onClick={onCancel} className={btnSecondary}><X className="h-3.5 w-3.5" /> Cancelar</button>
+      </div>
+    </div>
   );
 }
 
@@ -2157,6 +2470,9 @@ function Proyecto({
               <p className="text-[11px] mt-0.5 inline-flex items-center gap-1 text-sky-700">
                 <Link2 className="h-3 w-3" />
                 Las ve <span className="font-medium">{p.contratante_nombre}</span>
+                {p.desarrollo_nombre
+                  ? <span className="text-sky-500"> · en «{p.desarrollo_nombre}»</span>
+                  : <span className="text-amber-600" title="El contratante la ve, pero le sale suelta: no está dentro de ninguno de sus proyectos."> · sin agrupar</span>}
               </p>
             )}
           </button>
@@ -2525,7 +2841,23 @@ function FormProyecto({
     // poder DESLIGAR una obra: el servidor distingue "no vino el campo" de
     // "vino vacío" (ver camposAActualizar en routes/admin.js).
     contratante_id: inicial?.contratante_id ?? '',
+    // Y dentro de QUÉ proyecto de ese contratante va. Es agrupación, no permiso:
+    // el servidor deriva el contratante del proyecto cuando viene, así que las
+    // dos columnas no pueden discrepar.
+    desarrollo_id: inicial?.desarrollo_id ?? '',
   });
+  // Los proyectos del contratante elegido. Se piden al elegirlo porque son de
+  // él: no hay una lista global que sirva.
+  const [proyectosDelContratante, setProyectosDelContratante] = useState([]);
+
+  useEffect(() => {
+    if (!f.contratante_id) { setProyectosDelContratante([]); return; }
+    let vigente = true;
+    api.get(`/admin/clientes/${f.contratante_id}/proyectos`)
+      .then((d) => { if (vigente) setProyectosDelContratante(d.proyectos || []); })
+      .catch(() => { if (vigente) setProyectosDelContratante([]); });
+    return () => { vigente = false; };
+  }, [f.contratante_id]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -2579,7 +2911,14 @@ function FormProyecto({
             <>
               <select
                 value={f.contratante_id ?? ''}
-                onChange={(e) => setF((s) => ({ ...s, contratante_id: e.target.value }))}
+                // Al cambiar de contratante se limpia el proyecto: un desarrollo
+                // del contratante anterior no vale para el nuevo, y el select se
+                // esconde al vaciar "Para" pero el estado sobrevivía — así el
+                // formulario mandaba el desarrollo viejo y el servidor volvía a
+                // derivar de él el contratante que se quería quitar.
+                onChange={(e) => setF((s) => ({
+                  ...s, contratante_id: e.target.value, desarrollo_id: '',
+                }))}
                 className={inputCls}
                 disabled={!contratantes.length}
               >
@@ -2605,6 +2944,34 @@ function FormProyecto({
             </p>
           )}
         </div>
+        {/* En qué proyecto del contratante va esta obra. Es lo que le arma al
+            desarrollador la torre completa en un lugar; sin esto sus obras le
+            salen sueltas, una por proveedor. */}
+        {puedeLigarContratante && f.contratante_id && (
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">
+              Proyecto del contratante
+            </label>
+            <select
+              value={f.desarrollo_id ?? ''}
+              onChange={(e) => setF((s) => ({ ...s, desarrollo_id: e.target.value }))}
+              className={inputCls}
+              disabled={!proyectosDelContratante.length}
+            >
+              <option value="">Sin agrupar en ningún proyecto</option>
+              {proyectosDelContratante.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nombre}{p.clave ? ` (${p.clave})` : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-400 mt-1">
+              {proyectosDelContratante.length
+                ? 'La obra aparece agrupada dentro de ese proyecto en el portal del contratante.'
+                : 'Ese contratante todavía no tiene proyectos. Puedes crearle uno en su detalle.'}
+            </p>
+          </div>
+        )}
         <div>
           <label className="text-[11px] text-slate-500 mb-1 block">Monto del contrato</label>
           <InputPesos

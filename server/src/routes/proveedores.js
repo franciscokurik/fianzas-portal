@@ -15,9 +15,13 @@ import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth, requireContratante } from '../auth/middleware.js';
 import {
-  exigirProveedor, exigirObraDelContratante, urlDeDocumentoParaContratante,
+  exigirProveedor, exigirObraDelContratante, exigirDesarrollo,
+  urlDeDocumentoParaContratante,
 } from '../lib/permisos.js';
 import { panoramaDelContratante } from '../services/proveedores.js';
+import {
+  crearDesarrollo, actualizarDesarrollo, eliminarDesarrollo,
+} from '../services/desarrollos.js';
 import { adoptarArchivo } from '../services/subidas.js';
 import { borrarArchivo } from '../lib/upload.js';
 import {
@@ -61,6 +65,70 @@ router.get('/', requireAuth, requireContratante, async (req, res) => {
   const { proveedores, metricas } = await panoramaDelContratante(contratanteId);
 
   res.json({ razon_social: empresa.razon_social, metricas, proveedores });
+});
+
+// --- Los PROYECTOS del contratante (sus desarrollos) ---
+//
+// Esto es lo único que el contratante crea y edita en el portal. Es suyo: el
+// desarrollo completo, con el que agrupa a los proveedores que van adentro.
+//
+// Lo que NO puede hacer es asignarse proveedores: eso lo hace Fortex, porque
+// ligarle la obra de una empresa a su proyecto le abre las pólizas de esa
+// empresa y no se deshace.
+
+// GET /api/proveedores/proyectos -> sus proyectos con el rollup de cada uno
+router.get('/proyectos', requireAuth, requireContratante, async (req, res) => {
+  const { proyectos, obrasSinProyecto, metricas } = await panoramaDelContratante(req.user.client_id);
+  res.json({
+    proyectos,
+    // Las obras que Fortex ya le ligó pero que todavía no están dentro de
+    // ninguno de sus proyectos. Se dicen para que no se pierdan de vista.
+    obras_sin_proyecto: paraElFront(obrasSinProyecto),
+    metricas,
+  });
+});
+
+// POST /api/proveedores/proyectos -> registra un proyecto
+router.post('/proyectos', requireAuth, requireContratante, async (req, res) => {
+  const fila = await crearDesarrollo(req.user.client_id, req.body || {});
+  res.json({ ok: true, id: fila.id });
+});
+
+// PUT /api/proveedores/proyectos/:id
+router.put('/proyectos/:id', requireAuth, requireContratante, async (req, res) => {
+  const id = await exigirDesarrollo(req.user.client_id, req.params.id);
+  await actualizarDesarrollo(id, req.body || {});
+  res.json({ ok: true });
+});
+
+// DELETE /api/proveedores/proyectos/:id
+//
+// Se niega mientras haya obras adentro. Borrarlo con obras las dejaría sueltas
+// (desarrollo_id es ON DELETE SET NULL) y el contratante perdería de vista sus
+// propios documentos por obra sin entender por qué. Primero se saca la obra,
+// y eso lo hace Fortex.
+router.delete('/proyectos/:id', requireAuth, requireContratante, async (req, res) => {
+  const id = await exigirDesarrollo(req.user.client_id, req.params.id);
+  await eliminarDesarrollo(id, req.user.client_id);
+  res.json({ ok: true });
+});
+
+// GET /api/proveedores/proyectos/:id -> el proyecto con todo lo que cuelga
+router.get('/proyectos/:id', requireAuth, requireContratante, async (req, res) => {
+  const contratanteId = req.user.client_id;
+  const id = await exigirDesarrollo(contratanteId, req.params.id);
+
+  const { proyectos, obras, proveedores } = await panoramaDelContratante(contratanteId);
+  const proyecto = proyectos.find((p) => p.id === id);
+  const suyas = obras.filter((o) => o.desarrollo_id === id);
+
+  // Los proveedores que de verdad tienen obra en ESTE proyecto, con su ficha del
+  // padrón. Los demás no salen: el proyecto no es el padrón completo.
+  const asignados = proveedores
+    .filter((p) => suyas.some((o) => o.client_id === p.id))
+    .map((p) => ({ ...p, obras: paraElFront(suyas.filter((o) => o.client_id === p.id)) }));
+
+  res.json({ proyecto, proveedores: asignados });
 });
 
 // GET /api/proveedores/:id -> las obras que ese proveedor ejecuta PARA MÍ,

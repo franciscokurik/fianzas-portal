@@ -95,7 +95,8 @@ fianzas-portal/
   client/          App React (Vite)
     src/
       pages/       Login, Dashboard, Proveedores, Admin
-      components/   MisFianzas, Documentos
+      components/   MisFianzas, Documentos,
+                    ProyectosContratante, PadronContratante, ObraContratante
 ```
 
 ## Cómo correr
@@ -203,12 +204,57 @@ Eso es `clients.tipo`, y son dos negocios, no dos niveles de permiso:
 | Compra fianzas | ✅ | ❌ |
 | Obras propias, pólizas, líneas de crédito, expediente | ✅ | ❌ (el servidor las rechaza) |
 | Padrón de proveedores | ❌ | ✅ |
+| Registra proyectos (desarrollos) | ❌ (captura obras) | ✅ |
 | Sube archivos | su expediente y su papelería | solo su carpeta por obra (lo que le entregó el proveedor) |
-| Al entrar ve | "Mis fianzas" | "Mis proveedores" |
+| Al entrar ve | "Mis fianzas" | "Mis proyectos" y "Proveedores" |
 
 Va como una columna sobre la misma tabla, y no como una tabla aparte, porque un
 contratante tiene la **misma ficha** que un fiado (razón social, RFC, teléfono,
 vendedor titular) y sus accesos se dan igual. Lo único que cambia es qué ve.
+
+### Tres niveles, y cada uno es de alguien distinto
+
+Es la parte del modelo que más conviene tener clara antes de tocar nada:
+
+| | tabla | de quién es | quién lo captura |
+|---|---|---|---|
+| **Desarrollo** — la torre, el fraccionamiento | `desarrollos` | del **contratante** | él desde su portal, o Fortex por él |
+| **Obra / contrato** — lo que le toca a un proveedor | `proyectos` | del **proveedor** | Fortex |
+| **Fianza** | `fianzas` | del **proveedor** | Fortex |
+
+Y son tablas distintas porque son cosas distintas: una fianza la presenta **una**
+empresa por **un** contrato, siempre. El desarrollo es el nivel de arriba, el que
+le faltaba al desarrollador para ver la torre completa en un lugar en vez de sus
+obras sueltas, una por proveedor.
+
+Una obra se mete en un desarrollo con `proyectos.desarrollo_id`. Eso es
+**agrupación, no permiso**: lo que autoriza sigue siendo `contratante_id`, la
+única columna que aparece en el alcance de `lib/permisos.js`.
+
+Las dos columnas y no una, a propósito. Si el alcance dependiera del desarrollo
+habría que rehacer y volver a probar toda la maquinaria de privacidad, y una obra
+ligada a un contratante que todavía no tiene desarrollo dejaría de verse. Y para
+que no puedan discrepar, **`contratante_id` se deriva del desarrollo** cuando hay
+uno: el servidor lo saca de ahí y no le cree al body, aunque venga otro
+(`resolverDesarrollo` en `routes/admin.js`, con su prueba).
+
+De ahí salen dos reglas que parecen detalles y no lo son:
+
+- **Sacar una obra del desarrollo NO la desliga del contratante.** Son dos cosas:
+  deja de estar agrupada, se sigue viendo. Aparece en "obras que todavía no están
+  en ningún proyecto", porque desaparecerla se leería como que se perdió.
+- **Desligarla del contratante SÍ la saca del desarrollo** —y cambiarla a otro
+  contratante, también. Si no, quedaría dentro del proyecto de alguien que ya no
+  la alcanza: la obra contaría en las métricas de uno y aparecería en el proyecto
+  del otro, que es justo lo que este par de columnas existe para evitar.
+- **Un cuerpo que se contradice se rechaza con 400, no se deriva.** Si la
+  petición trae a la vez un desarrollo y un contratante que no es su dueño, la
+  ruta contesta "sácala del proyecto antes de cambiarle el contratante". Derivar
+  en silencio hacía algo mucho peor que confundir: "desliga esta obra" contestaba
+  **200 sin desligar nada**, porque el desarrollo volvía a poner al contratante
+  de antes. Una revocación que falla callada es lo peor que puede hacer una ruta
+  de permisos, y por eso hay guarda en los dos lados —el formulario limpia el
+  proyecto al cambiar de contratante, y el servidor rechaza el par imposible.
 
 ### Un proveedor es un fiado normal
 
@@ -308,6 +354,29 @@ porque ahí está su venta. Puede hacerlo sin riesgo porque el panel le muestra
 **exactamente la misma proyección** que ve el contratante —la misma consulta
 alimenta las dos pantallas—, no el expediente completo de esos proveedores.
 
+### El crédito afianzable dentro del proyecto
+
+La afianzadora le autoriza la línea a la **empresa**, no a la obra: Cimentaciones
+Vega tiene $5M con Aserta y ya. Así que no hay líneas por proyecto, y es
+deliberado — con una línea por proyecto, los mismos $5M aparecerían disponibles en
+dos obras a la vez y el portal reportaría capacidad que no existe.
+
+Lo que sí se dice es **cuánto le está apartando este proyecto**:
+
+- El **contratante** ve, por proveedor y por afianzadora, lo comprometido por su
+  proyecto. Y nada más: ni el total autorizado ni el disponible. Eso es de la
+  empresa del proveedor y es el dato con el que se le negocia precio.
+- **Fortex** ve además la línea autorizada, lo comprometido en *todas* sus obras
+  (para cualquiera, no solo para este contratante) y lo que queda. Es lo que
+  contesta "¿le cabe otra fianza en esta obra?".
+
+Vale la pena notar que lo del contratante **no es información nueva**: es la suma
+de los montos afianzados de las pólizas que ya ve una por una. Lo que aporta es no
+tener que sacar la calculadora — y por eso ese número se pudo prender sin abrirle
+nada. El de Fortex sí es información del proveedor, y por eso se queda en el panel
+(`lineasDeLosProveedores` en `services/proveedores.js`, separada del panorama a
+propósito).
+
 ### La carpeta de la obra: los dos lados pueden subir
 
 Al picarle a un proveedor en el padrón se abre **su pantalla**, con las obras que
@@ -393,8 +462,12 @@ personas comparten la información del fiado. `norte@demo.mx` entra también con
 su RFC (`IAN980720XYZ`) porque su empresa tiene una sola cuenta. `carlos@fortex.mx`
 solo ve a Ingeniería del Norte: sirve para comprobar el alcance del vendedor.
 
-`delta@demo.mx` es el **contratante**. Entra a otra pantalla y su padrón trae los
-tres casos de una vez: Cimentaciones Vega con fianza vigente, Instalaciones
+`delta@demo.mx` es el **contratante**. Entra a otra pantalla, con **dos proyectos
+propios**: *Torre Delta Poniente*, que agrupa a sus tres proveedores, y *Plaza
+Delta Sur*, recién capturado y todavía sin nadie asignado — sale como "Sin obra",
+que no es incumplimiento sino captura que falta.
+
+Dentro de la torre, el padrón trae los tres casos de una vez: Cimentaciones Vega con fianza vigente, Instalaciones
 Herrera con una que vence en veinte días, y Acabados Solís con una obra en
 proceso y **ninguna** fianza — el renglón que el desarrollador quiere cazar.
 Acabados Solís no tiene cuenta a propósito: se ve que un proveedor puede vivir en
@@ -467,6 +540,9 @@ Para automatizar diariamente, programa un cron que llame a ese endpoint o a `cor
   padrón no diga "sin registro" de quien sí cumplió.
 - **Qué fianza exige cada obra** (`obra_requisitos`): hoy una obra a la que le
   falta el anticipo pero tiene el cumplimiento sale en verde.
+- Que el contratante pueda **pedirle a Fortex que asigne** un proveedor desde su
+  portal (hoy se lo dice por fuera). Sería una solicitud como `papeleria_requests`,
+  no un alta directa: ligar una obra abre las pólizas de otra empresa.
 - Ayudar a ligar obras viejas a su contratante a partir del campo de texto
   `beneficiario` (proponiendo las coincidencias para que un operador las
   confirme, nunca aplicándolas solas: ligar de más abre información).

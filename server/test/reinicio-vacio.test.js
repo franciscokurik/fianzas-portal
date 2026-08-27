@@ -54,8 +54,11 @@ before(async () => {
     INSERT INTO clients (razon_social, rfc, tipo)
       VALUES ('Desarrollos Delta', 'DDE150610QR3', 'contratante');
     INSERT INTO client_proveedores (contratante_id, proveedor_id) VALUES (3, 2);
-    INSERT INTO proyectos (client_id, contratante_id, nombre, monto_contrato)
-      VALUES (2, 3, 'Obra para Delta', 50000000);
+    -- Un proyecto del contratante, con la obra del proveedor adentro: es la
+    -- combinación completa, y 'desarrollos' cuelga de clients por CASCADE.
+    INSERT INTO desarrollos (contratante_id, nombre) VALUES (3, 'Torre Delta');
+    INSERT INTO proyectos (client_id, contratante_id, desarrollo_id, nombre, monto_contrato)
+      VALUES (2, 3, 1, 'Obra para Delta', 50000000);
   `);
 });
 
@@ -63,8 +66,8 @@ test('borra los clientes y todo lo que cuelga de ellos', async () => {
   const resumen = await reiniciarVacio();
 
   assert.deepEqual(resumen, {
-    clientes: 2, contratantes: 1, padron: 1, proyectos: 2, fianzas: 1,
-    admins_conservados: 1,
+    clientes: 2, contratantes: 1, padron: 1, proyectos: 2,
+    proyectos_de_contratante: 1, fianzas: 1, admins_conservados: 1,
   });
 
   assert.equal(await contar('proyectos'), 0);
@@ -73,6 +76,7 @@ test('borra los clientes y todo lo que cuelga de ellos', async () => {
   assert.equal(await contar('papeleria_requests'), 0, 'quedó papelería huérfana');
   assert.equal(await contar('notifications'), 0, 'quedaron notificaciones huérfanas');
   assert.equal(await contar('client_proveedores'), 0, 'quedó padrón huérfano');
+  assert.equal(await contar('desarrollos'), 0, 'quedaron proyectos de contratante huérfanos');
   assert.equal(await contar('clients'), 0, 'las empresas debieron irse todas, contratantes incluidos');
 });
 
@@ -103,8 +107,8 @@ test('conserva afianzadoras y catálogos', async () => {
 test('correrlo dos veces no falla ni borra de más', async () => {
   const resumen = await reiniciarVacio();
   assert.deepEqual(resumen, {
-    clientes: 0, contratantes: 0, padron: 0, proyectos: 0, fianzas: 0,
-    admins_conservados: 1,
+    clientes: 0, contratantes: 0, padron: 0, proyectos: 0,
+    proyectos_de_contratante: 0, fianzas: 0, admins_conservados: 1,
   });
   assert.equal(await contar('clients'), 0);
 });

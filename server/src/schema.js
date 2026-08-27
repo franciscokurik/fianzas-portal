@@ -112,6 +112,37 @@ ALTER TABLE client_proveedores ADD COLUMN IF NOT EXISTS activo INTEGER NOT NULL 
 CREATE INDEX IF NOT EXISTS idx_proveedores_contratante ON client_proveedores(contratante_id);
 CREATE INDEX IF NOT EXISTS idx_proveedores_proveedor ON client_proveedores(proveedor_id);
 
+-- El PROYECTO DEL CONTRATANTE: el desarrollo completo (una torre, un
+-- fraccionamiento), con varios proveedores adentro.
+--
+-- Es otra cosa que 'proyectos', y por eso es otra tabla:
+--   desarrollos -> lo que el DESARROLLADOR contrata y vigila. Es de él, y lo
+--                  registra él desde su portal.
+--   proyectos   -> el contrato de UN proveedor, que es de ese proveedor. Toda
+--                  fianza cuelga de uno de estos, porque una fianza siempre la
+--                  presenta una sola empresa por un solo contrato.
+--
+-- Sin este nivel, el desarrollador tenía sus obras sueltas —una por proveedor—
+-- y ningún lugar donde ver la torre completa. Y es lo único que le pidió al
+-- portal: tener todo en un mismo lugar.
+--
+-- El estatus usa el MISMO vocabulario que proyectos, para que la etiqueta se
+-- pinte con la misma función en las dos pantallas.
+CREATE TABLE IF NOT EXISTS desarrollos (
+  id              SERIAL PRIMARY KEY,
+  contratante_id  INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  nombre          TEXT    NOT NULL,
+  clave           TEXT,
+  ubicacion       TEXT,
+  monto_inversion BIGINT  NOT NULL DEFAULT 0,
+  fecha_inicio    TEXT,
+  fecha_termino   TEXT,
+  estatus         TEXT    NOT NULL DEFAULT 'en_proceso',
+  notas           TEXT,
+  created_at      TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
+);
+CREATE INDEX IF NOT EXISTS idx_desarrollos_contratante ON desarrollos(contratante_id);
+
 -- Enlaces para reponer la contraseña olvidada.
 --
 -- Se guarda el HASH del token, no el token: quien pueda leer esta tabla (un
@@ -185,6 +216,22 @@ CREATE INDEX IF NOT EXISTS idx_proyectos_client ON proyectos(client_id);
 -- se queda (es suya); nada más deja de estar ligada.
 ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS contratante_id INTEGER REFERENCES clients(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_proyectos_contratante ON proyectos(contratante_id);
+
+-- Dentro de QUÉ desarrollo va este contrato. Es AGRUPACIÓN, no permiso: quien
+-- decide lo que el contratante alcanza sigue siendo contratante_id, y ese sigue
+-- siendo el único que aparece en el alcance de lib/permisos.js.
+--
+-- Por eso las dos columnas y no una. Si el alcance dependiera del desarrollo,
+-- habría que rehacer y volver a probar toda la maquinaria de privacidad, y una
+-- obra ligada a un contratante que todavía no tiene desarrollo dejaría de
+-- verse. Aquí contratante_id se DERIVA del desarrollo cuando hay uno
+-- (routes/admin.js lo fuerza y no le cree al body), así que no pueden discrepar.
+--
+-- ON DELETE SET NULL: si el desarrollador borra su proyecto, el contrato del
+-- proveedor se queda —es suyo, con sus pólizas— y nada más sale de la
+-- agrupación.
+ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS desarrollo_id INTEGER REFERENCES desarrollos(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_proyectos_desarrollo ON proyectos(desarrollo_id);
 
 -- El tipo lo manda tipos_fianza. En bases viejas todavía existe la columna de
 -- texto libre 'tipo_fianza'; la migración 003 la tira una vez respaldada.

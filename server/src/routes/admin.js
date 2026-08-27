@@ -15,13 +15,16 @@ import {
 } from '../services/documentos-cliente.js';
 import {
   exigirCliente, exigirEntidad, filtroCartera, ALCANCE, JOIN_PADRON,
-  exigirObraDelContratante,
+  exigirObraDelContratante, esVendedor,
 } from '../lib/permisos.js';
 import {
   crearUsuario, actualizarUsuario, desactivarUsuario, eliminarUsuario, DOMINIO_INTERNO,
 } from '../services/usuarios.js';
 import { eliminarCliente } from '../services/clientes.js';
-import { panoramaDelContratante } from '../services/proveedores.js';
+import { panoramaDelContratante, lineasDeLosProveedores } from '../services/proveedores.js';
+import {
+  crearDesarrollo, actualizarDesarrollo, eliminarDesarrollo, desarrollosDe,
+} from '../services/desarrollos.js';
 
 const router = Router();
 
@@ -283,6 +286,64 @@ router.put('/clientes/:id/vendedor', soloOperador, async (req, res) => {
 
   await db.prepare('UPDATE clients SET vendedor_id = ? WHERE id = ?')
     .run(vendedorId, Number(req.params.id));
+  res.json({ ok: true });
+});
+
+// --- Los PROYECTOS de un contratante, desde el panel ---
+//
+// El contratante los registra desde su portal, y Fortex por la MISMA puerta
+// (services/desarrollos.js). Hacen falta las dos: al dar de alta la cuenta, el
+// operador captura el desarrollo antes de que el desarrollador entre por primera
+// vez, y sin esto no habría a qué ligarle las obras de sus proveedores.
+//
+// Va con exigirCliente y no soloOperador: es captura en nombre del cliente, como
+// el expediente, y al vendedor lo acota su cartera.
+
+// GET /api/admin/clientes/:id/proyectos -> los proyectos de ese contratante
+router.get('/clientes/:id/proyectos', async (req, res) => {
+  await exigirCliente(req.user, req.params.id);
+  res.json({ proyectos: await desarrollosDe(req.params.id) });
+});
+
+router.post('/clientes/:id/proyectos', async (req, res) => {
+  const contratanteId = Number(req.params.id);
+  await exigirCliente(req.user, contratanteId);
+  if ((await tipoDe(contratanteId)) !== 'contratante') {
+    return res.status(400).json({
+      error: 'Solo una cuenta de tipo contratante tiene proyectos propios. Un fiado captura obras.',
+    });
+  }
+
+  const fila = await crearDesarrollo(contratanteId, req.body || {});
+  res.json({ ok: true, id: fila.id });
+});
+
+// El :proyectoId se comprueba contra el contratante del path, no solo por id:
+// si no, con el id de un proyecto ajeno se podría editar el de otro cliente.
+async function exigirProyectoDelContratante(contratanteId, proyectoId) {
+  const fila = await db
+    .prepare('SELECT id FROM desarrollos WHERE id = ? AND contratante_id = ?')
+    .get(Number(proyectoId), Number(contratanteId));
+  return Boolean(fila);
+}
+
+router.put('/clientes/:id/proyectos/:proyectoId', async (req, res) => {
+  await exigirCliente(req.user, req.params.id);
+  if (!(await exigirProyectoDelContratante(req.params.id, req.params.proyectoId))) {
+    return res.status(404).json({ error: 'Ese proyecto no es de este cliente' });
+  }
+
+  await actualizarDesarrollo(req.params.proyectoId, req.body || {});
+  res.json({ ok: true });
+});
+
+router.delete('/clientes/:id/proyectos/:proyectoId', async (req, res) => {
+  await exigirCliente(req.user, req.params.id);
+  if (!(await exigirProyectoDelContratante(req.params.id, req.params.proyectoId))) {
+    return res.status(404).json({ error: 'Ese proyecto no es de este cliente' });
+  }
+
+  await eliminarDesarrollo(req.params.proyectoId, req.params.id);
   res.json({ ok: true });
 });
 
@@ -602,7 +663,24 @@ router.delete('/tipos-fianza/:id', soloOperador, async (req, res) => {
 // --- Proyectos (obras) ---
 
 const CAMPOS_PROYECTO = ['nombre', 'numero_contrato', 'beneficiario', 'monto_contrato',
-                         'fecha_inicio', 'fecha_termino', 'estatus', 'notas', 'contratante_id'];
+                         'fecha_inicio', 'fecha_termino', 'estatus', 'notas',
+                         'contratante_id', 'desarrollo_id'];
+
+// El DESARROLLO manda sobre el contratante. Si la obra se mete en un proyecto de
+// un contratante, el contratante sale de ahí: no se le cree al body.
+//
+// Con dos columnas que dicen lo mismo —contratante_id y desarrollo_id— la única
+// forma de que no discrepen es que una sea la fuente y la otra se derive. Y la
+// que autoriza sigue siendo contratante_id, que es la que ve lib/permisos.js.
+//
+// Devuelve { desarrollo_id, contratante_id } o { error }.
+async function resolverDesarrollo(desarrolloId) {
+  const d = await db
+    .prepare('SELECT id, contratante_id FROM desarrollos WHERE id = ?')
+    .get(Number(desarrolloId));
+  if (!d) return { error: 'Ese proyecto de contratante no existe' };
+  return { desarrollo_id: d.id, contratante_id: d.contratante_id };
+}
 
 // Ligar la obra a un contratante es lo que le abre a ESA OTRA EMPRESA las
 // pólizas de esta obra. Por eso se comprueban tres cosas y no una:
@@ -659,7 +737,7 @@ const AVISO_SUSPENDIDO = 'La obra quedó ligada, pero ese proveedor está SUSPEN
   + 'del contratante, así que el contratante todavía no la ve. Reactívalo en su padrón.';
 
 router.post('/proyectos', async (req, res) => {
-  const { client_id, contratante_id } = req.body || {};
+  const { client_id, desarrollo_id } = req.body || {};
   const nombre = String(req.body?.nombre || '').trim();
   if (!client_id || !nombre) {
     return res.status(400).json({ error: 'client_id y nombre son obligatorios' });
@@ -667,24 +745,46 @@ router.post('/proyectos', async (req, res) => {
   await exigirCliente(req.user, client_id);
   await exigirFiado(client_id, 'obras');
 
-  if (contratante_id && !puedeLigarContratante(req.user)) {
+  // Si viene el proyecto del contratante, de ahí sale el contratante.
+  let contratanteId = req.body?.contratante_id || null;
+  let desarrolloId = null;
+  if (desarrollo_id) {
+    const r = await resolverDesarrollo(desarrollo_id);
+    if (r.error) return res.status(400).json({ error: r.error });
+
+    // Igual que en el PUT: si el body dice a la vez un desarrollo y un
+    // contratante que no es su dueño, se rechaza. Derivar en silencio deja al
+    // operador creyendo que capturó una cosa y guardó otra.
+    if (contratanteId && Number(contratanteId) !== r.contratante_id) {
+      return res.status(400).json({
+        error: 'El proyecto que elegiste es de otro contratante. Elige el proyecto del '
+             + 'contratante correcto, o déjalo sin agrupar.',
+      });
+    }
+
+    desarrolloId = r.desarrollo_id;
+    contratanteId = r.contratante_id;
+  }
+
+  if (contratanteId && !puedeLigarContratante(req.user)) {
     return res.status(403).json({ error: NO_PUEDE_LIGAR });
   }
-  const errContratante = await validarContratante(contratante_id, client_id);
+  const errContratante = await validarContratante(contratanteId, client_id);
   if (errContratante) return res.status(400).json({ error: errContratante });
 
   const row = await db.prepare(
     `INSERT INTO proyectos (client_id, nombre, numero_contrato, beneficiario, monto_contrato,
-                            fecha_inicio, fecha_termino, estatus, notas, contratante_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+                            fecha_inicio, fecha_termino, estatus, notas,
+                            contratante_id, desarrollo_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
   ).get(Number(client_id), nombre,
         req.body.numero_contrato || null, req.body.beneficiario || null,
         centavos(req.body.monto_contrato),
         req.body.fecha_inicio || null, req.body.fecha_termino || null,
         req.body.estatus || 'en_proceso', req.body.notas || null,
-        contratante_id ? Number(contratante_id) : null);
+        contratanteId ? Number(contratanteId) : null, desarrolloId);
 
-  const aviso = await asegurarEnPadron(contratante_id, client_id);
+  const aviso = await asegurarEnPadron(contratanteId, client_id);
   res.json({ ok: true, id: row.id, aviso: aviso ? AVISO_SUSPENDIDO : null });
 });
 
@@ -694,6 +794,43 @@ router.put('/proyectos/:id', async (req, res) => {
 
   const body = { ...(req.body || {}) };
   if ('monto_contrato' in body) body.monto_contrato = centavos(body.monto_contrato);
+
+  // El desarrollo va PRIMERO porque, cuando viene, es el que fija el
+  // contratante: la guarda de abajo se aplica igual sobre el valor derivado.
+  //
+  // Vaciarlo saca la obra del proyecto pero NO la desliga del contratante: son
+  // dos cosas distintas y la segunda se pide aparte, vaciando "Para".
+  if ('desarrollo_id' in body) {
+    const pedido = body.desarrollo_id ? Number(body.desarrollo_id) : null;
+    if (pedido === null) {
+      body.desarrollo_id = null;
+    } else {
+      const r = await resolverDesarrollo(pedido);
+      if (r.error) return res.status(400).json({ error: r.error });
+
+      // Si el body ADEMÁS trae un contratante y no es el dueño de ese
+      // desarrollo, se rechaza en vez de derivar en silencio.
+      //
+      // Derivando, "desliga esta obra" acababa en 200 SIN DESLIGAR NADA: el
+      // formulario mandaba el desarrollo viejo junto con el contratante vacío,
+      // el desarrollo reponía al contratante de antes, y el operador leía
+      // "Proyecto actualizado" mientras la otra empresa seguía viendo las
+      // pólizas. Una revocación que falla en silencio es lo peor que puede
+      // hacer esta ruta.
+      if ('contratante_id' in body) {
+        const pedidoContratante = body.contratante_id ? Number(body.contratante_id) : null;
+        if (pedidoContratante !== r.contratante_id) {
+          return res.status(400).json({
+            error: 'Esa obra está dentro de un proyecto de otro contratante. Sácala del '
+                 + 'proyecto —déjalo en "sin agrupar"— antes de cambiarle el contratante.',
+          });
+        }
+      }
+
+      body.desarrollo_id = r.desarrollo_id;
+      body.contratante_id = r.contratante_id;
+    }
+  }
 
   // Vacío significa "para nadie del portal": la obra se desliga y el
   // contratante deja de ver sus fianzas.
@@ -716,6 +853,13 @@ router.put('/proyectos/:id', async (req, res) => {
       const err = await validarContratante(pedido, clientId);
       if (err) return res.status(400).json({ error: err });
       body.contratante_id = pedido;
+      // Cambiar de contratante —o desligarla— saca la obra del desarrollo
+      // anterior, que era del contratante de antes. Si se quedara, las dos
+      // columnas discreparían, que es justo lo que este par existe para evitar:
+      // la obra contaría en las métricas de uno y aparecería en el proyecto de
+      // otro. Cuando la petición SÍ nombró un desarrollo, el bloque de arriba ya
+      // lo puso y ya comprobó que el contratante coincide.
+      if (!('desarrollo_id' in body)) body.desarrollo_id = null;
     }
   }
 
@@ -1251,7 +1395,20 @@ router.get('/clientes/:id/detalle', async (req, res) => {
   // proveedores pueden ser clientes de otro vendedor, y por aquí no se le
   // escapan ni las primas ni las líneas de crédito de nadie.
   if (cliente.tipo === 'contratante') {
-    const { proveedores, obras: obrasCrudas, metricas } = await panoramaDelContratante(id);
+    const {
+      proveedores, proyectos: susProyectos, obras: obrasCrudas, metricas,
+    } = await panoramaDelContratante(id);
+    // La línea de crédito de sus proveedores, con lo que llevan comprometido en
+    // TOTAL. Esto es solo para el panel: al contratante se le dice cuánto aparta
+    // su proyecto —que es la suma de las pólizas que ya ve— y no cuánto tiene
+    // autorizado su proveedor ni con quién.
+    //
+    // Y al VENDEDOR tampoco. Alcanzar a un contratante no puede volverse la
+    // puerta trasera a las líneas de crédito de sus proveedores, que pueden ser
+    // clientes de otro vendedor: por su detalle recibe un 403, y por aquí
+    // estaba entrando lo mismo. Peor todavía, el comprometido_total suma
+    // pólizas de obras que ese proveedor hace para OTROS contratantes.
+    const lineasProveedores = esVendedor(req.user) ? [] : await lineasDeLosProveedores(id);
     // Los documentos de su carpeta van con el nombre legible del tipo, igual que
     // en su portal: es la misma pantalla vista desde el otro lado.
     const obras = obrasCrudas.map((o) => ({
@@ -1277,7 +1434,11 @@ router.get('/clientes/:id/detalle', async (req, res) => {
 
     return res.json({
       cliente, usuarios, proveedores, suspendidos, obras, metricas,
-      lineas: [], proyectos: [], fianzas: [], documentos: [], papeleria: [],
+      // 'proyectos' aquí son SUS desarrollos, no obras propias: un contratante
+      // no ejecuta obra. El front lo distingue por cliente.tipo.
+      proyectos: susProyectos,
+      lineas_proveedores: lineasProveedores,
+      lineas: [], fianzas: [], documentos: [], papeleria: [],
     });
   }
 
@@ -1377,9 +1538,10 @@ router.get('/clientes/:id/detalle', async (req, res) => {
   // Se trae el nombre del contratante ligado: es lo que le dice al operador
   // "ojo, las pólizas de esta obra las está viendo Desarrollos Delta".
   const proyectosRows = await db.prepare(
-    `SELECT p.*, ct.razon_social AS contratante_nombre
+    `SELECT p.*, ct.razon_social AS contratante_nombre, de.nombre AS desarrollo_nombre
      FROM proyectos p
      LEFT JOIN clients ct ON ct.id = p.contratante_id
+     LEFT JOIN desarrollos de ON de.id = p.desarrollo_id
      WHERE p.client_id = ? ORDER BY p.estatus, p.nombre`
   ).all(id);
 

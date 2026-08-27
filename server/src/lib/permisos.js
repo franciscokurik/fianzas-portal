@@ -152,6 +152,22 @@ export async function exigirProveedor(contratanteId, proveedorId) {
   return fila;
 }
 
+// Que ese proyecto sea de este contratante.
+//
+// Aquí no hace falta el JOIN_PADRON: el desarrollo es SUYO —lo registró él— y no
+// depende de ningún proveedor. Es la única cosa del contratante que se autoriza
+// por propiedad directa y no por alcance.
+export async function exigirDesarrollo(contratanteId, desarrolloId) {
+  const id = idValido(desarrolloId);
+  if (id === null) throw negar('No existe ese proyecto', 404);
+
+  const fila = await db
+    .prepare('SELECT id FROM desarrollos WHERE id = ? AND contratante_id = ?')
+    .get(id, Number(contratanteId));
+  if (!fila) throw negar('No existe ese proyecto', 404);
+  return id;
+}
+
 // Que esa obra esté dentro del alcance del contratante. Es la puerta de todo lo
 // que se hace SOBRE una obra: subirle un archivo, listarlo, borrarlo.
 //

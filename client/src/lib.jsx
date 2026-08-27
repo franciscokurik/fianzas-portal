@@ -147,8 +147,10 @@ const CUMPLIMIENTO = {
   sin_fianza:   { label: 'Sin registro', cls: 'bg-rose-100 text-rose-700',
                   ayuda: 'No hay ninguna fianza registrada en Fortex para esta obra. '
                        + 'Puede que exista y se haya colocado con otro agente.' },
+  // Lo usan dos pantallas: un proveedor sin obras ligadas y un proyecto sin
+  // proveedores asignados. La ayuda tiene que ser cierta para las dos.
   sin_obra:     { label: 'Sin obra',     cls: 'bg-slate-100 text-slate-600',
-                  ayuda: 'Está en el padrón, pero todavía no se le ha ligado ninguna obra. '
+                  ayuda: 'Todavía no se le ha ligado ninguna obra. '
                        + 'No es un incumplimiento: falta la captura.' },
   // Distinto de 'sin_obra', y la diferencia importa: aquí la captura SÍ está
   // hecha, lo que pasa es que el trabajo terminó. Decirle "falta la captura"
