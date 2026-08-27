@@ -6,7 +6,7 @@
 // propias guardas.
 import { Router } from 'express';
 import { requireAuth } from '../auth/middleware.js';
-import { exigirCliente, tipoDeCliente } from '../lib/permisos.js';
+import { exigirCliente } from '../lib/permisos.js';
 import {
   firmarSubida, esFormatoPermitido, FORMATOS_PERMITIDOS, MAXIMO_MB,
 } from '../lib/upload.js';
@@ -25,14 +25,12 @@ router.post('/firma', requireAuth, async (req, res) => {
     if (req.user.client_id !== clientId) {
       return res.status(403).json({ error: 'No puedes subir archivos de otro cliente' });
     }
-    // Un contratante no tiene expediente ni papelería: no hay una sola ruta que
-    // acepte un archivo suyo. Si se le firmara la subida igual, podría llenar la
-    // cuota de Cloudinary con archivos que nada apunta y que nadie vería.
-    if ((await tipoDeCliente(clientId)) === 'contratante') {
-      return res.status(403).json({
-        error: 'Tu cuenta es de un contratante: aquí no se suben archivos.',
-      });
-    }
+    // El contratante SÍ sube —la fianza que le entregó su proveedor, su contrato
+    // con él— y la comprobación de arriba es justo la que hace que sea seguro:
+    // solo puede firmar para SU propio client_id, así que el archivo cae en su
+    // carpeta de Cloudinary y no en la del proveedor. Quien autoriza colgarlo de
+    // una obra concreta es la ruta que lo registra
+    // (POST /api/proveedores/obras/:id/documentos), con su propia guarda.
   } else {
     await exigirCliente(req.user, clientId);
   }

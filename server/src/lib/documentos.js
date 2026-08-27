@@ -19,6 +19,32 @@ export const TIPOS_DOC = {
   ],
 };
 
+// La carpeta del CONTRATANTE sobre una obra de su proveedor. Es una lista
+// aparte de TIPOS_DOC.proyecto a propósito, aunque las dos cuelguen de un
+// proyecto: son dos carpetas distintas sobre la misma obra y se distinguen por
+// el dueño del archivo (documentos.client_id).
+//
+//   TIPOS_DOC.proyecto            -> papeles del PROVEEDOR (contrato de obra,
+//                                    convenios, actas). El contratante no los ve.
+//   TIPOS_DOC_CONTRATANTE         -> lo que el contratante recibió o guarda de
+//                                    esa obra. El proveedor no los ve.
+//
+// 'fianza_presentada' es el que importa: es el PDF que el proveedor le entregó
+// al desarrollador. No es una póliza capturada —no suma en nada, no consume
+// línea, no es producción de Fortex—, es el papel que respalda que sí la
+// presentó, y le sirve a Fortex para capturarla después si la coloca.
+export const TIPOS_DOC_CONTRATANTE = [
+  { clave: 'fianza_presentada', nombre: 'Fianza presentada por el proveedor' },
+  { clave: 'contrato_proveedor', nombre: 'Contrato con el proveedor' },
+  { clave: 'otro_contratante', nombre: 'Otro documento' },
+];
+
+export const esTipoDeContratante = (tipoDoc) =>
+  TIPOS_DOC_CONTRATANTE.some((t) => t.clave === tipoDoc);
+
+export const nombreTipoDocContratante = (tipoDoc) =>
+  TIPOS_DOC_CONTRATANTE.find((t) => t.clave === tipoDoc)?.nombre ?? tipoDoc;
+
 export const ENTIDADES = Object.keys(TIPOS_DOC);
 
 export function esTipoValido(entidadTipo, tipoDoc) {

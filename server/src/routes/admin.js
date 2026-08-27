@@ -6,12 +6,16 @@ import { centavos } from '../lib/dinero.js';
 import { slugify } from '../lib/slug.js';
 import { borrarArchivo } from '../lib/upload.js';
 import { adoptarArchivo } from '../services/subidas.js';
-import { TIPOS_DOC, esTipoValido, agruparPorEntidad, deEntidad } from '../lib/documentos.js';
+import {
+  TIPOS_DOC, esTipoValido, agruparPorEntidad, deEntidad,
+  TIPOS_DOC_CONTRATANTE, esTipoDeContratante, nombreTipoDocContratante,
+} from '../lib/documentos.js';
 import {
   guardarDocumentoCliente, borrarDocumentoCliente, exigirTipoDocumento,
 } from '../services/documentos-cliente.js';
 import {
   exigirCliente, exigirEntidad, filtroCartera, ALCANCE, JOIN_PADRON,
+  exigirObraDelContratante,
 } from '../lib/permisos.js';
 import {
   crearUsuario, actualizarUsuario, desactivarUsuario, eliminarUsuario, DOMINIO_INTERNO,
@@ -735,9 +739,31 @@ router.delete('/proyectos/:id', async (req, res) => {
       error: `El proyecto tiene ${c} fianza(s). Reasígnalas a otro proyecto antes de eliminarlo.`,
     });
   }
+
+  // Borrar la obra se lleva TODOS los archivos que cuelgan de ella, y desde que
+  // el contratante tiene su carpeta ahí puede haber archivos de OTRA empresa.
+  // Esta ruta autoriza contra el dueño de la OBRA, así que sin esto era la
+  // puerta ancha por la que un vendedor destruía archivos de una cuenta que no
+  // alcanza — exactamente lo que DELETE /documentos/:id le niega con un 403.
+  //
+  // Se exige lo mismo por los dos caminos: hay que alcanzar a cada dueño de lo
+  // que se va. Para un admin u operador no cambia nada (alcanzan todo); al
+  // vendedor lo frena, que es el punto.
+  const ajenos = await db.prepare(
+    `SELECT d.client_id
+     FROM documentos d
+     WHERE d.entidad_tipo = 'proyecto' AND d.entidad_id = ?
+       AND d.client_id <> (SELECT client_id FROM proyectos WHERE id = ?)`
+  ).all(id, id);
+  for (const dueno of new Set(ajenos.map((a) => a.client_id))) {
+    await exigirCliente(req.user, dueno);
+  }
+
   await borrarDocumentosDe('proyecto', id);
   await db.prepare('DELETE FROM proyectos WHERE id = ?').run(id);
-  res.json({ ok: true });
+  // Se dice cuántos archivos de terceros se fueron: un {ok:true} pelón esconde
+  // que el borrado también vació la carpeta de un contratante.
+  res.json({ ok: true, archivos_de_terceros: ajenos.length });
 });
 
 // --- Fianzas (pólizas) ---
@@ -928,7 +954,12 @@ router.get('/recordatorios', async (req, res) => {
 
 // --- Documentos de proyectos y fianzas ---
 
-router.get('/tipos-documento', (req, res) => res.json({ tipos: TIPOS_DOC }));
+// Dos juegos: los de siempre (por entidad) y los de la carpeta del contratante,
+// que es otra carpeta sobre la misma obra y con otros tipos (ver lib/documentos.js).
+router.get('/tipos-documento', (req, res) => res.json({
+  tipos: TIPOS_DOC,
+  tipos_contratante: TIPOS_DOC_CONTRATANTE,
+}));
 
 // La tabla es polimórfica, así que no hay llave foránea que limpie sola:
 // al borrar la entidad hay que llevarse sus archivos a mano.
@@ -982,6 +1013,69 @@ router.post('/:entidadTipo(proyectos|fianzas)/:id/documentos', async (req, res) 
         archivo.nombre, archivo.bytes);
 
   res.json({ ok: true, id: row.id, url: archivo.url });
+});
+
+// POST /api/admin/clientes/:id/obras/:obraId/documentos
+//   :id = el CONTRATANTE (el dueño de la carpeta), :obraId = la obra del proveedor
+//
+// La otra mitad de lo que hace el contratante desde su portal: en la práctica el
+// proveedor le pasa la fianza en papel al desarrollador, o directo a Fortex, y
+// tiene que poder entrar por las dos puertas. La misma carpeta, el mismo dueño;
+// lo único que cambia es el 'subido_por', para que en la pantalla se sepa quién
+// la consiguió.
+router.post('/clientes/:id/obras/:obraId/documentos', async (req, res) => {
+  const contratanteId = Number(req.params.id);
+  const tipoDoc = req.body?.tipo_doc || 'otro_contratante';
+
+  // Lo barato primero: cuando esta petición llega, el archivo YA está en
+  // Cloudinary, y cada rechazo tardío deja basura en la cuenta.
+  if (!esTipoDeContratante(tipoDoc)) {
+    return res.status(400).json({ error: 'Ese tipo de documento no es válido aquí' });
+  }
+  await exigirCliente(req.user, contratanteId);
+  if ((await tipoDe(contratanteId)) !== 'contratante') {
+    return res.status(400).json({ error: 'Esa carpeta es de una cuenta de tipo contratante' });
+  }
+  // La misma guarda que usa el contratante, y a propósito: si la obra no está en
+  // su alcance —porque no está ligada, o porque su proveedor está suspendido—
+  // el archivo caería en una carpeta que él no puede abrir.
+  await exigirObraDelContratante(contratanteId, req.params.obraId);
+
+  const archivo = await adoptarArchivo({
+    publicId: req.body?.public_id,
+    clientId: contratanteId,
+    nombre: req.body?.nombre,
+  });
+
+  const row = await db.prepare(
+    `INSERT INTO documentos
+       (client_id, entidad_tipo, entidad_id, tipo_doc, url, nombre_archivo, size_bytes, subido_por)
+     VALUES (?, 'proyecto', ?, ?, ?, ?, ?, 'fortex') RETURNING id`
+  ).get(contratanteId, Number(req.params.obraId), tipoDoc,
+        archivo.url, archivo.nombre, archivo.bytes);
+
+  res.json({ ok: true, id: row.id });
+});
+
+// GET /api/admin/documentos/:id/archivo -> redirige al archivo
+//
+// Hermana de /descargar, pero por ID en vez de por URL. Existe porque hay
+// pantallas del panel que a propósito NO reciben la URL —la carpeta del
+// contratante se arma con panoramaDelContratante, que nunca selecciona url— y
+// pasear la URL por el front solo para poder pedirla de vuelta sería darle una
+// liga permanente de Cloudinary a algo que no la necesita.
+//
+// exigirEntidad averigua de quién es el documento y acota al vendedor a su
+// cartera, que es la misma guarda de siempre.
+router.get('/documentos/:id(\\d+)/archivo', async (req, res) => {
+  await exigirEntidad(req.user, 'documento', req.params.id);
+
+  const doc = await db.prepare('SELECT url FROM documentos WHERE id = ?')
+    .get(Number(req.params.id));
+  if (!doc || !/^https:\/\//.test(doc.url || '')) {
+    return res.status(404).json({ error: 'Archivo no disponible' });
+  }
+  res.redirect(doc.url);
 });
 
 // DELETE /api/admin/documentos/:id -> quita el registro y el archivo del blob
@@ -1157,7 +1251,15 @@ router.get('/clientes/:id/detalle', async (req, res) => {
   // proveedores pueden ser clientes de otro vendedor, y por aquí no se le
   // escapan ni las primas ni las líneas de crédito de nadie.
   if (cliente.tipo === 'contratante') {
-    const { proveedores, obras, metricas } = await panoramaDelContratante(id);
+    const { proveedores, obras: obrasCrudas, metricas } = await panoramaDelContratante(id);
+    // Los documentos de su carpeta van con el nombre legible del tipo, igual que
+    // en su portal: es la misma pantalla vista desde el otro lado.
+    const obras = obrasCrudas.map((o) => ({
+      ...o,
+      mis_documentos: (o.mis_documentos || []).map((d) => ({
+        ...d, tipo_doc_nombre: nombreTipoDocContratante(d.tipo_doc),
+      })),
+    }));
 
     // Los suspendidos van APARTE y solo para Fortex: el contratante no los ve
     // (SQL_PADRON los filtra), pero el operador necesita poder reactivarlos.

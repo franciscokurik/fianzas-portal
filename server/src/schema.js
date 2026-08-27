@@ -249,8 +249,22 @@ CREATE TABLE IF NOT EXISTS documentos (
   nombre_archivo TEXT    NOT NULL,
   mime_type      TEXT,
   size_bytes     INTEGER,
+  -- Quién lo puso ahí: 'fortex', 'contratante' o 'proveedor'. Hace falta desde
+  -- que el contratante puede subir la fianza que le entregó su proveedor: en la
+  -- pantalla es la diferencia entre "esto lo tenemos porque nos lo dieron" y
+  -- "esto lo emitió la afianzadora por medio de Fortex".
+  --
+  -- OJO con client_id en estos archivos: sigue siendo el DUEÑO, y para lo que
+  -- sube el contratante el dueño es el contratante, no el proveedor de la obra.
+  -- Así el archivo vive en la carpeta de Cloudinary de quien lo subió y no hay
+  -- que aflojar la regla del prefijo, que es lo único que impide que un cliente
+  -- le cuelgue archivos a otro.
+  subido_por     TEXT    NOT NULL DEFAULT 'fortex',
   subido_el      TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
 );
+-- En bases que ya existen: todo lo que hay lo subió Fortex, porque hasta ahora
+-- la única ruta que registraba estos archivos era del panel.
+ALTER TABLE documentos ADD COLUMN IF NOT EXISTS subido_por TEXT NOT NULL DEFAULT 'fortex';
 CREATE INDEX IF NOT EXISTS idx_documentos_entidad ON documentos(entidad_tipo, entidad_id);
 CREATE INDEX IF NOT EXISTS idx_documentos_client ON documentos(client_id);
 

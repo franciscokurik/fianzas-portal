@@ -203,6 +203,7 @@ Eso es `clients.tipo`, y son dos negocios, no dos niveles de permiso:
 | Compra fianzas | ✅ | ❌ |
 | Obras propias, pólizas, líneas de crédito, expediente | ✅ | ❌ (el servidor las rechaza) |
 | Padrón de proveedores | ❌ | ✅ |
+| Sube archivos | su expediente y su papelería | solo su carpeta por obra (lo que le entregó el proveedor) |
 | Al entrar ve | "Mis fianzas" | "Mis proveedores" |
 
 Va como una columna sobre la misma tabla, y no como una tabla aparte, porque un
@@ -307,6 +308,43 @@ porque ahí está su venta. Puede hacerlo sin riesgo porque el panel le muestra
 **exactamente la misma proyección** que ve el contratante —la misma consulta
 alimenta las dos pantallas—, no el expediente completo de esos proveedores.
 
+### La carpeta de la obra: los dos lados pueden subir
+
+Al picarle a un proveedor en el padrón se abre **su pantalla**, con las obras que
+hace para ese contratante y las pólizas de cada una. Y dentro de cada obra hay una
+carpeta —**"Documentos que recibiste"**— donde el contratante sube lo que le
+entregaron: la fianza en papel, su contrato con el proveedor.
+
+Fortex sube **a la misma carpeta** desde el panel (el clip que aparece en cada obra
+del padrón), porque en la práctica el proveedor le entrega el papel al desarrollador
+o directo a Fortex, y las dos cosas pasan. Lo que queda registrado es el
+`subido_por`, para que en pantalla se sepa quién lo consiguió.
+
+Dos cosas de esa carpeta que conviene tener claras:
+
+**El archivo es del contratante, no del proveedor.** `documentos.client_id` es el
+contratante, así que el archivo vive bajo *su* prefijo de Cloudinary. Eso es lo que
+permitió abrirle la subida sin aflojar la regla del prefijo —la única cosa que
+impide que un cliente le cuelgue archivos a otro—: solo puede firmar para su propio
+`client_id`. Consecuencias: el proveedor **no** ve esos archivos, el contratante
+solo puede borrar los suyos, y si se da de baja su cuenta se van con él.
+
+**Un PDF ahí NO es una póliza.** No suma en el monto afianzado, no cuenta como
+cobertura y no aparece como producción de Fortex. Es el papel que respalda que el
+proveedor sí presentó la fianza, y le sirve a Fortex para capturarla si acaba
+colocándola. Por eso una obra puede decir "Sin registro" y al mismo tiempo tener el
+PDF adentro: son dos cosas distintas, y confundirlas sería meter en las cifras de
+Fortex pólizas que no son suyas.
+
+> Ojo para quien toque `documentos`: en esa tabla, con `entidad_tipo = 'proyecto'`,
+> ahora conviven **dos** carpetas sobre la misma obra —los papeles del proveedor
+> (contrato, convenios, actas) y los del contratante— y lo único que las distingue
+> es el `client_id`. Cualquier consulta que lea documentos de un proyecto tiene que
+> decidir cuál de las dos quiere. Y por lo mismo, dar de baja a un proveedor tiene
+> que llevarse también los archivos que el contratante colgó de sus obras: la tabla
+> es polimórfica y borrar el proyecto no los limpia solo
+> (`services/clientes.js`, con su prueba en `server/test/baja-cliente.test.js`).
+
 ### El hueco que hay que decir en voz alta
 
 El portal solo sabe de las fianzas que **colocó Fortex**. Un proveedor que
@@ -315,11 +353,16 @@ dice **"Sin registro"** y no "Sin fianza", y la pantalla lo explica al pie. La
 diferencia no es cosmética: acusar en falso a un proveedor que sí cumplió es la
 forma más rápida de que el desarrollador cierre el portal y vuelva al Excel.
 
-Registrar las fianzas colocadas por terceros es la ampliación obvia, y no es
-gratis: pide un tercer valor en `fianzas.clase` (una póliza que se vigila pero
-no es producción de Fortex) y revisar los lugares donde `clase` decide si algo
-suma. Mientras no exista, esa lista de "sin registro" es la lista de prospectos
-de Fortex.
+Lo que sí se puede hoy es **guardar el papel**: el contratante (o Fortex) sube el
+PDF que el proveedor entregó a la carpeta de la obra, y ahí queda el respaldo
+aunque la póliza no esté capturada. Es media solución, y a propósito: el papel
+prueba que la presentó, pero el portal sigue sin poder juzgarle vigencia ni
+sumarla.
+
+Capturarlas de verdad es la ampliación obvia, y no es gratis: pide un tercer valor
+en `fianzas.clase` (una póliza que se vigila pero no es producción de Fortex) y
+revisar los lugares donde `clase` decide si algo suma. Mientras no exista, esa
+lista de "sin registro" es la lista de prospectos de Fortex.
 
 Dos cosas más que **no** hace esta primera entrega:
 

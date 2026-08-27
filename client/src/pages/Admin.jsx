@@ -37,6 +37,7 @@ export default function Admin() {
   const [afianzadoras, setAfianzadoras] = useState([]);
   const [tipos, setTipos] = useState([]);
   const [tiposDoc, setTiposDoc] = useState({ proyecto: [], fianza: [] });
+  const [tiposDocContratante, setTiposDocContratante] = useState([]);
   const [docsRequeridos, setDocsRequeridos] = useState([]);
   const [recordatorios, setRecordatorios] = useState([]);
   const [sel, setSel] = useState(null);
@@ -54,7 +55,10 @@ export default function Admin() {
   const cargarAfianzadoras = () => cargar('/admin/afianzadoras', (d) => setAfianzadoras(d.afianzadoras));
   const cargarTipos = () => cargar('/admin/tipos-fianza', (d) => setTipos(d.tipos));
   const cargarRecordatorios = () => cargar('/admin/recordatorios', (d) => setRecordatorios(d.recordatorios));
-  const cargarTiposDoc = () => cargar('/admin/tipos-documento', (d) => setTiposDoc(d.tipos));
+  const cargarTiposDoc = () => cargar('/admin/tipos-documento', (d) => {
+    setTiposDoc(d.tipos);
+    setTiposDocContratante(d.tipos_contratante || []);
+  });
   const cargarDocsRequeridos = () => cargar('/admin/documentos-requeridos', (d) => setDocsRequeridos(d.tipos));
   const cargarInternos = () => cargar('/admin/usuarios/internos', (d) => setInternos(d.usuarios));
 
@@ -272,6 +276,7 @@ export default function Admin() {
                 puedeOperar={puedeOperar}
                 vendedores={vendedores}
                 clientes={clientes}
+                tiposDocContratante={tiposDocContratante}
                 onEliminado={() => {
                   setSel(null);
                   setDetalle(null);
@@ -580,7 +585,7 @@ function CatalogoDocumentos({ tipos, onChange, flash }) {
    -------------------------------------------------------------------------- */
 
 function DetalleCliente({
-  detalle, esAdmin, puedeOperar, vendedores, clientes = [],
+  detalle, esAdmin, puedeOperar, vendedores, clientes = [], tiposDocContratante = [],
   afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
 }) {
   const {
@@ -624,6 +629,34 @@ function DetalleCliente({
     const a = document.createElement('a');
     a.href = url; a.download = rel.split('/').pop(); a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // Hermana de descargar(), pero por ID. La carpeta del contratante se arma con
+  // panoramaDelContratante, que a propósito NUNCA selecciona la url: pasearla
+  // por el front solo para poder pedirla de vuelta sería darle una liga
+  // permanente de Cloudinary a algo que no la necesita.
+  // Recibe el documento completo, no solo el id, porque el nombre del archivo
+  // hace falta: sin él se bajaba un "documento-7" sin extensión que en Windows
+  // no abre nada. Y el fallo se reporta por 'avisar' —el estado de error de
+  // quien llama— y no por flash(), que es el banner VERDE de éxito con palomita.
+  async function descargarPorId(doc, avisar = flash) {
+    try {
+      const res = await fetch(`/api/admin/documentos/${doc.id}/archivo`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) {
+        avisar('No se pudo descargar el archivo. Puede que ya no esté disponible.');
+        return;
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.nombre_archivo || `documento-${doc.id}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      avisar('No se pudo descargar el archivo. Revisa tu conexión e inténtalo de nuevo.');
+    }
   }
 
   // Se pide teclear la razón social, no un "¿estás seguro?": esto se lleva las
@@ -789,6 +822,8 @@ function DetalleCliente({
           suspendidos={suspendidos}
           obras={obras}
           clientes={clientes}
+          tiposDoc={tiposDocContratante}
+          descargar={descargarPorId}
           puedeOperar={puedeOperar}
           onChange={onChange}
           flash={flash}
@@ -870,7 +905,8 @@ function DetalleCliente({
    vendedor, y por aquí no se le escapan primas ni líneas de crédito de nadie. */
 
 function PadronProveedores({
-  contratanteId, proveedores, suspendidos = [], obras, clientes, puedeOperar, onChange, flash,
+  contratanteId, proveedores, suspendidos = [], obras, clientes,
+  tiposDoc = [], descargar, puedeOperar, onChange, flash,
 }) {
   const [agregando, setAgregando] = useState(false);
   const [error, setError] = useState('');
@@ -997,15 +1033,15 @@ function PadronProveedores({
               {suyas.length > 0 && (
                 <div className="mt-1.5 pl-3 border-l-2 border-slate-100 space-y-1">
                   {suyas.map((o) => (
-                    <div key={o.id} className="flex flex-wrap items-center gap-2 text-[11px]">
-                      <Briefcase className="w-3 h-3 text-slate-300 shrink-0" />
-                      <span className="text-slate-600">{o.nombre}</span>
-                      <span className="text-slate-400">{etiquetaEstatus(o.estatus)}</span>
-                      <CumplimientoBadge estado={o.estado_cobertura} />
-                      <span className="text-slate-400 tabular-nums">
-                        {o.fianzas.length} póliza(s){o.total_previos > 0 && ` · ${o.total_previos} previo(s)`}
-                      </span>
-                    </div>
+                    <ObraDelPadron
+                      key={o.id}
+                      obra={o}
+                      contratanteId={contratanteId}
+                      tiposDoc={tiposDoc}
+                      descargar={descargar}
+                      onChange={onChange}
+                      flash={flash}
+                    />
                   ))}
                 </div>
               )}
@@ -1065,6 +1101,158 @@ function PadronProveedores({
               </div>
             ))}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Un renglón de obra dentro del padrón, con la carpeta del contratante detrás
+// del clip.
+//
+// La carpeta es la MISMA que él ve en su portal, y Fortex sube por la misma
+// puerta: en la práctica el proveedor le entrega la fianza en papel al
+// desarrollador o directo a Fortex, y las dos cosas pasan. Lo único que cambia
+// es el 'subido_por', que queda a la vista para saber quién la consiguió.
+function ObraDelPadron({ obra: o, contratanteId, tiposDoc, descargar, onChange, flash }) {
+  const [abierta, setAbierta] = useState(false);
+  const docs = o.mis_documentos || [];
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <Briefcase className="w-3 h-3 text-slate-300 shrink-0" />
+        <span className="text-slate-600">{o.nombre}</span>
+        <span className="text-slate-400">{etiquetaEstatus(o.estatus)}</span>
+        <CumplimientoBadge estado={o.estado_cobertura} />
+        <span className="text-slate-400 tabular-nums">
+          {o.fianzas.length} póliza(s){o.total_previos > 0 && ` · ${o.total_previos} previo(s)`}
+        </span>
+        <button
+          onClick={() => setAbierta((a) => !a)}
+          className={`${btnSecondary} ml-auto ${docs.length ? 'text-indigo-700 border-indigo-200' : ''}`}
+          title="Documentos que el contratante recibió de esta obra"
+        >
+          <Paperclip className="h-3 w-3" />
+          {docs.length > 0 && <span className="tabular-nums">{docs.length}</span>}
+        </button>
+      </div>
+
+      {abierta && (
+        <CarpetaDelContratante
+          contratanteId={contratanteId}
+          obraId={o.id}
+          documentos={docs}
+          tipos={tiposDoc}
+          descargar={descargar}
+          onChange={onChange}
+          flash={flash}
+        />
+      )}
+    </div>
+  );
+}
+
+// La carpeta del contratante sobre una obra, desde el panel. Es hermana de
+// DocsEntidad, pero el dueño del archivo es el CONTRATANTE y no el fiado de la
+// obra: por eso la subida se firma con su client_id y se registra por su ruta.
+function CarpetaDelContratante({
+  contratanteId, obraId, documentos, tipos, descargar, onChange, flash,
+}) {
+  const [tipoDoc, setTipoDoc] = useState(tipos[0]?.clave || 'fianza_presentada');
+  const [subiendo, setSubiendo] = useState(false);
+  const [error, setError] = useState('');
+
+  async function subir(archivo) {
+    if (!archivo) return;
+    setError('');
+    const problema = revisarArchivo(archivo);
+    if (problema) return setError(problema);
+
+    setSubiendo(true);
+    try {
+      // Bajo la carpeta del CONTRATANTE, que es de quien es el archivo.
+      const subido = await subirACloudinary(contratanteId, archivo);
+      await api.post(`/admin/clientes/${contratanteId}/obras/${obraId}/documentos`,
+        { ...subido, tipo_doc: tipoDoc });
+      onChange();
+      flash('Documento subido a la carpeta del contratante');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSubiendo(false);
+    }
+  }
+
+  async function quitar(id) {
+    setError('');
+    try {
+      await api.del(`/admin/documentos/${id}`);
+      onChange();
+      flash('Documento eliminado');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <div className="mt-1.5 mb-2 rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+      <p className="text-[11px] font-medium text-slate-600 mb-1.5">
+        Documentos que el contratante recibió
+        <span className="font-normal text-slate-400">
+          {' '}· son de él, el proveedor no los ve. Un PDF aquí no es una póliza capturada.
+        </span>
+      </p>
+
+      {documentos.length > 0 && (
+        <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg bg-white mb-2">
+          {documentos.map((d) => (
+            <div key={d.id} className="flex items-center gap-2 px-2.5 py-1.5 text-[11px]">
+              <Paperclip className="h-3 w-3 text-slate-400 shrink-0" />
+              <span className="font-medium text-slate-700 shrink-0">{d.tipo_doc_nombre}</span>
+              <span className="text-slate-500 truncate">{d.nombre_archivo}</span>
+              <span className="text-slate-400 tabular-nums shrink-0">{pesoArchivo(d.size_bytes)}</span>
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 shrink-0">
+                {d.subido_por === 'fortex' ? 'lo cargamos' : 'lo cargó él'}
+              </span>
+              <button onClick={() => descargar(d, setError)} className={`${btnSecondary} ml-auto shrink-0`}>
+                <FileDown className="h-3 w-3" /> Ver
+              </button>
+              <button
+                onClick={() => quitar(d.id)}
+                className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600 shrink-0`}
+                title="Eliminar documento"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={tipoDoc}
+          onChange={(e) => setTipoDoc(e.target.value)}
+          className="text-[11px] px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-700"
+        >
+          {tipos.map((t) => <option key={t.clave} value={t.clave}>{t.nombre}</option>)}
+        </select>
+        <label className={`${btnSecondary} cursor-pointer ${subiendo ? 'opacity-50 pointer-events-none' : ''}`}>
+          <Upload className="h-3 w-3" /> {subiendo ? 'Subiendo…' : 'Subir'}
+          <input
+            type="file"
+            accept={ACCEPT_ARCHIVOS}
+            className="hidden"
+            onChange={(e) => { subir(e.target.files?.[0]); e.target.value = ''; }}
+          />
+        </label>
+        <span className="text-[11px] text-slate-400">{AYUDA_ARCHIVOS}</span>
+      </div>
+
+      {error && (
+        <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-[11px] text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> {error}
         </div>
       )}
     </div>

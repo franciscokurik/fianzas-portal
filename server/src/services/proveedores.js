@@ -59,6 +59,19 @@ const SQL_DOCUMENTOS = `
   WHERE ${ALCANCE}
     AND d.tipo_doc IN (${SQL_DOCS_DEL_CONTRATANTE})`;
 
+// La carpeta del CONTRATANTE sobre sus obras: lo que él subió, o Fortex por él.
+// Se distingue de los papeles del proveedor por el dueño del archivo
+// (d.client_id = el contratante), no por el tipo. Sin la URL, igual que todo lo
+// demás: la descarga pasa por la API.
+const SQL_MIS_DOCUMENTOS = `
+  SELECT d.id, d.entidad_id, d.tipo_doc, d.nombre_archivo, d.size_bytes,
+         d.subido_el, d.subido_por
+  FROM documentos d
+  JOIN proyectos p ON p.id = d.entidad_id AND d.entidad_tipo = 'proyecto'
+  ${JOIN_PADRON}
+  WHERE ${ALCANCE} AND d.client_id = ?
+  ORDER BY d.subido_el DESC`;
+
 // Las obras que todavía se juzgan. Una obra cerrada o cancelada no necesita
 // cobertura, y exigírsela llenaría la pantalla del desarrollador de rojos de
 // hace tres años. Se siguen listando; nada más no cuentan para el cumplimiento.
@@ -127,11 +140,18 @@ export async function panoramaDelContratante(contratanteId) {
   const obrasRows = await db.prepare(SQL_OBRAS).all(id);
   const fianzasRows = await db.prepare(SQL_FIANZAS).all(id);
   const docsRows = await db.prepare(SQL_DOCUMENTOS).all(id);
+  const misDocsRows = await db.prepare(SQL_MIS_DOCUMENTOS).all(id, id);
 
   const docsPorFianza = new Map();
   for (const d of docsRows) {
     if (!docsPorFianza.has(d.entidad_id)) docsPorFianza.set(d.entidad_id, []);
     docsPorFianza.get(d.entidad_id).push(d);
+  }
+
+  const misDocsPorObra = new Map();
+  for (const d of misDocsRows) {
+    if (!misDocsPorObra.has(d.entidad_id)) misDocsPorObra.set(d.entidad_id, []);
+    misDocsPorObra.get(d.entidad_id).push(d);
   }
 
   const fianzas = fianzasRows.map((f) => ({
@@ -150,6 +170,10 @@ export async function panoramaDelContratante(contratanteId) {
       ...o,
       viva: obraViva(o.estatus),
       fianzas: suyas,
+      // Lo que el contratante recibió o guarda de esta obra. Va aparte de las
+      // fianzas a propósito: un PDF que le entregaron NO es una póliza
+      // capturada, y no puede contar como cobertura ni sumar en nada.
+      mis_documentos: misDocsPorObra.get(o.id) || [],
       total_previos: suyas.length - emitidas.length,
       estado_cobertura: estadoDeObra(suyas),
       // Lo que cubren las fianzas que siguen vigentes. Es la cifra que el

@@ -194,12 +194,12 @@ export async function seed() {
     pHerrera, delta, 'Torre Delta Poniente – Instalaciones', 'DD-2025-021', DELTA,
     pesos(8300000), addMonths(hoy, -4), addMonths(hoy, 10), 'en_proceso'
   )).id;
-  // Obra en proceso y SIN NINGUNA FIANZA: es el renglón que Delta quiere cazar,
-  // y la razón de ser de toda esta pantalla.
-  await insObraPara.get(
+  // Obra en proceso y SIN NINGUNA FIANZA en Fortex: es el renglón que Delta
+  // quiere cazar, y la razón de ser de toda esta pantalla.
+  const oSolis = (await insObraPara.get(
     pSolis, delta, 'Torre Delta Poniente – Acabados', 'DD-2025-033', DELTA,
     pesos(4100000), addMonths(hoy, -1), addMonths(hoy, 11), 'en_proceso'
-  );
+  )).id;
 
   // Y la misma constructora trabajando para OTRO, sin ligar a ningún contratante
   // del portal. Es lo que hace demostrable el aislamiento: Delta NO debe ver
@@ -289,6 +289,19 @@ export async function seed() {
     'demo/caratula-ase-2025-1140.pdf', 'caratula.pdf', 190000);
   await insDocEntidad.run(pVega, fVega, 'recibo_prima',
     'demo/recibo-ase-2025-1140.pdf', 'recibo_prima.pdf', 64000);
+
+  // Y el caso que explica para qué sirve la carpeta del contratante: la obra de
+  // Acabados Solís no tiene NINGUNA póliza registrada en Fortex —la compró con
+  // otro agente— pero Delta ya tiene el PDF que le entregaron. El archivo es de
+  // DELTA (client_id), no del proveedor: es su copia, vive en su carpeta, y no
+  // cuenta como cobertura en ninguna cifra. Sirve para que Fortex la capture si
+  // acaba colocándola.
+  await db.prepare(
+    `INSERT INTO documentos (client_id, entidad_tipo, entidad_id, tipo_doc, url,
+                             nombre_archivo, mime_type, size_bytes, subido_por)
+     VALUES (?, 'proyecto', ?, 'fianza_presentada', ?, ?, 'application/pdf', ?, 'contratante')`
+  ).run(delta, oSolis, 'demo/fianza-solis-otro-agente.pdf',
+        'fianza-acabados-solis.pdf', 148000);
 
   // --- Documentos del cliente 1 (algunos subidos, otros pendientes) ---
   const insDoc = db.prepare(

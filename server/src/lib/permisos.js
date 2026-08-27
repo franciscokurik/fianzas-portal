@@ -152,6 +152,27 @@ export async function exigirProveedor(contratanteId, proveedorId) {
   return fila;
 }
 
+// Que esa obra esté dentro del alcance del contratante. Es la puerta de todo lo
+// que se hace SOBRE una obra: subirle un archivo, listarlo, borrarlo.
+//
+// Devuelve el client_id del PROVEEDOR (el dueño de la obra) y el nombre lo dice
+// para que no se confunda: ese id sirve para leer la obra, JAMÁS para firmar una
+// subida. Lo que el contratante sube va a su PROPIA carpeta.
+export async function exigirObraDelContratante(contratanteId, obraId) {
+  const id = idValido(obraId);
+  if (id === null) throw negar('No existe esa obra', 404);
+
+  const fila = await db.prepare(
+    `SELECT p.client_id AS proveedor_id
+     FROM proyectos p
+     ${JOIN_PADRON}
+     WHERE p.id = ? AND ${ALCANCE}`
+  ).get(id, Number(contratanteId));
+  // 404 y no 403, por lo mismo que en exigirProveedor.
+  if (!fila) throw negar('No existe esa obra', 404);
+  return fila.proveedor_id;
+}
+
 // Los papeles que ACREDITAN LA GARANTÍA, y nada más. La lista es blanca, no
 // negra, por la misma razón que VEN_TODO: el tipo de documento que se agregue
 // mañana nace cerrado.
@@ -191,7 +212,9 @@ export async function urlDeDocumentoParaContratante(contratanteId, documentoId) 
   const id = idValido(documentoId);
   if (id === null) return null;
 
-  const fila = await db.prepare(
+  // 1) Los papeles de la GARANTÍA, que son del proveedor: solo los de la lista
+  //    blanca, y solo si cuelgan de una obra que este contratante alcanza.
+  const deLaGarantia = await db.prepare(
     `SELECT d.url
      FROM documentos d
      JOIN fianzas f   ON f.id = d.entidad_id AND d.entidad_tipo = 'fianza'
@@ -200,5 +223,19 @@ export async function urlDeDocumentoParaContratante(contratanteId, documentoId) 
      WHERE d.id = ? AND ${ALCANCE}
        AND d.tipo_doc IN (${SQL_DOCS_DEL_CONTRATANTE})`
   ).get(id, Number(contratanteId));
-  return fila?.url ?? null;
+  if (deLaGarantia) return deLaGarantia.url;
+
+  // 2) Lo de su PROPIA carpeta: lo que él subió, o Fortex por él, sobre una de
+  //    sus obras. Aquí no hace falta lista blanca de tipos porque el archivo es
+  //    suyo —d.client_id es él—, pero sí se exige que la obra siga en su
+  //    alcance: si le suspendieron al proveedor, esa obra ya no existe para él y
+  //    no tiene por dónde pedirla (la sigue teniendo Fortex).
+  const propio = await db.prepare(
+    `SELECT d.url
+     FROM documentos d
+     JOIN proyectos p ON p.id = d.entidad_id AND d.entidad_tipo = 'proyecto'
+     ${JOIN_PADRON}
+     WHERE d.id = ? AND d.client_id = ? AND ${ALCANCE}`
+  ).get(id, Number(contratanteId), Number(contratanteId));
+  return propio?.url ?? null;
 }

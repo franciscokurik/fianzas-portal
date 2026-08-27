@@ -19,6 +19,13 @@ import { baseEnMemoria } from './ayuda/pg-memoria.js';
 
 process.env.DATABASE_URL ??= 'postgres://noop';
 process.env.JWT_SECRET = 'secreto-de-prueba';
+// De mentiras, igual que en subidas.test.js: alcanzan para que la firma se
+// calcule aquí, y hacen que consultar el archivo falle — que es justo lo que se
+// quiere, porque aquí no se prueba Cloudinary sino quién alcanza a firmar.
+process.env.CLOUDINARY_CLOUD_NAME = 'cuenta-de-prueba';
+process.env.CLOUDINARY_API_KEY = '123456789012345';
+process.env.CLOUDINARY_API_SECRET = 'secreto-de-prueba';
+delete process.env.CLOUDINARY_URL;
 
 const { default: db } = await import('../src/db.js');
 const memoria = baseEnMemoria();
@@ -165,10 +172,14 @@ test('un proveedor que no está en el padrón no se abre', async () => {
 test('quitar la liga de la obra le cierra la puerta, aunque siga en el padrón', async () => {
   await memoria.query('UPDATE proyectos SET contratante_id = NULL WHERE id = ?', [OBRA_DELTA]);
   try {
-    const { proveedores, obras } = await (await pedir('/api/proveedores', delta)).json();
-    assert.equal(obras.length, 0, 'sin liga de obra no hay nada que ver');
+    const { proveedores } = await (await pedir('/api/proveedores', delta)).json();
     assert.equal(proveedores[0].cumplimiento, 'sin_obra',
       'sigue en el padrón, pero ya no se le juzga ninguna obra');
+
+    // Las obras se piden al abrir el proveedor: la lista del padrón ya no las
+    // manda (era casi todo el peso de esa respuesta, sin que nadie la leyera).
+    const { obras } = await (await pedir(`/api/proveedores/${VEGA}`, delta)).json();
+    assert.equal(obras.length, 0, 'sin liga de obra no hay nada que ver');
   } finally {
     await memoria.query('UPDATE proyectos SET contratante_id = ? WHERE id = ?', [DELTA, OBRA_DELTA]);
   }
@@ -180,9 +191,10 @@ test('suspender al proveedor le cierra la puerta, aunque la obra siga ligada', a
     [DELTA, VEGA]
   );
   try {
-    const { proveedores, obras } = await (await pedir('/api/proveedores', delta)).json();
+    const { proveedores } = await (await pedir('/api/proveedores', delta)).json();
     assert.equal(proveedores.length, 0, 'el suspendido sale del padrón');
-    assert.equal(obras.length, 0, 'y sus obras dejan de alcanzarse en el mismo instante');
+    // Y sus obras dejan de alcanzarse en el mismo instante: la ruta del detalle
+    // ni abre.
     assert.equal((await pedir(`/api/proveedores/${VEGA}`, delta)).status, 404);
   } finally {
     await memoria.query(
@@ -270,12 +282,22 @@ test('el personal de Fortex tampoco: no tiene empresa propia', async () => {
   assert.match((await res.json()).error, /panel de Fortex/i);
 });
 
-test('el contratante no sube archivos', async () => {
-  const res = await mandar('POST', '/api/subidas/firma', delta, {
-    client_id: DELTA, nombre: 'x.pdf', mime: 'application/pdf',
+test('el contratante firma subidas SOLO para su propia carpeta', async () => {
+  // La suya sí: sube la fianza que le entregó su proveedor.
+  const propia = await mandar('POST', '/api/subidas/firma', delta, {
+    client_id: DELTA, nombre: 'fianza.pdf', mime: 'application/pdf',
   });
-  assert.equal(res.status, 403);
-  assert.match((await res.json()).error, /no se suben archivos/i);
+  assert.equal(propia.status, 200);
+
+  // La de su proveedor NO, aunque lo alcance para leerlo. Es la regla del
+  // prefijo de Cloudinary, y es lo único que impide que un cliente le cuelgue
+  // archivos a otro: si esto pasara, Delta podría meterle papeles al expediente
+  // de Cimentaciones Vega.
+  const ajena = await mandar('POST', '/api/subidas/firma', delta, {
+    client_id: VEGA, nombre: 'x.pdf', mime: 'application/pdf',
+  });
+  assert.equal(ajena.status, 403);
+  assert.match((await ajena.json()).error, /otro cliente/i);
 });
 
 // ---------------------------------------------------------------------------
@@ -556,12 +578,13 @@ test('un previo no cubre nada: la obra sigue descubierta', async () => {
 test('una obra cerrada no cuenta como incumplimiento, y se dice por qué', async () => {
   await memoria.query(`UPDATE proyectos SET estatus = 'cerrado' WHERE id = ?`, [OBRA_DELTA]);
   try {
-    const { proveedores, obras, metricas } = await (await pedir('/api/proveedores', delta)).json();
+    const { proveedores, metricas } = await (await pedir('/api/proveedores', delta)).json();
 
     assert.equal(metricas.obras_vivas, 0);
     assert.equal(metricas.obras_descubiertas, 0, 'una obra cerrada no se le exige a nadie');
 
     // Se sigue listando, con el dato que explica por qué no se juzga.
+    const { obras } = await (await pedir(`/api/proveedores/${VEGA}`, delta)).json();
     assert.equal(obras.length, 1);
     assert.equal(obras[0].viva, false);
     assert.equal(obras[0].estatus, 'cerrado');
@@ -668,26 +691,194 @@ test('reactivar desde el padrón conserva el alias y las notas', async () => {
 });
 
 test('no se vuelve contratante a quien está en el padrón de alguien', async () => {
-  // Vega no tiene obras ni pólizas propias que estorben si se le quitan, pero
-  // SÍ está en el padrón de Delta: volverlo contratante lo dejaría ahí para
-  // siempre, porque el POST del padrón rechaza a los contratantes.
-  await memoria.query('DELETE FROM fianzas WHERE client_id = ?', [VEGA]);
-  await memoria.query('DELETE FROM client_credit_lines WHERE client_id = ?', [VEGA]);
-  await memoria.query('DELETE FROM proyectos WHERE client_id = ?', [VEGA]);
+  // Un fiado recién creado y limpio —sin obras, sin pólizas, sin líneas— metido
+  // al padrón de Delta. Lo único que le estorba para volverse contratante es
+  // justamente el padrón, así que la prueba aísla ESO.
+  //
+  // Antes esta prueba borraba las obras y las pólizas de Vega para dejarlo
+  // limpio, y no las reponía: se llevaba entre las patas a las pruebas de abajo.
+  const alta = await mandar('POST', `/api/admin/clientes/${DELTA}/proveedores`, operador, {
+    razon_social: 'Pintura Total SA', alias: 'Pintura',
+  });
+  assert.equal(alta.status, 200);
+  const { proveedor_id } = await alta.json();
+
+  const res = await mandar('PUT', `/api/admin/clientes/${proveedor_id}/tipo`, operador, {
+    tipo: 'contratante',
+  });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /padr(ó|o)n/i);
+
+  // Y sacándolo del padrón sí se puede: lo que bloqueaba era la liga, no la
+  // empresa.
+  await mandar('DELETE', `/api/admin/clientes/${DELTA}/proveedores/${proveedor_id}`, operador);
+  const ahora = await mandar('PUT', `/api/admin/clientes/${proveedor_id}/tipo`, operador, {
+    tipo: 'contratante',
+  });
+  assert.equal(ahora.status, 200);
+});
+
+// ---------------------------------------------------------------------------
+// La carpeta del contratante: lo que él subió (o Fortex por él) sobre una obra.
+//
+// El archivo es SUYO —vive bajo su client_id— y eso es lo que hace que subir sea
+// seguro sin aflojar la regla del prefijo. Un PDF que le entregaron NO es una
+// póliza capturada: no suma en nada.
+// ---------------------------------------------------------------------------
+
+// Se inserta con SQL en vez de por la ruta porque adoptarArchivo le pregunta a
+// Cloudinary de verdad. Lo que sí se prueba por la ruta son las guardas, que es
+// lo que decide quién alcanza qué.
+const suCarpeta = async () => {
+  const { id } = await memoria.prepare(
+    `INSERT INTO documentos (client_id, entidad_tipo, entidad_id, tipo_doc, url,
+                             nombre_archivo, subido_por)
+     VALUES (?, 'proyecto', ?, 'fianza_presentada', 'https://cdn/presentada.pdf',
+             'fianza-vega.pdf', 'contratante') RETURNING id`
+  ).get(DELTA, OBRA_DELTA);
+  return id;
+};
+
+test('la obra le sale con su carpeta, y el papel entregado NO cuenta como cobertura', async () => {
+  const idDoc = await suCarpeta();
   try {
-    const res = await mandar('PUT', `/api/admin/clientes/${VEGA}/tipo`, operador, {
-      tipo: 'contratante',
-    });
-    assert.equal(res.status, 400);
-    assert.match((await res.json()).error, /padr(ó|o)n/i);
+    const { obras } = await (await pedir(`/api/proveedores/${VEGA}`, delta)).json();
+    const obra = obras.find((o) => o.id === OBRA_DELTA);
+
+    assert.equal(obra.mis_documentos.length, 1);
+    assert.equal(obra.mis_documentos[0].tipo_doc, 'fianza_presentada');
+    assert.equal(obra.mis_documentos[0].tipo_doc_nombre, 'Fianza presentada por el proveedor');
+    assert.equal(obra.mis_documentos[0].subido_por, 'contratante');
+    // Sin la URL, como todo lo demás: la descarga pasa por la API.
+    assert.equal(obra.mis_documentos[0].url, undefined);
+
+    // Y no se colgó de ninguna fianza ni movió una cifra.
+    const { metricas } = await (await pedir('/api/proveedores', delta)).json();
+    assert.equal(metricas.obras_cubiertas, 1, 'la cobertura la dan las pólizas, no los PDF');
+
+    // Sí la puede bajar: es suya.
+    assert.equal((await pedir(`/api/proveedores/documentos/${idDoc}`, delta)).status, 302);
   } finally {
-    // Se deja como estaba: esta prueba va al final a propósito, pero aun así.
-    await memoria.query(
-      `INSERT INTO proyectos (id, client_id, contratante_id, nombre, monto_contrato, estatus)
-       VALUES (?, ?, ?, 'Torre Delta', 12500000, 'en_proceso')
-       ON CONFLICT (id) DO NOTHING`,
-      [OBRA_DELTA, VEGA, DELTA]
+    await memoria.query('DELETE FROM documentos WHERE id = ?', [idDoc]);
+  }
+});
+
+test('el proveedor no ve lo que su contratante subió sobre él', async () => {
+  const idDoc = await suCarpeta();
+  try {
+    const { fianzas } = await (await pedir('/api/fianzas', vega)).json();
+    const papeles = fianzas.flatMap((f) => [...f.documentos, ...f.documentos_proyecto]);
+    assert.ok(!papeles.some((d) => d.nombre_archivo === 'fianza-vega.pdf'),
+      'la carpeta del contratante es del contratante');
+
+    // Ni la puede bajar por su ruta, que filtra por dueño.
+    assert.equal((await pedir(`/api/fianzas/documentos/${idDoc}`, vega)).status, 404);
+  } finally {
+    await memoria.query('DELETE FROM documentos WHERE id = ?', [idDoc]);
+  }
+});
+
+test('el contratante borra lo suyo, y NO los papeles del proveedor', async () => {
+  const idDoc = await suCarpeta();
+
+  // El suyo, sí.
+  const propio = await mandar('DELETE', `/api/proveedores/documentos/${idDoc}`, delta);
+  assert.equal(propio.status, 200);
+  assert.equal(
+    await memoria.prepare('SELECT id FROM documentos WHERE id = ?').get(idDoc), undefined
+  );
+
+  // La carátula de la fianza, no: la alcanza para leerla, no para tocarla.
+  const { id: idCaratula } = await memoria.prepare(
+    `SELECT id FROM documentos WHERE tipo_doc = 'caratula'`
+  ).get();
+  const ajeno = await mandar('DELETE', `/api/proveedores/documentos/${idCaratula}`, delta);
+  assert.equal(ajeno.status, 404);
+  assert.ok(await memoria.prepare('SELECT id FROM documentos WHERE id = ?').get(idCaratula),
+    'la carátula del proveedor sigue ahí');
+});
+
+test('no se sube a una obra que no está en el alcance, ni con un tipo inventado', async () => {
+  // Tipo que no es de esta carpeta. Se rechaza ANTES de tocar el archivo, que
+  // ya está en Cloudinary: cada rechazo tardío deja basura en la cuenta.
+  const tipoMalo = await mandar('POST', `/api/proveedores/obras/${OBRA_DELTA}/documentos`, delta, {
+    public_id: 'x', nombre: 'x.pdf', tipo_doc: 'recibo_prima',
+  });
+  assert.equal(tipoMalo.status, 400);
+
+  // La obra que el mismo proveedor hace para CFE: no es asunto de Delta.
+  const obraAjena = await mandar('POST', `/api/proveedores/obras/${OBRA_CFE}/documentos`, delta, {
+    public_id: 'x', nombre: 'x.pdf', tipo_doc: 'fianza_presentada',
+  });
+  assert.equal(obraAjena.status, 404);
+});
+
+test('Fortex ve la carpeta del contratante y sube por la misma puerta', async () => {
+  const idDoc = await suCarpeta();
+  try {
+    const d = await (await pedir(`/api/admin/clientes/${DELTA}/detalle`, admin)).json();
+    const obra = d.obras.find((o) => o.id === OBRA_DELTA);
+    assert.equal(obra.mis_documentos.length, 1);
+    assert.equal(obra.mis_documentos[0].tipo_doc_nombre, 'Fianza presentada por el proveedor');
+    assert.equal(obra.mis_documentos[0].subido_por, 'contratante');
+  } finally {
+    await memoria.query('DELETE FROM documentos WHERE id = ?', [idDoc]);
+  }
+
+  // Esa carpeta es de un contratante: no se le abre a un fiado.
+  const aUnFiado = await mandar(
+    'POST', `/api/admin/clientes/${VEGA}/obras/${OBRA_DELTA}/documentos`, operador,
+    { public_id: 'x', nombre: 'x.pdf', tipo_doc: 'fianza_presentada' }
+  );
+  assert.equal(aUnFiado.status, 400);
+  assert.match((await aUnFiado.json()).error, /contratante/i);
+});
+
+test('borrar la obra exige alcanzar también al dueño de la carpeta', async () => {
+  const idDoc = await suCarpeta();
+
+  // Una obra sin fianzas, para pasar el único otro freno de esa ruta.
+  const { id: obraSola } = await memoria.prepare(
+    `INSERT INTO proyectos (client_id, contratante_id, nombre, estatus)
+     VALUES (?, ?, 'Obra sin pólizas', 'en_proceso') RETURNING id`
+  ).get(VEGA, DELTA);
+  const { id: docAjeno } = await memoria.prepare(
+    `INSERT INTO documentos (client_id, entidad_tipo, entidad_id, tipo_doc, url,
+                             nombre_archivo, subido_por)
+     VALUES (?, 'proyecto', ?, 'fianza_presentada', 'https://cdn/x.pdf', 'x.pdf', 'contratante')
+     RETURNING id`
+  ).get(DELTA, obraSola);
+
+  // El vendedor de Vega alcanza la OBRA, pero no a Delta. Borrar la obra se
+  // llevaría el archivo de Delta, así que se le niega igual que el borrado
+  // directo del documento: si no, esta era la puerta ancha por la que se
+  // destruían archivos de una cuenta fuera de su cartera.
+  const carlos = await memoria.prepare(
+    `SELECT id FROM users WHERE email = 'carlos@fortex.mx'`
+  ).get();
+  const vendedorToken = signToken({ id: carlos.id, role: 'vendedor', nombre: 'Carlos' });
+  await memoria.query('UPDATE clients SET vendedor_id = ? WHERE id = ?', [carlos.id, VEGA]);
+
+  try {
+    const suelto = await mandar('DELETE', `/api/admin/documentos/${docAjeno}`, vendedorToken);
+    assert.equal(suelto.status, 403, 'el borrado directo ya se lo negaba');
+
+    const enCascada = await mandar('DELETE', `/api/admin/proyectos/${obraSola}`, vendedorToken);
+    assert.equal(enCascada.status, 403, 'y la cascada tiene que negarlo igual');
+    assert.ok(await memoria.prepare('SELECT id FROM documentos WHERE id = ?').get(docAjeno),
+      'el archivo de Delta sigue ahí');
+
+    // Un operador sí alcanza a los dos, y se le dice cuántos archivos ajenos
+    // se llevó: un {ok:true} pelón escondería que vació la carpeta de otro.
+    const conPermiso = await mandar('DELETE', `/api/admin/proyectos/${obraSola}`, operador);
+    assert.equal(conPermiso.status, 200);
+    assert.equal((await conPermiso.json()).archivos_de_terceros, 1);
+    assert.equal(
+      await memoria.prepare('SELECT id FROM documentos WHERE id = ?').get(docAjeno), undefined
     );
+  } finally {
+    await memoria.query('UPDATE clients SET vendedor_id = NULL WHERE id = ?', [VEGA]);
+    await memoria.query('DELETE FROM documentos WHERE id = ?', [idDoc]);
   }
 });
 
