@@ -1568,7 +1568,30 @@ router.get('/clientes/:id/detalle', async (req, res) => {
        ORDER BY c.razon_social`
     ).all(id);
 
+    // Los contratos que EXISTEN pero que esta pantalla no está mostrando,
+    // porque su proveedor está suspendido en el padrón y panoramaDelContratante
+    // filtra por cp.activo = 1.
+    //
+    // Hace falta decirlo o la pantalla se contradice a sí misma: la partida
+    // vuelve a decir "sin contratista", el operador vuelve a asignar, y queda
+    // una segunda obra fantasma. Pasó de verdad al probar el atajo.
+    //
+    // Va SOLO al panel: el contratante no ve a sus suspendidos —los suspendió
+    // él— y esta cuenta no es dato suyo, es de la captura de Fortex.
+    const invisibles = await db.prepare(
+      `SELECT p.id, p.nombre, p.partida_id, p.desarrollo_id,
+              p.client_id, c.razon_social AS proveedor_nombre
+       FROM proyectos p
+       JOIN client_proveedores cp
+         ON cp.proveedor_id = p.client_id
+        AND cp.contratante_id = p.contratante_id
+       JOIN clients c ON c.id = p.client_id
+       WHERE p.contratante_id = ? AND cp.activo = 0
+       ORDER BY c.razon_social, p.nombre`
+    ).all(id);
+
     return res.json({
+      obras_invisibles: invisibles,
       cliente, usuarios, proveedores, suspendidos, obras, metricas,
       // 'proyectos' aquí son SUS desarrollos, no obras propias: un contratante
       // no ejecuta obra. El front lo distingue por cliente.tipo.

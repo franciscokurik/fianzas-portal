@@ -440,6 +440,20 @@ export async function panoramaDelContratante(contratanteId) {
       // requisitos para que no se pueda prometer, y esa partida sale verde sin
       // haber comprobado nada.
       partidas_sin_requisitos: susPartidas.filter((pa) => !pa.requisitos.length).length,
+      // Lo que le falta cobertura en ESTE proyecto, sin importar en qué nivel
+      // esté capturado: las partidas descubiertas más las obras vivas suyas que
+      // no están en ninguna partida. Mismo criterio que el titular del portal.
+      //
+      // Lo calcula el servidor y no el front porque allá se escribió
+      // "partidas_descubiertas ?? obras_descubiertas", y ese respaldo NUNCA
+      // entraba: partidas_descubiertas siempre existe y vale 0. Un proyecto sin
+      // partidas y con una obra sin fianza se quedaba callado mientras el punto
+      // ámbar de la lista de clientes prendía por la misma obra.
+      pendientes_sin_fianza: susPartidas.filter(
+        (pa) => obraDescubierta(pa.estado_cobertura)
+      ).length + vivasDeEste.filter(
+        (o) => o.partida_id == null && obraDescubierta(o.estado_cobertura)
+      ).length,
       total_proveedores: new Set(suyas.map((o) => o.client_id)).size,
       total_obras: suyas.length,
       obras_vivas: vivasDeEste.length,

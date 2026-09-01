@@ -610,6 +610,9 @@ function DetalleCliente({
     // Solo vienen cuando es un contratante (la API contesta con la forma que le
     // toca a cada tipo, no con listas vacías; ver routes/admin.js).
     proveedores = [], suspendidos = [], obras = [], metricas,
+    // Los contratos que EXISTEN y esta pantalla no muestra, porque su proveedor
+    // quedó suspendido en el padrón. Solo para Fortex (ver routes/admin.js).
+    obras_invisibles: obrasInvisibles = [],
     lineas_proveedores: lineasProveedores = [],
     // Y solo cuando es un fiado: a qué contratantes les surte.
     contratantes = [],
@@ -840,6 +843,7 @@ function DetalleCliente({
           proveedores={proveedores}
           suspendidos={suspendidos}
           clientes={clientes}
+          obrasInvisibles={obrasInvisibles}
           tipos={tipos}
           lineasProveedores={lineasProveedores}
           puedeLigarContratante={puedeOperar}
@@ -886,6 +890,7 @@ function DetalleCliente({
         puedeLigarContratante={puedeOperar}
         onChange={onChange}
         flash={flash}
+        avisar={avisar}
       />
 
       {/* Expediente del fiado */}
@@ -1082,6 +1087,8 @@ function AsignarContratista({
   // Para no pisar lo que el operador escribió: el nombre se autocompleta solo
   // mientras no lo haya tocado.
   const [nombreTocado, setNombreTocado] = useState(false);
+  const [confirmar, setConfirmar] = useState('');
+  const [confirmado, setConfirmado] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -1105,6 +1112,10 @@ function AsignarContratista({
   };
 
   function elegirProveedor(id) {
+    // La confirmación era para el proveedor anterior. Dejarla viva sería un sí
+    // heredado, que es lo mismo que no haber preguntado.
+    setConfirmar('');
+    setConfirmado(false);
     setF((s) => ({
       ...s,
       client_id: id,
@@ -1114,10 +1125,40 @@ function AsignarContratista({
     }));
   }
 
+  // Ligar la obra mete al proveedor al padrón del contratante si no estaba, y
+  // eso le abre sus pólizas a otra empresa en ese instante. No se deshace. El
+  // optgroup lo avisa, pero avisar no es preguntar: se pide un sí explícito.
+  const vieneDeFuera = (id) => {
+    const n = Number(id);
+    return Boolean(n) && !enPadron.has(n) && !enSuspendidos.has(n);
+  };
+
+  // Un segundo contrato del MISMO proveedor en la MISMA partida es legítimo
+  // —puede haber dos contratos— pero casi siempre es el doble clic de alguien
+  // que no vio el primero. El servidor no tiene guarda y no debe tenerla; el
+  // aviso va aquí.
+  const yaTieneContrato = (id) =>
+    (partida.contratos || []).some((o) => o.client_id === Number(id));
+
   async function guardar() {
     setError('');
     if (!f.client_id) return setError('Elige al contratista.');
     if (!f.nombre.trim()) return setError('El nombre del contrato es obligatorio.');
+
+    if (vieneDeFuera(f.client_id) && !confirmado) {
+      return setConfirmar(
+        `${nombreDelProveedor(f.client_id)} no está en el padrón de ${contratanteNombre}. `
+        + 'Al ligarla queda dentro, y el contratante va a ver las pólizas de esta obra. '
+        + 'Eso no se deshace.'
+      );
+    }
+    if (yaTieneContrato(f.client_id) && !confirmado) {
+      return setConfirmar(
+        `Ya hay un contrato de ${nombreDelProveedor(f.client_id)} en esta partida. `
+        + 'Si es otro contrato distinto, adelante; si no, cancela y revisa el que ya está.'
+      );
+    }
+
     setBusy(true);
     try {
       // Solo partida_id: el desarrollo y el contratante los deriva el servidor.
@@ -1129,9 +1170,11 @@ function AsignarContratista({
         numero_contrato: f.numero_contrato || null,
         monto_contrato: f.monto_contrato,
         partida_id: partida.id,
-        // El respaldo legible de la póliza. No autoriza nada —eso es
-        // contratante_id— pero es el texto que va impreso.
-        beneficiario: contratanteNombre || null,
+        // El beneficiario NO se prellena, aunque sea tentador. Es el texto que
+        // va impreso en la póliza y casi siempre es CFE, el IMSS o un municipio
+        // —no el contratante del portal—; nadie lo verificó aquí, y si la obra
+        // se mueve luego a la partida de otro contratante, quedaría nombrando
+        // al anterior. Se captura en la obra, donde el formulario lo explica.
       });
       await onListo(r);
     } catch (e) {
@@ -1214,6 +1257,19 @@ function AsignarContratista({
         </div>
       )}
 
+      {confirmar && (
+        <div className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800 flex flex-wrap items-start gap-2">
+          <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+          <span className="flex-1 min-w-[12rem]">{confirmar}</span>
+          <button
+            onClick={() => { setConfirmado(true); setConfirmar(''); guardar(); }}
+            className="underline hover:no-underline font-medium shrink-0"
+          >
+            Sí, ligar
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2 mt-2">
         <button onClick={guardar} disabled={busy} className={btnSecondary}>
           <Save className="h-3.5 w-3.5" /> {busy ? 'Asignando…' : 'Asignar'}
@@ -1222,7 +1278,8 @@ function AsignarContratista({
           <X className="h-3.5 w-3.5" /> Cancelar
         </button>
         <span className="text-[11px] text-slate-400">
-          Fechas, estatus y pólizas se capturan luego en la obra del proveedor.
+          Fechas, beneficiario, estatus y pólizas se capturan luego en la obra
+          del proveedor.
         </span>
       </div>
     </div>
@@ -1231,9 +1288,14 @@ function AsignarContratista({
 
 function PartidasDelProyecto({
   contratanteId, contratanteNombre, proyecto, tipos, nombreDe,
-  proveedores = [], suspendidos = [], clientes = [], puedeLigarContratante,
-  onChange, flash, avisar,
+  proveedores = [], suspendidos = [], clientes = [], obrasInvisibles = [],
+  puedeLigarContratante, onChange, flash, avisar,
 }) {
+  // Los contratos que existen y esta pantalla no muestra, por partida. Vienen
+  // del panel (obras_invisibles) y no del panorama, porque el panorama es lo que
+  // ve el contratante y él no ve a sus suspendidos.
+  const invisiblesDe = (partidaId) =>
+    obrasInvisibles.filter((o) => o.partida_id === partidaId);
   const [creando, setCreando] = useState(false);
   const [editando, setEditando] = useState(null);
   const [asignando, setAsignando] = useState(null);
@@ -1368,12 +1430,20 @@ function PartidasDelProyecto({
                 clientes={clientes}
                 onCancel={() => setAsignando(null)}
                 onListo={async (r) => {
-                  setAsignando(null);
                   onChange();
+                  if (r?.aviso) {
+                    // Sin verde: la obra quedó ligada pero el contratante no la
+                    // ve, así que "Contratista asignado" prometería algo que no
+                    // pasó. El formulario tampoco se cierra —queda a la vista
+                    // con el aviso— porque esta pantalla filtra por padrón
+                    // activo y la partida va a seguir diciendo "sin
+                    // contratista": cerrando, el operador vuelve a asignar y
+                    // deja una segunda obra fantasma. Pasó al probarlo.
+                    avisar?.(r.aviso);
+                    return;
+                  }
+                  setAsignando(null);
                   flash('Contratista asignado');
-                  // El aviso va aparte y en ámbar: dice que la obra quedó
-                  // ligada PERO que el contratante todavía no la ve.
-                  if (r?.aviso) avisar?.(r.aviso);
                 }}
               />
             )}
@@ -1401,11 +1471,24 @@ function PartidasDelProyecto({
                   </p>
                 ))
               : (
-                <p className="text-[11px] text-slate-400 pl-1">
-                  {puedeLigarContratante
-                    ? 'sin contratista — usa "Asignar contratista" aquí arriba'
-                    : 'sin contratista — lo asigna un operador'}
-                </p>
+                <>
+                  <p className="text-[11px] text-slate-400 pl-1">
+                    {puedeLigarContratante
+                      ? 'sin contratista — usa "Asignar contratista" aquí arriba'
+                      : 'sin contratista — lo asigna un operador'}
+                  </p>
+                  {/* Y si SÍ hay contratos pero esta pantalla no los muestra
+                      porque su proveedor está suspendido, se dice. Sin esto la
+                      pantalla se contradice: invita a asignar lo que ya está
+                      asignado, y el segundo clic deja una obra fantasma. */}
+                  {invisiblesDe(pa.id).length > 0 && (
+                    <p className="text-[11px] text-amber-700 pl-1">
+                      {invisiblesDe(pa.id).length} contrato(s) ya asignado(s) que no se ven
+                      aquí: {invisiblesDe(pa.id).map((o) => o.proveedor_nombre).join(', ')}
+                      {' '}está(n) suspendido(s) en el padrón. Reactívalo(s) abajo.
+                    </p>
+                  )}
+                </>
               )}
           </div>
         ))}
@@ -1439,14 +1522,24 @@ function PartidasDelProyecto({
 
 function ProyectosDelContratante({
   contratanteId, contratanteNombre, proyectos, proveedores, suspendidos = [],
-  clientes = [], tipos, lineasProveedores, puedeLigarContratante,
-  onChange, flash, avisar,
+  clientes = [], obrasInvisibles = [], tipos, lineasProveedores,
+  puedeLigarContratante, onChange, flash, avisar,
 }) {
   const [creando, setCreando] = useState(false);
   const [editando, setEditando] = useState(null);
   const [error, setError] = useState('');
 
-  const nombreDe = (id) => proveedores.find((p) => p.id === id)?.razon_social || 'Proveedor';
+  // Busca en el padrón activo, luego en los suspendidos y luego en la cartera.
+  // Los tres, porque el atajo permite asignar a un suspendido y a un fiado de
+  // fuera del padrón a propósito: con la búsqueda solo en el padrón activo esos
+  // contratos se pintaban como el genérico "Proveedor" y se perdía a quién
+  // reclamarle. Y si de plano no aparece, se dice que está fuera del padrón en
+  // vez de fingir un nombre.
+  const nombreDe = (id) =>
+    proveedores.find((p) => p.id === id)?.razon_social
+    || suspendidos.find((p) => p.id === id)?.razon_social
+    || clientes.find((c) => c.id === id)?.razon_social
+    || 'Proveedor (fuera del padrón)';
 
   async function borrar(p) {
     setError('');
@@ -1522,9 +1615,9 @@ function ProyectosDelContratante({
                     {p.partidas_sin_contratista > 0 && (
                       <span className="text-slate-500"> · {p.partidas_sin_contratista} sin contratar</span>
                     )}
-                    {(p.partidas_descubiertas ?? p.obras_descubiertas) > 0 && (
+                    {p.pendientes_sin_fianza > 0 && (
                       <span className="text-rose-600">
-                        {' · '}{p.partidas_descubiertas ?? p.obras_descubiertas} sin fianza completa
+                        {' · '}{p.pendientes_sin_fianza} sin fianza completa
                       </span>
                     )}
                     {p.monto_afianzado > 0 && (
@@ -1562,6 +1655,7 @@ function ProyectosDelContratante({
                 proveedores={proveedores}
                 suspendidos={suspendidos}
                 clientes={clientes}
+                obrasInvisibles={obrasInvisibles}
                 puedeLigarContratante={puedeLigarContratante}
                 onChange={onChange}
                 flash={flash}
@@ -2895,7 +2989,7 @@ function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange 
 
 function Proyectos({
   clienteId, proyectos, afianzadoras, tipos, tiposDoc,
-  contratantes = [], puedeLigarContratante, onChange, flash,
+  contratantes = [], puedeLigarContratante, onChange, flash, avisar,
 }) {
   const [creando, setCreando] = useState(false);
 
@@ -2921,7 +3015,11 @@ function Proyectos({
             // El servidor avisa si la obra quedó ligada a un contratante que
             // tiene suspendido a este proveedor: se ligó, pero todavía no la ve.
             flash('Proyecto creado');
-            if (r.aviso) avisar(r.aviso);
+            // El '?.' no es por costumbre: este aviso solo aparece cuando el
+            // proveedor está suspendido, así que una prop mal cableada NO
+            // revienta en las pruebas ni en el uso normal — revienta el día que
+            // de verdad hay algo que avisar. Ya pasó una vez.
+            if (r.aviso) avisar?.(r.aviso);
           }}
         />
       )}
@@ -2940,6 +3038,7 @@ function Proyectos({
             puedeLigarContratante={puedeLigarContratante}
             onChange={onChange}
             flash={flash}
+            avisar={avisar}
           />
         ))}
         {!proyectos.length && !creando && (
@@ -2954,7 +3053,7 @@ function Proyectos({
 
 function Proyecto({
   proyecto: p, proyectos, clienteId, afianzadoras, tipos, tiposDoc,
-  contratantes = [], puedeLigarContratante, onChange, flash,
+  contratantes = [], puedeLigarContratante, onChange, flash, avisar,
 }) {
   const [abierto, setAbierto] = useState(true);
   const [editando, setEditando] = useState(false);
@@ -3066,7 +3165,7 @@ function Proyecto({
             setEditando(false);
             onChange();
             flash('Proyecto actualizado');
-            if (r.aviso) avisar(r.aviso);
+            if (r.aviso) avisar?.(r.aviso);
           }}
         />
       )}

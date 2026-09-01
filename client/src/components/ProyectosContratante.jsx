@@ -244,10 +244,10 @@ function DetalleProyecto({
               )}
             </p>
             <p className={`text-[11px] tabular-nums ${
-              proyecto?.partidas_descubiertas ? 'text-rose-600 font-medium' : 'text-emerald-700'
+              proyecto?.pendientes_sin_fianza ? 'text-rose-600 font-medium' : 'text-emerald-700'
             }`}>
-              {proyecto?.partidas_descubiertas
-                ? `${proyecto.partidas_descubiertas} sin fianza completa`
+              {proyecto?.pendientes_sin_fianza
+                ? `${proyecto.pendientes_sin_fianza} sin fianza completa`
                 : 'todas con fianza'}
             </p>
           </div>
@@ -402,8 +402,7 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
           <div
             key={p.id}
             className={`portal-card bg-white border rounded-lg ${
-              (p.partidas_descubiertas ?? p.obras_descubiertas) > 0
-                ? 'border-rose-200' : 'border-slate-200'
+              p.pendientes_sin_fianza > 0 ? 'border-rose-200' : 'border-slate-200'
             }`}
           >
             <div className="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -427,9 +426,9 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
                   {p.partidas_sin_contratista > 0 && (
                     <span className="text-slate-500"> · {p.partidas_sin_contratista} sin contratar</span>
                   )}
-                  {(p.partidas_descubiertas ?? p.obras_descubiertas) > 0 && (
+                  {p.pendientes_sin_fianza > 0 && (
                     <span className="text-rose-600">
-                      {' · '}{p.partidas_descubiertas ?? p.obras_descubiertas} sin fianza completa
+                      {' · '}{p.pendientes_sin_fianza} sin fianza completa
                     </span>
                   )}
                   {p.monto_afianzado > 0 && (

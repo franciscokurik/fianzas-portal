@@ -664,6 +664,129 @@ test('el vendedor no puede usar el atajo', async () => {
 });
 
 
+test('un proyecto SIN partidas y con obra sin fianza no se queda callado', async () => {
+  // El '??' del front nunca caía al respaldo, porque partidas_descubiertas
+  // siempre existe y vale 0: el renglón del proyecto decía nada mientras el
+  // punto de la lista de clientes prendía por la misma obra. Ahora el número lo
+  // calcula el servidor y es uno solo.
+  const proy = (await (await mandar('POST', '/api/proveedores/proyectos', delta, {
+    nombre: 'Nave industrial', clave: 'NAV-01',
+  })).json()).id;
+
+  const obra = (await (await mandar('POST', '/api/admin/proyectos', operador, {
+    client_id: VEGA, nombre: 'Nave – Vega', desarrollo_id: proy,
+  })).json()).id;
+
+  const lista = await (await pedir('/api/proveedores/proyectos', delta)).json();
+  const nave = lista.proyectos.find((p) => p.id === proy);
+
+  assert.equal(nave.total_partidas, 0, 'a propósito: sin partidas');
+  assert.equal(nave.partidas_descubiertas, 0);
+  assert.equal(nave.obras_descubiertas, 1);
+  assert.equal(nave.pendientes_sin_fianza, 1, 'la obra suelta sin fianza tiene que contar');
+
+  await mandar('PUT', `/api/admin/proyectos/${obra}`, operador, {
+    nombre: 'Nave – Vega', contratante_id: '',
+  });
+  await mandar('DELETE', `/api/proveedores/proyectos/${proy}`, delta);
+});
+
+test('con partidas, el pendiente del proyecto suma los dos niveles', async () => {
+  const proy = (await (await mandar('POST', '/api/proveedores/proyectos', delta, {
+    nombre: 'Centro comercial',
+  })).json()).id;
+
+  // Una partida descubierta...
+  const pa = (await (await mandar(
+    'POST', `/api/proveedores/proyectos/${proy}/partidas`, delta,
+    { nombre: 'Estacionamiento', requisitos: [tCumplimiento] }
+  )).json()).id;
+  const enPartida = (await (await mandar('POST', '/api/admin/proyectos', operador, {
+    client_id: VEGA, nombre: 'Estacionamiento – Vega', partida_id: pa,
+  })).json()).id;
+
+  // ...y una obra suelta, también descubierta. Contando solo partidas, esta
+  // segunda desaparecería del número; contando solo obras, volvería el falso OK
+  // de una partida con fianza incompleta.
+  const suelta = (await (await mandar('POST', '/api/admin/proyectos', operador, {
+    client_id: VEGA, nombre: 'Barda perimetral – Vega', desarrollo_id: proy,
+  })).json()).id;
+
+  const lista = await (await pedir('/api/proveedores/proyectos', delta)).json();
+  const centro = lista.proyectos.find((p) => p.id === proy);
+  assert.equal(centro.partidas_descubiertas, 1);
+  assert.equal(centro.pendientes_sin_fianza, 2, 'la partida y la obra suelta');
+
+  for (const id of [enPartida, suelta]) {
+    await mandar('PUT', `/api/admin/proyectos/${id}`, operador, {
+      nombre: 'x', contratante_id: '',
+    });
+  }
+  await mandar('DELETE', `/api/proveedores/partidas/${pa}`, delta);
+  await mandar('DELETE', `/api/proveedores/proyectos/${proy}`, delta);
+});
+
+test('el panel dice qué contratos NO se ven por el padrón', async () => {
+  // El bug que se vivió probando el atajo: con el proveedor suspendido, su
+  // contrato desaparece de esta pantalla, la partida vuelve a decir "sin
+  // contratista", y el segundo clic deja una obra fantasma.
+  const pa = (await (await mandar(
+    'POST', `/api/proveedores/proyectos/${torre}/partidas`, delta,
+    { nombre: 'Cancelería', requisitos: [tCumplimiento] }
+  )).json()).id;
+
+  const obra = (await (await mandar('POST', '/api/admin/proyectos', operador, {
+    client_id: VEGA, nombre: 'Cancelería – Vega', partida_id: pa,
+  })).json()).id;
+
+  // Con el proveedor activo, la obra se ve normal y no hay nada invisible.
+  let det = await (await pedir(`/api/admin/clientes/${DELTA}/detalle`, operador)).json();
+  assert.equal(det.obras_invisibles.length, 0);
+
+  await memoria.query(
+    `UPDATE client_proveedores SET activo = 0
+     WHERE contratante_id = ${DELTA} AND proveedor_id = ${VEGA}`
+  );
+  try {
+    det = await (await pedir(`/api/admin/clientes/${DELTA}/detalle`, operador)).json();
+
+    // El panorama ya no la trae —es lo que ve el contratante, y él no ve a sus
+    // suspendidos— pero el panel sí sabe que existe.
+    const enPartidas = det.proyectos.flatMap((p) => p.partidas || [])
+      .find((x) => x.id === pa);
+    assert.equal(enPartidas.contratos.length, 0, 'el panorama la filtra, como debe');
+
+    const invisible = det.obras_invisibles.find((o) => o.id === obra);
+    assert.ok(invisible, 'el panel tiene que saber que existe');
+    assert.equal(invisible.partida_id, pa);
+    assert.equal(invisible.proveedor_nombre, 'Cimentaciones Vega');
+  } finally {
+    await memoria.query(
+      `UPDATE client_proveedores SET activo = 1
+       WHERE contratante_id = ${DELTA} AND proveedor_id = ${VEGA}`
+    );
+  }
+
+  await mandar('PUT', `/api/admin/proyectos/${obra}`, operador, {
+    nombre: 'Cancelería – Vega', contratante_id: '',
+  });
+  await mandar('DELETE', `/api/proveedores/partidas/${pa}`, delta);
+});
+
+test('el contratante NUNCA recibe obras_invisibles', async () => {
+  // Es dato de la captura de Fortex, no suyo: él suspendió a ese proveedor.
+  const lista = await (await pedir('/api/proveedores/proyectos', delta)).json();
+  const uno = await (await pedir(`/api/proveedores/proyectos/${torre}`, delta)).json();
+  const padron = await (await pedir('/api/proveedores', delta)).json();
+
+  for (const [nombre, cuerpo] of [['lista', lista], ['detalle', uno], ['padrón', padron]]) {
+    assert.equal(
+      JSON.stringify(cuerpo).includes('obras_invisibles'), false,
+      `${nombre} no debe traer obras_invisibles`
+    );
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Quién alcanza qué
 // ---------------------------------------------------------------------------
