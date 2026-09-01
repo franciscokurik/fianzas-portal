@@ -247,6 +247,18 @@ export default function Obra({ obra, clienteId, tipos = [], onCambio, avisar, co
         <span className={`text-sm font-medium ${obra.viva ? 'text-slate-700' : 'text-slate-500'}`}>
           {conProveedor ? `${conProveedor} · ` : ''}{obra.nombre}
         </span>
+        {/* Lo que le falta a ESTA obra, no a la partida. Va aquí porque la
+            fianza la presenta esta empresa por este contrato: en el renglón de
+            la partida el reclamo no tendría a quién dirigirse cuando hay dos
+            contratistas. */}
+        {obra.faltantes?.length > 0 && (
+          <span
+            className="text-[11px] px-1.5 py-0.5 rounded border bg-rose-50 text-rose-700 border-rose-200 font-medium"
+            title="Ninguna póliza vigente de este tipo para esta obra"
+          >
+            falta {obra.faltantes.map((f) => f.tipo_fianza).join(' y ')}
+          </span>
+        )}
         {obra.numero_contrato && (
           <span className="text-[11px] font-mono text-slate-500">{obra.numero_contrato}</span>
         )}
@@ -260,7 +272,10 @@ export default function Obra({ obra, clienteId, tipos = [], onCambio, avisar, co
             </span>
           )}
           {obra.viva ? (
-            <CumplimientoBadge estado={obra.estado_cobertura} />
+            <CumplimientoBadge
+              estado={obra.estado_cobertura}
+              verificada={obra.cobertura_verificada}
+            />
           ) : (
             <span
               className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-500 whitespace-nowrap"

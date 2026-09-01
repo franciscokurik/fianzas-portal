@@ -150,9 +150,19 @@ const cubreHoy = (f) => f.clase !== 'previo' && (f.estado === 'activa' || f.esta
 // cubierta: se cae al significado de antes —"tiene fianza"— y el front lo dice
 // con esas palabras. Prometer completitud sin saber qué se exige sería el mismo
 // falso OK con otro nombre.
-export function estadoDePartida(requisitos, contratos, fianzas) {
-  if (!contratos.length) return { estado: 'sin_contratista', faltantes: [] };
-
+// El estado de UN contrato contra lo que se le exige, y QUÉ le falta.
+//
+// Está escrito una sola vez porque se aplica en dos niveles: la obra se juzga
+// contra los requisitos de su partida, y la partida contra sus obras ya
+// juzgadas. Sin requisitos capturados se reduce a "¿tiene fianza vigente?", que
+// es todo lo que se podía contestar antes de que las partidas existieran.
+//
+// La unidad es EL CONTRATO, y eso no es un detalle de implementación: una fianza
+// la presenta una empresa por un contrato, y responde por ese contrato. Evaluar
+// el requisito sobre el montón de pólizas de la partida hacía que, con los muros
+// partidos entre dos empresas, la fianza de la primera tapara la falta de la
+// segunda — y la partida salía cubierta con un contratista trabajando sin nada.
+export function estadoContraRequisitos(requisitos, fianzas) {
   const emitidas = fianzas.filter((f) => f.clase !== 'previo');
   if (!emitidas.length) return { estado: 'sin_fianza', faltantes: requisitos };
 
@@ -178,6 +188,22 @@ export function estadoDePartida(requisitos, contratos, fianzas) {
   };
 }
 
+// La partida, a partir de sus contratos YA juzgados uno por uno.
+//
+// Su estado es el del peor: basta que a un contratista le falte su fianza para
+// que la partida no esté cubierta, aunque los demás la tengan. Y sus faltantes
+// son la unión sin repetir, porque la pantalla dice QUÉ falta y decir dos veces
+// "Anticipo" porque dos empresas lo deben no ayuda a nadie.
+export function estadoDePartida(contratos) {
+  if (!contratos.length) return { estado: 'sin_contratista', faltantes: [] };
+
+  const faltantes = [...new Map(
+    contratos.flatMap((o) => o.faltantes || []).map((r) => [r.tipo_fianza_id, r])
+  ).values()];
+
+  return { estado: peorDe(contratos.map((o) => o.estado_cobertura)), faltantes };
+}
+
 // ¿Está cubierta esta obra, hoy?
 //   'cubierta'     -> hay al menos una fianza emitida y vigente
 //   'por_vencer'   -> la cobertura vigente vence en 30 días o menos
@@ -188,18 +214,13 @@ export function estadoDePartida(requisitos, contratos, fianzas) {
 // Un previo no cubre nada: es lo que se cotizó y la afianzadora todavía no
 // emite. Se le muestra al contratante marcado, para que sepa que el trámite ya
 // va, pero una obra con puros previos está descubierta.
+// Es exactamente el caso "nadie declaró qué se exige" del cálculo de arriba. Se
+// deja con su nombre porque así se lee en el resto del archivo, pero una sola
+// implementación: dos copias de esta regla se separan tarde o temprano, y la
+// última vez el que se quedó atrás fue el que decía verde con una póliza sin
+// fecha de vigencia.
 export function estadoDeObra(fianzas) {
-  const emitidas = fianzas.filter((f) => f.clase !== 'previo');
-  if (!emitidas.length) return 'sin_fianza';
-
-  const vigentes = emitidas.filter((f) => f.estado === 'activa' || f.estado === 'por_vencer');
-  if (!vigentes.length) {
-    // Distinguir "se venció" de "nunca se capturó la fecha": lo primero es del
-    // proveedor y lo segundo de Fortex, y se arreglan en lugares distintos.
-    return emitidas.some((f) => f.estado === 'sin_vigencia') ? 'sin_vigencia' : 'vencida';
-  }
-
-  return vigentes.some((f) => f.estado === 'por_vencer') ? 'por_vencer' : 'cubierta';
+  return estadoContraRequisitos([], fianzas).estado;
 }
 
 // Lo que un conjunto de pólizas le está apartando a cada proveedor con cada
@@ -294,9 +315,16 @@ export async function panoramaDelContratante(contratanteId) {
     documentos: docsPorFianza.get(f.id) || [],
   }));
 
+  // Lo que exige la partida de cada obra, para juzgarla contra eso y no solo
+  // contra "¿tiene alguna?". Una obra fuera de toda partida no exige nada, que
+  // es el estado de todo lo capturado antes de que las partidas existieran.
+  const exigePartida = new Map(partidasRows.map((pa) => [pa.id, pa.requisitos]));
+
   const obras = obrasRows.map((o) => {
     const suyas = fianzas.filter((f) => f.proyecto_id === o.id);
     const emitidas = suyas.filter((f) => f.clase !== 'previo');
+    const requisitos = exigePartida.get(o.partida_id) || [];
+    const { estado, faltantes } = estadoContraRequisitos(requisitos, suyas);
     return {
       ...o,
       viva: obraViva(o.estatus),
@@ -306,7 +334,13 @@ export async function panoramaDelContratante(contratanteId) {
       // capturada, y no puede contar como cobertura ni sumar en nada.
       mis_documentos: misDocsPorObra.get(o.id) || [],
       total_previos: suyas.length - emitidas.length,
-      estado_cobertura: estadoDeObra(suyas),
+      estado_cobertura: estado,
+      // QUÉ le falta a ESTA obra. Sube hasta la partida y hasta el padrón, así
+      // que el mismo hueco se cuenta igual desde donde se mire.
+      faltantes,
+      // Si "cubierta" se puede decir de verdad. Sin requisitos capturados lo
+      // único afirmable es que hay póliza, y la pantalla lo dice "Con fianza".
+      cobertura_verificada: requisitos.length > 0,
       // Lo que cubren las fianzas que siguen vigentes. Es la cifra que el
       // desarrollador quiere: cuánto tiene respaldado hoy, no cuánto tuvo.
       monto_afianzado: emitidas
@@ -360,7 +394,7 @@ export async function panoramaDelContratante(contratanteId) {
     // el porcentaje que uno saca de cabeza salga falso.
     const vivos = contratos.filter((o) => o.viva);
     const fianzasDeLaPartida = vivos.flatMap((o) => o.fianzas);
-    const { estado, faltantes } = estadoDePartida(pa.requisitos, vivos, fianzasDeLaPartida);
+    const { estado, faltantes } = estadoDePartida(vivos);
 
     return {
       ...pa,

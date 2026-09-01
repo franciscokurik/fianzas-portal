@@ -28,7 +28,15 @@ function nombreValido(nombre) {
 
 // El orden en que se presentan: primero cimentación, al final acabados. Un
 // número raro no debe tumbar la captura, así que cae al 50 de siempre.
+//
+// El vacío se descarta ANTES de convertir, y ahí estaba el error: Number('') es
+// 0, no NaN, así que borrar el campo en el formulario guardaba orden 0 y la
+// partida se iba de un salto al principio de la obra. Los acabados aparecían
+// antes que la cimentación por haber dejado una casilla en blanco.
+//
+// null y los espacios en blanco caen igual: Number(null) también es 0.
 function ordenValido(orden) {
+  if (orden === null || orden === undefined || String(orden).trim() === '') return 50;
   const n = Number(orden);
   return Number.isFinite(n) ? Math.round(n) : 50;
 }

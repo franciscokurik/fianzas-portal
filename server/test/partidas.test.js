@@ -28,7 +28,9 @@ db.prepare = memoria.prepare;
 const { default: app } = await import('../src/app.js');
 const { signToken } = await import('../src/auth/middleware.js');
 const { inicializar } = await import('../src/migrations.js');
-const { estadoDePartida } = await import('../src/services/proveedores.js');
+const {
+  estadoDePartida, estadoContraRequisitos,
+} = await import('../src/services/proveedores.js');
 
 let servidor;
 let base;
@@ -381,47 +383,77 @@ test('mandar requisitos vacíos SÍ los borra: es lo que se pidió', async () =>
 // El cálculo, directo: los casos que por HTTP costarían mucho montar
 // ---------------------------------------------------------------------------
 
-test('estadoDePartida distingue los seis casos', () => {
-  const req = [{ tipo_fianza_id: 1, tipo_fianza: 'Cumplimiento' },
-               { tipo_fianza_id: 2, tipo_fianza: 'Anticipo' }];
-  const obra = [{ id: 1 }];
-  const poliza = (tipo, estado, clase = 'emitida') =>
-    ({ tipo_fianza_id: tipo, estado, clase });
+const REQ = [{ tipo_fianza_id: 1, tipo_fianza: 'Cumplimiento' },
+             { tipo_fianza_id: 2, tipo_fianza: 'Anticipo' }];
+const poliza = (tipo, estado, clase = 'emitida') => ({ tipo_fianza_id: tipo, estado, clase });
+// Un contrato como lo arma el panorama: su estado y sus faltantes ya calculados.
+const contrato = (requisitos, fianzas) => {
+  const r = estadoContraRequisitos(requisitos, fianzas);
+  return { estado_cobertura: r.estado, faltantes: r.faltantes };
+};
 
-  assert.equal(estadoDePartida(req, [], []).estado, 'sin_contratista');
-  assert.equal(estadoDePartida(req, obra, []).estado, 'sin_fianza');
+test('un contrato se juzga contra lo que su partida exige', () => {
+  assert.equal(estadoContraRequisitos(REQ, []).estado, 'sin_fianza');
   assert.equal(
-    estadoDePartida(req, obra, [poliza(1, 'activa'), poliza(2, 'activa')]).estado,
-    'cubierta'
+    estadoContraRequisitos(REQ, [poliza(1, 'activa'), poliza(2, 'activa')]).estado, 'cubierta'
   );
+  assert.equal(estadoContraRequisitos(REQ, [poliza(1, 'activa')]).estado, 'incompleta');
   assert.equal(
-    estadoDePartida(req, obra, [poliza(1, 'activa')]).estado, 'incompleta'
-  );
-  assert.equal(
-    estadoDePartida(req, obra, [poliza(1, 'vencida'), poliza(2, 'vencida')]).estado, 'vencida'
+    estadoContraRequisitos(REQ, [poliza(1, 'vencida'), poliza(2, 'vencida')]).estado, 'vencida'
   );
   // Sin fecha de vigencia capturada NO es cobertura: es lo mismo que se arregló
   // en las obras. Verde por una fecha que nadie puso es la peor mentira posible.
-  assert.equal(
-    estadoDePartida(req, obra, [poliza(1, 'sin_vigencia')]).estado, 'sin_vigencia'
-  );
+  assert.equal(estadoContraRequisitos(REQ, [poliza(1, 'sin_vigencia')]).estado, 'sin_vigencia');
   // Un PREVIO no es fianza: la afianzadora no ha emitido nada.
-  assert.equal(
-    estadoDePartida(req, obra, [poliza(1, 'activa', 'previo')]).estado, 'sin_fianza'
-  );
+  assert.equal(estadoContraRequisitos(REQ, [poliza(1, 'activa', 'previo')]).estado, 'sin_fianza');
   // Por vencer sigue cubriendo hoy, pero se avisa.
   assert.equal(
-    estadoDePartida(req, obra, [poliza(1, 'por_vencer'), poliza(2, 'activa')]).estado,
+    estadoContraRequisitos(REQ, [poliza(1, 'por_vencer'), poliza(2, 'activa')]).estado,
     'por_vencer'
+  );
+  // Y dice CUÁL falta, que es lo único accionable.
+  assert.deepEqual(
+    estadoContraRequisitos(REQ, [poliza(1, 'activa')]).faltantes.map((f) => f.tipo_fianza),
+    ['Anticipo']
   );
 });
 
 test('sin requisitos capturados, tener fianza basta para no estar descubierta', () => {
   // Es honesto: el portal no puede exigir lo que nadie declaró. Lo que NO hace
   // es llamarle "cubierta" en la pantalla.
-  const r = estadoDePartida([], [{ id: 1 }], [{ tipo_fianza_id: 9, estado: 'activa', clase: 'emitida' }]);
+  const r = estadoContraRequisitos([], [poliza(9, 'activa')]);
   assert.equal(r.estado, 'cubierta');
   assert.deepEqual(r.faltantes, []);
+});
+
+test('la partida sin contratos es un pendiente, no una falta', () => {
+  assert.equal(estadoDePartida([]).estado, 'sin_contratista');
+  assert.deepEqual(estadoDePartida([]).faltantes, []);
+});
+
+test('la fianza de un contratista NO tapa la falta de otro', () => {
+  // El bug: los muros partidos entre dos empresas, la partida exige
+  // cumplimiento, la primera lo presentó y la segunda no. Evaluando el montón
+  // de pólizas de la partida, la póliza de la primera satisfacía el requisito y
+  // la partida salía CUBIERTA con alguien trabajando sin nada.
+  //
+  // Una fianza responde por UN contrato y UN fiado. La unidad es el contrato.
+  const exige = [{ tipo_fianza_id: 1, tipo_fianza: 'Cumplimiento' }];
+  const conFianza = contrato(exige, [poliza(1, 'activa')]);
+  const sinNada = contrato(exige, []);
+
+  assert.equal(conFianza.estado_cobertura, 'cubierta');
+  assert.equal(sinNada.estado_cobertura, 'sin_fianza');
+
+  const partida = estadoDePartida([conFianza, sinNada]);
+  assert.equal(partida.estado, 'sin_fianza', 'basta uno sin fianza para que no esté cubierta');
+  assert.deepEqual(partida.faltantes.map((f) => f.tipo_fianza), ['Cumplimiento']);
+});
+
+test('los faltantes de la partida no se repiten', () => {
+  // Dos contratistas debiendo lo mismo es un renglón, no dos.
+  const p = estadoDePartida([contrato(REQ, []), contrato(REQ, [])]);
+  assert.deepEqual(p.faltantes.map((f) => f.tipo_fianza).sort(), ['Anticipo', 'Cumplimiento']);
 });
 
 // ---------------------------------------------------------------------------
@@ -458,6 +490,179 @@ test('el payload con partidas adentro no trae nada prohibido', async () => {
   }({ lista, uno, padron }));
   assert.deepEqual([...halladas], []);
 });
+
+// ---------------------------------------------------------------------------
+// El campo de orden vacío
+// ---------------------------------------------------------------------------
+
+test('borrar el campo de orden no manda la partida al principio', async () => {
+  // Number('') es 0, no NaN: el formulario mandaba orden 0 al dejar la casilla
+  // en blanco, y la partida saltaba delante de la cimentación. Se descubrió
+  // porque apareció una partida con orden 0 que nadie ordenó ahí.
+  const vacio = (await (await mandar(
+    'POST', `/api/proveedores/proyectos/${torre}/partidas`, delta,
+    { nombre: 'Con orden en blanco', orden: '' }
+  )).json()).id;
+
+  const nulo = (await (await mandar(
+    'POST', `/api/proveedores/proyectos/${torre}/partidas`, delta,
+    { nombre: 'Con orden nulo', orden: null }
+  )).json()).id;
+
+  // Y el 0 explícito SÍ es 0: quien lo teclea quiere que vaya primero.
+  const cero = (await (await mandar(
+    'POST', `/api/proveedores/proyectos/${torre}/partidas`, delta,
+    { nombre: 'Primero a propósito', orden: 0 }
+  )).json()).id;
+
+  const pas = (await detalle()).partidas;
+  const orden = (id) => pas.find((pa) => pa.id === id)?.orden;
+
+  assert.equal(orden(vacio), 50, 'el vacío tiene que caer en el 50 de siempre');
+  assert.equal(orden(nulo), 50);
+  assert.equal(orden(cero), 0);
+
+  for (const id of [vacio, nulo, cero]) {
+    await mandar('DELETE', `/api/proveedores/partidas/${id}`, delta);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// El atajo: asignar contratista desde la partida
+// ---------------------------------------------------------------------------
+
+test('con solo la partida y el fiado, la obra queda ligada y en su lugar', async () => {
+  // Es lo que manda el atajo del panel: nada de desarrollo ni contratante, que
+  // los deriva el servidor. Si esto dejara de funcionar, el atajo estaría
+  // capturando obras sueltas sin que nadie lo notara.
+  // Con su propia partida y no con paMuros: para cuando esta prueba corre, las
+  // de arriba ya le colgaron contrato y póliza. Suponer el estado que dejó otra
+  // prueba es lo que convierte un fallo en doce.
+  const pa = (await (await mandar(
+    'POST', `/api/proveedores/proyectos/${torre}/partidas`, delta,
+    { nombre: 'Losa de azotea', requisitos: [tCumplimiento] }
+  )).json()).id;
+
+  const antes = (await detalle()).partidas.find((x) => x.id === pa);
+  assert.equal(antes.estado_cobertura, 'sin_contratista');
+
+  const res = await mandar('POST', '/api/admin/proyectos', operador, {
+    client_id: VEGA,
+    nombre: 'Losa de azotea – Vega',
+    partida_id: pa,
+    monto_contrato: 680000000,
+    beneficiario: 'Desarrollos Delta',
+  });
+  assert.equal(res.status, 200);
+  const { id: obra, aviso } = await res.json();
+  assert.equal(aviso, null, 'Vega está activo en el padrón: no debe avisar nada');
+
+  const fila = (await memoria.query(
+    `SELECT partida_id, desarrollo_id, contratante_id, estatus FROM proyectos WHERE id = ${obra}`
+  ))[0];
+  assert.equal(fila.partida_id, pa);
+  assert.equal(fila.desarrollo_id, torre, 'el proyecto se derivó de la partida');
+  assert.equal(fila.contratante_id, DELTA, 'y el contratante también');
+  assert.equal(fila.estatus, 'en_proceso', 'tiene que nacer viva o no se juzgaría');
+
+  // Y el contratante ya la ve, dentro de su partida, sin haber tocado el padrón.
+  const losa = (await detalle()).partidas.find((x) => x.id === pa);
+  assert.equal(losa.contratos.length, 1);
+  assert.equal(losa.contratos[0].proveedor_nombre, 'Cimentaciones Vega');
+  // Sin pólizas todavía: pasa de "nadie la hace" a "falta la fianza", que es
+  // otro pendiente y de otra persona.
+  assert.equal(losa.estado_cobertura, 'sin_fianza');
+
+  // Se limpia sin dejar rastro, y en orden: primero la obra sale del
+  // contratante, luego se borra la partida (que se niega con contratos dentro).
+  await mandar('PUT', `/api/admin/proyectos/${obra}`, operador, {
+    nombre: 'Losa de azotea – Vega', contratante_id: '',
+  });
+  await mandar('DELETE', `/api/proveedores/partidas/${pa}`, delta);
+});
+
+test('el atajo mete al proveedor al padrón si no estaba', async () => {
+  // El caso real: "acabo de contratar a alguien nuevo". El selector ofrece
+  // fiados fuera del padrón porque ligarlos los mete solos; si no fuera así,
+  // el contratante vería la fianza y no al proveedor en su lista.
+  await memoria.exec(`INSERT INTO clients (razon_social, tipo) VALUES ('Plomería Nueva', 'fiado')`);
+  const nuevo = (await memoria.query(
+    `SELECT id FROM clients WHERE razon_social = 'Plomería Nueva'`
+  ))[0].id;
+
+  const pa = (await (await mandar(
+    'POST', `/api/proveedores/proyectos/${torre}/partidas`, delta,
+    { nombre: 'Plomería', requisitos: [tCumplimiento] }
+  )).json()).id;
+
+  const res = await mandar('POST', '/api/admin/proyectos', operador, {
+    client_id: nuevo, nombre: 'Plomería – Nueva', partida_id: pa,
+  });
+  assert.equal(res.status, 200);
+  const obra = (await res.json()).id;
+
+  const padron = (await memoria.query(
+    `SELECT activo FROM client_proveedores
+     WHERE contratante_id = ${DELTA} AND proveedor_id = ${nuevo}`
+  ))[0];
+  assert.equal(padron?.activo, 1, 'tenía que quedar en el padrón, y activo');
+
+  await memoria.query(`DELETE FROM proyectos WHERE id = ${obra}`);
+  await mandar('DELETE', `/api/proveedores/partidas/${pa}`, delta);
+  await memoria.query(`DELETE FROM client_proveedores WHERE proveedor_id = ${nuevo}`);
+  await memoria.query(`DELETE FROM clients WHERE id = ${nuevo}`);
+});
+
+test('con un proveedor SUSPENDIDO la obra se liga pero avisa', async () => {
+  // Y el aviso importa: el contratante NO va a ver esa obra (SQL_PADRON filtra
+  // activo = 1), así que el operador tiene que enterarse. Va en ámbar en el
+  // panel, no en el banner verde.
+  await memoria.query(
+    `UPDATE client_proveedores SET activo = 0
+     WHERE contratante_id = ${DELTA} AND proveedor_id = ${VEGA}`
+  );
+  try {
+    const res = await mandar('POST', '/api/admin/proyectos', operador, {
+      client_id: VEGA, nombre: 'Obra con suspendido', partida_id: paMuros,
+    });
+    assert.equal(res.status, 200);
+    const { id: obra, aviso } = await res.json();
+    assert.ok(aviso && /SUSPENDIDO/.test(aviso), 'tenía que avisar de la suspensión');
+
+    // Y reactivar no es cosa del alta: sigue suspendido.
+    const padron = (await memoria.query(
+      `SELECT activo FROM client_proveedores
+       WHERE contratante_id = ${DELTA} AND proveedor_id = ${VEGA}`
+    ))[0];
+    assert.equal(padron.activo, 0, 'ligar una obra no puede des-suspender a nadie');
+
+    await memoria.query(`DELETE FROM proyectos WHERE id = ${obra}`);
+  } finally {
+    await memoria.query(
+      `UPDATE client_proveedores SET activo = 1
+       WHERE contratante_id = ${DELTA} AND proveedor_id = ${VEGA}`
+    );
+  }
+});
+
+test('el atajo no sirve para ligarle una obra a otro contratante', async () => {
+  // El selector solo ofrece fiados, pero la ruta es la que tiene que negarse:
+  // un contratante no ejecuta obras.
+  const res = await mandar('POST', '/api/admin/proyectos', operador, {
+    client_id: OTRO, nombre: 'Imposible', partida_id: paMuros,
+  });
+  assert.equal(res.status, 400);
+});
+
+test('el vendedor no puede usar el atajo', async () => {
+  // Ligar la obra le abre las pólizas de su cliente a otra empresa. Por eso el
+  // botón no se le pinta, y por eso la ruta igual se niega.
+  const res = await mandar('POST', '/api/admin/proyectos', carlos, {
+    client_id: VEGA, nombre: 'Muros – Vega', partida_id: paMuros,
+  });
+  assert.equal(res.status, 403);
+});
+
 
 // ---------------------------------------------------------------------------
 // Quién alcanza qué

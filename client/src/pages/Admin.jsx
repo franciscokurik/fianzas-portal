@@ -43,6 +43,7 @@ export default function Admin() {
   const [sel, setSel] = useState(null);
   const [detalle, setDetalle] = useState(null);
   const [msg, setMsg] = useState('');
+  const [avisoOp, setAvisoOp] = useState('');
   const [errorCarga, setErrorCarga] = useState('');
 
   // Si una carga falla, hay que DECIRLO. Antes el error se tragaba y la
@@ -81,6 +82,12 @@ export default function Admin() {
   }
   const recargarDetalle = () => sel && cargar(`/admin/clientes/${sel}/detalle`, setDetalle);
   const flash = (t) => { setMsg(t); setTimeout(() => setMsg(''), 3000); };
+  // Aparte del verde, y no es cosmético: las rutas devuelven avisos del tipo
+  // "quedó ligada PERO el contratante todavía no la ve". Eso iba al banner
+  // verde con su palomita, que dice justo lo contrario de lo que el texto
+  // advierte. Va en ámbar y sin caducidad: se cierra a mano, para que no se
+  // desvanezca antes de leerlo.
+  const avisar = (t) => setAvisoOp(t);
 
   // Cualquier cambio en fianzas puede mover los recordatorios pendientes.
   const refrescarTodo = () => { recargarDetalle(); cargarClientes(); cargarRecordatorios(); };
@@ -119,6 +126,14 @@ export default function Admin() {
             </p>
           </div>
         </div>
+
+        {avisoOp && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-start gap-2 mb-4">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span className="flex-1">{avisoOp}</span>
+            <button onClick={() => setAvisoOp('')} className="text-amber-500 hover:text-amber-800 shrink-0">✕</button>
+          </div>
+        )}
 
         {msg && (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 flex items-center gap-2 mb-4">
@@ -277,6 +292,7 @@ export default function Admin() {
                 vendedores={vendedores}
                 clientes={clientes}
                 tiposDocContratante={tiposDocContratante}
+                avisar={avisar}
                 onEliminado={() => {
                   setSel(null);
                   setDetalle(null);
@@ -586,7 +602,7 @@ function CatalogoDocumentos({ tipos, onChange, flash }) {
 
 function DetalleCliente({
   detalle, esAdmin, puedeOperar, vendedores, clientes = [], tiposDocContratante = [],
-  afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash,
+  afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash, avisar,
 }) {
   const {
     cliente, usuarios = [], lineas = [], proyectos = [],
@@ -819,12 +835,17 @@ function DetalleCliente({
       {esContratante && (
         <ProyectosDelContratante
           contratanteId={cliente.id}
+          contratanteNombre={cliente.razon_social}
           proyectos={proyectos}
           proveedores={proveedores}
+          suspendidos={suspendidos}
+          clientes={clientes}
           tipos={tipos}
           lineasProveedores={lineasProveedores}
+          puedeLigarContratante={puedeOperar}
           onChange={onChange}
           flash={flash}
+          avisar={avisar}
         />
       )}
 
@@ -1024,11 +1045,198 @@ function FormPartidaPanel({ inicial, tipos = [], onSubmit, onCancel }) {
   );
 }
 
+/* --------------------------------------------------------------------------
+   Asignar contratista a una partida, sin salir de aquí
+   --------------------------------------------------------------------------
+   Hace lo MISMO que capturar la obra en el detalle del proveedor: crea el
+   proyecto del fiado ya apuntando a la partida, y de ahí el servidor deriva el
+   desarrollo y el contratante (ver resolverPartida en routes/admin.js). No es
+   una segunda forma de ligar, es la misma ruta con el camino corto.
+
+   Existe porque el hueco se ve AQUÍ: la partida dice "sin contratista" en la
+   pantalla del contratante, y para taparlo había que salirse, buscar al
+   proveedor entre todos los clientes y volver a elegir en tres selects lo que
+   esta pantalla ya sabe.
+
+   Solo pide lo que no se puede adivinar. Fechas, notas y estatus se completan
+   después en la obra: aquí lo que se quiere es cerrar el hueco rápido. */
+
+// "Cimentaciones Vega SA de CV" -> "Cimentaciones Vega". Solo para el nombre
+// que se autocompleta: el contrato se llama como la obra, no como el acta
+// constitutiva, y "Muros – Acabados Solís SA de CV" no cabe en el renglón.
+const corto = (razonSocial) =>
+  String(razonSocial || '')
+    .replace(/,?\s+(S\.?A\.?\s*(de\s*C\.?V\.?)?|S\.?\s*de\s*R\.?L\.?(\s*de\s*C\.?V\.?)?|S\.?A\.?P\.?I\.?\s*de\s*C\.?V\.?|S\.?C\.?)\.?$/i, '')
+    .trim() || String(razonSocial || '').trim();
+
+function AsignarContratista({
+  partida, contratanteId, contratanteNombre, proveedores, suspendidos, clientes,
+  onListo, onCancel,
+}) {
+  const [f, setF] = useState({
+    client_id: '',
+    nombre: '',
+    numero_contrato: '',
+    monto_contrato: 0,
+  });
+  // Para no pisar lo que el operador escribió: el nombre se autocompleta solo
+  // mientras no lo haya tocado.
+  const [nombreTocado, setNombreTocado] = useState(false);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const enPadron = new Set(proveedores.map((p) => p.id));
+  const enSuspendidos = new Set(suspendidos.map((p) => p.id));
+  // Los demás fiados: el caso real de "acabo de contratar a alguien nuevo".
+  // Se ofrecen porque ligarlos los mete al padrón solo (asegurarEnPadron), así
+  // que obligar a darlos de alta antes sería un paso de más sin ninguna
+  // garantía extra. Los contratantes se quedan fuera: el servidor los rechaza
+  // (exigirFiado) y ofrecerlos sería ofrecer un error.
+  const otros = clientes.filter(
+    (c) => c.tipo === 'fiado' && !enPadron.has(c.id) && !enSuspendidos.has(c.id)
+  );
+
+  const nombreDelProveedor = (id) => {
+    const n = Number(id);
+    return proveedores.find((p) => p.id === n)?.razon_social
+      || suspendidos.find((p) => p.id === n)?.razon_social
+      || clientes.find((c) => c.id === n)?.razon_social
+      || '';
+  };
+
+  function elegirProveedor(id) {
+    setF((s) => ({
+      ...s,
+      client_id: id,
+      // "Muros y albañilería – Vega": la misma forma que ya tienen las obras
+      // capturadas a mano, para que la lista no se vea de dos épocas.
+      nombre: nombreTocado ? s.nombre : (id ? `${partida.nombre} – ${corto(nombreDelProveedor(id))}` : ''),
+    }));
+  }
+
+  async function guardar() {
+    setError('');
+    if (!f.client_id) return setError('Elige al contratista.');
+    if (!f.nombre.trim()) return setError('El nombre del contrato es obligatorio.');
+    setBusy(true);
+    try {
+      // Solo partida_id: el desarrollo y el contratante los deriva el servidor.
+      // Mandarlos también sería repetir un dato que él ya sabe, y si alguno
+      // viniera mal contestaría 400 por contradicción.
+      const r = await api.post('/admin/proyectos', {
+        client_id: Number(f.client_id),
+        nombre: f.nombre.trim(),
+        numero_contrato: f.numero_contrato || null,
+        monto_contrato: f.monto_contrato,
+        partida_id: partida.id,
+        // El respaldo legible de la póliza. No autoriza nada —eso es
+        // contratante_id— pero es el texto que va impreso.
+        beneficiario: contratanteNombre || null,
+      });
+      await onListo(r);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 ml-3 p-3 rounded-lg border border-indigo-200 bg-indigo-50/40">
+      <p className="text-[11px] font-medium text-slate-600 mb-2">
+        Asignar contratista a “{partida.nombre}”
+      </p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+        <div className="sm:col-span-2">
+          <label className="text-[11px] text-slate-500 mb-1 block">Contratista<Req /></label>
+          <select
+            value={f.client_id}
+            onChange={(e) => elegirProveedor(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">Elige al fiado que la va a hacer…</option>
+            {proveedores.length > 0 && (
+              <optgroup label="En el padrón de este contratante">
+                {proveedores.map((p) => (
+                  <option key={p.id} value={p.id}>{p.razon_social}</option>
+                ))}
+              </optgroup>
+            )}
+            {otros.length > 0 && (
+              <optgroup label="Otros fiados (se agregan al padrón al ligarlos)">
+                {otros.map((c) => (
+                  <option key={c.id} value={c.id}>{c.razon_social}</option>
+                ))}
+              </optgroup>
+            )}
+            {/* Los suspendidos se ofrecen pero se dice qué va a pasar: la obra
+                queda ligada y el contratante NO la ve. Esconderlos haría que el
+                operador los buscara en "otros fiados" y no los encontrara. */}
+            {suspendidos.length > 0 && (
+              <optgroup label="Suspendidos en el padrón — el contratante no la vería">
+                {suspendidos.map((p) => (
+                  <option key={p.id} value={p.id}>{p.razon_social}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </div>
+        <div className="sm:col-span-2">
+          <label className="text-[11px] text-slate-500 mb-1 block">Nombre del contrato<Req /></label>
+          <input
+            value={f.nombre}
+            onChange={(e) => { setNombreTocado(true); setF({ ...f, nombre: e.target.value }); }}
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">N° de contrato</label>
+          <input
+            value={f.numero_contrato}
+            onChange={(e) => setF({ ...f, numero_contrato: e.target.value })}
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-500 mb-1 block">Monto del contrato</label>
+          <InputPesos
+            valor={f.monto_contrato}
+            onChange={(c) => setF((s) => ({ ...s, monto_contrato: c }))}
+            className={inputCls}
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-2 rounded border border-rose-200 bg-rose-50 p-2 text-[11px] text-rose-700 flex items-start gap-1.5">
+          <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2 mt-2">
+        <button onClick={guardar} disabled={busy} className={btnSecondary}>
+          <Save className="h-3.5 w-3.5" /> {busy ? 'Asignando…' : 'Asignar'}
+        </button>
+        <button onClick={onCancel} className={btnSecondary}>
+          <X className="h-3.5 w-3.5" /> Cancelar
+        </button>
+        <span className="text-[11px] text-slate-400">
+          Fechas, estatus y pólizas se capturan luego en la obra del proveedor.
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function PartidasDelProyecto({
-  contratanteId, proyecto, tipos, nombreDe, onChange, flash,
+  contratanteId, contratanteNombre, proyecto, tipos, nombreDe,
+  proveedores = [], suspendidos = [], clientes = [], puedeLigarContratante,
+  onChange, flash, avisar,
 }) {
   const [creando, setCreando] = useState(false);
   const [editando, setEditando] = useState(null);
+  const [asignando, setAsignando] = useState(null);
   const [error, setError] = useState('');
 
   const partidas = proyecto.partidas || [];
@@ -1108,7 +1316,24 @@ function PartidasDelProyecto({
                 estado={pa.estado_cobertura}
                 verificada={pa.requisitos.length > 0}
               />
-              <button onClick={() => { setEditando(pa); setCreando(false); }}
+              {/* El atajo va en la partida porque es donde se ve el hueco.
+                  Solo para quien puede ligar: al vendedor el servidor le
+                  contestaría 403, así que ofrecerle el botón sería ofrecerle un
+                  error. */}
+              {puedeLigarContratante && (
+                <button
+                  onClick={() => {
+                    setAsignando(asignando === pa.id ? null : pa.id);
+                    setCreando(false); setEditando(null);
+                  }}
+                  className={btnSecondary}
+                  title="Asignar contratista a esta partida"
+                >
+                  <UserPlus className="h-3 w-3" />
+                  {!pa.contratos?.length && <span>Asignar contratista</span>}
+                </button>
+              )}
+              <button onClick={() => { setEditando(pa); setCreando(false); setAsignando(null); }}
                       className={btnSecondary} title="Editar partida">
                 <Pencil className="h-3 w-3" />
               </button>
@@ -1133,6 +1358,26 @@ function PartidasDelProyecto({
                 : <span className="text-amber-700">nada capturado</span>}
             </p>
 
+            {asignando === pa.id && (
+              <AsignarContratista
+                partida={pa}
+                contratanteId={contratanteId}
+                contratanteNombre={contratanteNombre}
+                proveedores={proveedores}
+                suspendidos={suspendidos}
+                clientes={clientes}
+                onCancel={() => setAsignando(null)}
+                onListo={async (r) => {
+                  setAsignando(null);
+                  onChange();
+                  flash('Contratista asignado');
+                  // El aviso va aparte y en ámbar: dice que la obra quedó
+                  // ligada PERO que el contratante todavía no la ve.
+                  if (r?.aviso) avisar?.(r.aviso);
+                }}
+              />
+            )}
+
             {/* Quién la está haciendo. Es lo único de este nivel que el
                 contratante NO puede capturar: ligar la obra de una empresa le
                 abre sus pólizas. */}
@@ -1142,12 +1387,24 @@ function PartidasDelProyecto({
                     <Briefcase className="w-3 h-3 text-slate-300 shrink-0" />
                     <span className="text-slate-600">{nombreDe(o.client_id)}</span>
                     <span className="text-slate-400">{o.nombre}</span>
-                    <CumplimientoBadge estado={o.estado_cobertura} />
+                    <CumplimientoBadge
+                      estado={o.estado_cobertura}
+                      verificada={o.cobertura_verificada}
+                    />
+                    {/* A QUIÉN se le pide qué. Con dos contratistas en la misma
+                        partida, el faltante del encabezado no dice de quién es. */}
+                    {o.faltantes?.length > 0 && (
+                      <span className="text-rose-600 font-medium">
+                        le falta {o.faltantes.map((f) => f.tipo_fianza).join(' y ')}
+                      </span>
+                    )}
                   </p>
                 ))
               : (
                 <p className="text-[11px] text-slate-400 pl-1">
-                  sin contratista — se asigna desde la obra del proveedor, en "Partida"
+                  {puedeLigarContratante
+                    ? 'sin contratista — usa "Asignar contratista" aquí arriba'
+                    : 'sin contratista — lo asigna un operador'}
                 </p>
               )}
           </div>
@@ -1181,7 +1438,9 @@ function PartidasDelProyecto({
 }
 
 function ProyectosDelContratante({
-  contratanteId, proyectos, proveedores, tipos, lineasProveedores, onChange, flash,
+  contratanteId, contratanteNombre, proyectos, proveedores, suspendidos = [],
+  clientes = [], tipos, lineasProveedores, puedeLigarContratante,
+  onChange, flash, avisar,
 }) {
   const [creando, setCreando] = useState(false);
   const [editando, setEditando] = useState(null);
@@ -1296,11 +1555,17 @@ function ProyectosDelContratante({
                   va a leer. */}
               <PartidasDelProyecto
                 contratanteId={contratanteId}
+                contratanteNombre={contratanteNombre}
                 proyecto={p}
                 tipos={tipos}
                 nombreDe={nombreDe}
+                proveedores={proveedores}
+                suspendidos={suspendidos}
+                clientes={clientes}
+                puedeLigarContratante={puedeLigarContratante}
                 onChange={onChange}
                 flash={flash}
+                avisar={avisar}
               />
 
               {/* Lo que este proyecto le aparta a cada proveedor. Es lo que el
@@ -1698,7 +1963,7 @@ function ObraDelPadron({ obra: o, contratanteId, tiposDoc, descargar, onChange, 
         <Briefcase className="w-3 h-3 text-slate-300 shrink-0" />
         <span className="text-slate-600">{o.nombre}</span>
         <span className="text-slate-400">{etiquetaEstatus(o.estatus)}</span>
-        <CumplimientoBadge estado={o.estado_cobertura} />
+        <CumplimientoBadge estado={o.estado_cobertura} verificada={o.cobertura_verificada} />
         <span className="text-slate-400 tabular-nums">
           {o.fianzas.length} póliza(s){o.total_previos > 0 && ` · ${o.total_previos} previo(s)`}
         </span>
@@ -2655,7 +2920,8 @@ function Proyectos({
             onChange();
             // El servidor avisa si la obra quedó ligada a un contratante que
             // tiene suspendido a este proveedor: se ligó, pero todavía no la ve.
-            flash(r.aviso || 'Proyecto creado');
+            flash('Proyecto creado');
+            if (r.aviso) avisar(r.aviso);
           }}
         />
       )}
@@ -2799,7 +3065,8 @@ function Proyecto({
             const r = await api.put(`/admin/proyectos/${p.id}`, datos);
             setEditando(false);
             onChange();
-            flash(r.aviso || 'Proyecto actualizado');
+            flash('Proyecto actualizado');
+            if (r.aviso) avisar(r.aviso);
           }}
         />
       )}
