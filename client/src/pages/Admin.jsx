@@ -4,6 +4,7 @@ import {
   Users, FileText, Files, CheckCircle2, UserPlus, AlertTriangle,
   CreditCard, Trash2, Briefcase, Pencil, X, Bell, ListChecks, Check,
   Paperclip, Upload, FileDown, Mail, KeyRound, UserCog, ShieldCheck, Link2, Layers,
+  Settings,
 } from 'lucide-react';
 import { api, getToken, subirACloudinary } from '../api.js';
 import { useAuth } from '../auth.jsx';
@@ -94,6 +95,11 @@ export default function Admin() {
 
   // Cualquier cambio en fianzas puede mover los recordatorios pendientes.
   const refrescarTodo = () => { recargarDetalle(); cargarClientes(); cargarRecordatorios(); };
+
+  // Abrir un cliente cierra el alta: los dos viven en el mismo panel, y dejar el
+  // formulario montado debajo haría que el operador siguiera capturando algo que
+  // ya no está viendo.
+  const abrirCliente = (id) => { setAltaCliente(false); abrirDetalle(id); };
 
   // ¿Este cliente tiene algo que atender? Es la misma condición que enciende el
   // punto ámbar del renglón, escrita una vez para que el filtro y el punto no
@@ -212,20 +218,6 @@ export default function Admin() {
                 )}
               </div>
 
-              {altaCliente && puedeOperar && (
-                <div className="border-b border-slate-200">
-                  <NuevoCliente
-                    vendedores={vendedores}
-                    onDone={(id) => {
-                      setAltaCliente(false);
-                      cargarClientes();
-                      flash('Cliente creado');
-                      if (id) abrirDetalle(id);
-                    }}
-                  />
-                </div>
-              )}
-
               {clientes.length > 3 && (
                 <div className="px-3 py-2 border-b border-slate-100">
                   <input
@@ -267,7 +259,7 @@ export default function Admin() {
                   return (
                     <button
                       key={c.id}
-                      onClick={() => abrirDetalle(c.id)}
+                      onClick={() => abrirCliente(c.id)}
                       className={`w-full text-left px-4 py-2.5 hover:bg-slate-50/60 ${sel === c.id ? 'bg-indigo-50/60' : ''}`}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -330,37 +322,50 @@ export default function Admin() {
                 requeridos" al mismo tiempo que el expediente del fiado, que es
                 el único momento en que ese catálogo importa. */}
             {puedeOperar && (
-              <>
-                <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
-                <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
-                {/* Cambiar el catálogo mueve la lista de pendientes de todos los
-                    fiados, así que también se refresca el detalle abierto. */}
-                <CatalogoDocumentos
-                  tipos={docsRequeridos}
-                  onChange={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
-                  flash={flash}
-                />
-                {/* Las cuentas de acceso son lo único del admin en esta columna. */}
-                {esAdmin && (
-                  <PersonalFortex
-                    internos={internos}
-                    onChange={() => { cargarInternos(); cargarClientes(); recargarDetalle(); }}
-                    flash={flash}
-                  />
-                )}
-              </>
+              <Configuracion
+                tipos={tipos}
+                docsRequeridos={docsRequeridos}
+                internos={internos}
+                esAdmin={esAdmin}
+                onAfianzadora={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }}
+                onTipos={cargarTipos}
+                // Cambiar el catálogo mueve la lista de pendientes de TODOS los
+                // fiados, así que también se refresca el detalle abierto y la
+                // lista: si no, el expediente de la derecha seguiría pidiendo un
+                // papel que acaba de dejar de existir.
+                onDocumentos={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
+                onInternos={() => { cargarInternos(); cargarClientes(); recargarDetalle(); }}
+                flash={flash}
+              />
             )}
           </div>
 
-          {/* Columna derecha: detalle */}
+          {/* Columna derecha: el alta, o el detalle del cliente abierto.
+
+              El alta se pinta AQUÍ y no en la columna de la izquierda, que mide
+              326px a 1440: ocho campos apilados en ese ancho eran justo el
+              "demasiada info por todas partes" del que se quejó el operador. Y
+              es el lugar correcto además por otra razón: al guardar, en este
+              mismo panel aparece el detalle del cliente recién creado. */}
           <div className="xl:col-span-3 space-y-4">
-            {!detalle ? (
+            {altaCliente && puedeOperar ? (
+              <NuevoCliente
+                vendedores={vendedores}
+                onCancel={() => setAltaCliente(false)}
+                onDone={(id) => {
+                  setAltaCliente(false);
+                  cargarClientes();
+                  flash('Cliente creado');
+                  if (id) abrirDetalle(id);
+                }}
+              />
+            ) : !detalle ? (
               <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-400">
                 {clientes.length
                   ? 'Selecciona un cliente para ver y gestionar su información.'
                   : esVendedor
                     ? 'Aún no tienes clientes asignados. Te los asigna un operador.'
-                    : 'Todavía no hay clientes. Da de alta el primero desde "Agregar cliente".'}
+                    : 'Todavía no hay clientes. Da de alta el primero desde "Agregar".'}
               </div>
             ) : (
               <DetalleCliente
@@ -457,7 +462,10 @@ function Recordatorios({ recordatorios, onAbrirCliente, onAtendido }) {
    Catálogo de tipos de fianza (editable por el admin)
    -------------------------------------------------------------------------- */
 
-function CatalogoTipos({ tipos, onChange, flash }) {
+// 'embebido' = va dentro de la tarjeta de Configuración, que ya tiene su propio
+// encabezado y su propia pestaña. Sin esto, agruparlos daba dos encabezados
+// encimados y un acordeón dentro de otro.
+function CatalogoTipos({ tipos, onChange, flash, embebido }) {
   const [open, setOpen] = useState(false);
   const [nombre, setNombre] = useState('');
 
@@ -477,15 +485,17 @@ function CatalogoTipos({ tipos, onChange, flash }) {
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
-      >
-        <ListChecks className="w-4 h-4 text-indigo-600" /> Tipos de fianza ({tipos.length})
-        <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
-      </button>
-      {open && (
+    <div className={embebido ? '' : 'bg-white border border-slate-200 rounded-lg overflow-hidden'}>
+      {!embebido && (
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
+        >
+          <ListChecks className="w-4 h-4 text-indigo-600" /> Tipos de fianza ({tipos.length})
+          <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
+        </button>
+      )}
+      {(open || embebido) && (
         <div className="p-4 space-y-2.5">
           <div className="flex gap-2">
             <input
@@ -521,7 +531,7 @@ function CatalogoTipos({ tipos, onChange, flash }) {
    Catálogo de documentos requeridos (los que se le piden a TODOS los fiados)
    -------------------------------------------------------------------------- */
 
-function CatalogoDocumentos({ tipos, onChange, flash }) {
+function CatalogoDocumentos({ tipos, onChange, flash, embebido }) {
   const vacio = { nombre: '', periodicidad_meses: '', alerta_dias: 30 };
   const [open, setOpen] = useState(false);
   const [nuevo, setNuevo] = useState(vacio);
@@ -556,15 +566,17 @@ function CatalogoDocumentos({ tipos, onChange, flash }) {
   })();
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
-      >
-        <FileText className="w-4 h-4 text-indigo-600" /> Documentos requeridos ({tipos.length})
-        <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
-      </button>
-      {open && (
+    <div className={embebido ? '' : 'bg-white border border-slate-200 rounded-lg overflow-hidden'}>
+      {!embebido && (
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
+        >
+          <FileText className="w-4 h-4 text-indigo-600" /> Documentos requeridos ({tipos.length})
+          <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
+        </button>
+      )}
+      {(open || embebido) && (
         <div className="p-4 space-y-2.5">
           <p className="text-[11px] text-slate-400">
             Lo que se le pide a todos los fiados. Los meses de vigencia hacen que el
@@ -2893,7 +2905,7 @@ function UsuariosCliente({ clienteId, usuarios = [], esAdmin, onChange, flash })
    Personal de Fortex: vendedores, operadores y administradores
    -------------------------------------------------------------------------- */
 
-function PersonalFortex({ internos = [], onChange, flash }) {
+function PersonalFortex({ internos = [], onChange, flash, embebido }) {
   const vacio = { nombre: '', email: '', password: '', role: 'operador' };
   const [open, setOpen] = useState(false);
   const [nuevo, setNuevo] = useState(vacio);
@@ -2960,15 +2972,17 @@ function PersonalFortex({ internos = [], onChange, flash }) {
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
-      >
-        <UserCog className="w-4 h-4 text-indigo-600" /> Personal de Fortex ({internos.length})
-        <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
-      </button>
-      {open && (
+    <div className={embebido ? '' : 'bg-white border border-slate-200 rounded-lg overflow-hidden'}>
+      {!embebido && (
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
+        >
+          <UserCog className="w-4 h-4 text-indigo-600" /> Personal de Fortex ({internos.length})
+          <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
+        </button>
+      )}
+      {(open || embebido) && (
         <div className="p-4 space-y-2.5">
           <p className="text-[11px] text-slate-400">
             El vendedor solo ve y edita los clientes que le asignes. El operador hace toda la
@@ -4299,8 +4313,14 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
    Altas simples
    -------------------------------------------------------------------------- */
 
-function NuevoCliente({ vendedores = [], onDone }) {
-  const [open, setOpen] = useState(false);
+/* --------------------------------------------------------------------------
+   Alta de cliente
+   --------------------------------------------------------------------------
+   Lo abre y lo cierra quien lo monta. Antes traía su propio 'open' con su propio
+   encabezado, así que al moverlo dentro de la tarjeta de clientes hacían falta
+   DOS clics para ver un campo: uno abría el bloque y el otro el formulario. */
+
+function NuevoCliente({ vendedores = [], onDone, onCancel }) {
   const empty = {
     razon_social: '', rfc: '', telefono: '', tipo: 'fiado', vendedor_id: '',
     nombre_contacto: '', email: '', password: '',
@@ -4324,7 +4344,6 @@ function NuevoCliente({ vendedores = [], onDone }) {
     try {
       const r = await api.post('/admin/clientes', f);
       setF(empty);
-      setOpen(false);
       onDone(r.id);
     } catch (e) {
       setError(e.message);
@@ -4333,17 +4352,26 @@ function NuevoCliente({ vendedores = [], onDone }) {
     }
   }
 
+  const esContratante = f.tipo === 'contratante';
+
   return (
     <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
-      >
-        <UserPlus className="w-4 h-4 text-indigo-600" /> Agregar cliente
-        <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${open ? 'rotate-45' : ''}`} />
-      </button>
-      {open && (
-        <div className="p-4 space-y-2.5">
+      <div className="px-5 py-3 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <UserPlus className="w-4 h-4 text-indigo-600" />
+        <h3 className="text-sm font-semibold text-slate-700">Nuevo cliente</h3>
+        <button onClick={onCancel} className={`${btnSecondary} ml-auto`}>
+          <X className="h-3.5 w-3.5" /> Cancelar
+        </button>
+      </div>
+
+      {/* Dos mitades porque son dos cosas distintas: la EMPRESA que se da de
+          alta, y la PERSONA que va a entrar por ella. Apiladas en la columna
+          estrecha se leían como una sola lista de ocho campos. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 p-5">
+        <div className="space-y-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            La empresa
+          </p>
           <div>
             <label className="text-[11px] text-slate-500 mb-1 block">Razón social<Req /></label>
             <input value={f.razon_social} onChange={set('razon_social')} className={inputCls} />
@@ -4358,70 +4386,201 @@ function NuevoCliente({ vendedores = [], onDone }) {
               <input value={f.telefono} onChange={set('telefono')} className={inputCls} />
             </div>
           </div>
+
+          {/* El campo que más caro cuesta equivocar: decide la pantalla ENTERA
+              que va a ver esa cuenta. Por eso se explica al elegirlo, no
+              después. */}
           <div>
             <label className="text-[11px] text-slate-500 mb-1 block">Tipo de cuenta<Req /></label>
-            <select value={f.tipo} onChange={set('tipo')} className={inputCls}>
-              <option value="fiado">Fiado — compra fianzas</option>
-              <option value="contratante">Contratante — se las exige a sus proveedores</option>
-            </select>
-            <p className="text-[11px] text-slate-400 mt-1">
-              {f.tipo === 'contratante'
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { v: 'fiado', t: 'Fiado', s: 'Compra fianzas' },
+                { v: 'contratante', t: 'Contratante', s: 'Se las exige a sus proveedores' },
+              ].map((o) => (
+                <button
+                  key={o.v}
+                  onClick={() => setF((s) => ({ ...s, tipo: o.v }))}
+                  className={`text-left px-3 py-2 rounded-lg border transition-colors ${
+                    f.tipo === o.v
+                      ? 'border-indigo-400 bg-indigo-50/60'
+                      : 'border-slate-200 hover:border-indigo-300'
+                  }`}
+                >
+                  <span className="block text-sm font-medium text-slate-700">{o.t}</span>
+                  <span className="block text-[11px] text-slate-500">{o.s}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              {esContratante
                 ? 'No tendrá pólizas, líneas de crédito ni expediente. Al entrar verá el '
                   + 'padrón de sus proveedores y qué fianza presentó cada uno.'
                 : 'Lo de siempre: obras, pólizas, líneas de crédito y expediente.'}
             </p>
           </div>
+
           <div>
-            <label className="text-[11px] text-slate-500 mb-1 block">Vendedor</label>
+            <label className="text-[11px] text-slate-500 mb-1 block">Vendedor titular</label>
             <select value={f.vendedor_id} onChange={set('vendedor_id')} className={inputCls}>
               <option value="">Sin asignar</option>
               {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
             </select>
+            <p className="text-[11px] text-slate-400 mt-1">
+              {f.vendedor_id
+                ? 'Solo él y los operadores verán esta cuenta.'
+                : 'Sin vendedor, ningún vendedor la va a ver en su cartera. Los operadores sí.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-3 md:border-l md:border-slate-100 md:pl-6">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            Su primer acceso
+          </p>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Nombre o puesto del contacto</label>
+            <input
+              value={f.nombre_contacto}
+              onChange={set('nombre_contacto')}
+              placeholder="Dirección, Contabilidad…"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Correo electrónico<Req /></label>
+            <input type="email" value={f.email} onChange={set('email')} className={inputCls} />
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">Contraseña inicial<Req /></label>
+            <input
+              type="text"
+              value={f.password}
+              onChange={set('password')}
+              placeholder="mínimo 8 caracteres"
+              className={inputCls}
+            />
+            {/* Se muestra en claro a propósito: alguien de Fortex se la tiene
+                que dictar al cliente, y un campo de puntitos obliga a teclearla
+                dos veces a ciegas. */}
+            <p className="text-[11px] text-slate-400 mt-1">
+              Se ve en claro porque hay que dictársela. El cliente la cambia al entrar.
+            </p>
           </div>
 
-          <div className="border-t border-slate-100 pt-2.5 space-y-2.5">
-            <p className="text-[11px] font-medium text-slate-600">Primer acceso al portal</p>
-            <div>
-              <label className="text-[11px] text-slate-500 mb-1 block">Nombre o puesto del contacto</label>
-              <input
-                value={f.nombre_contacto}
-                onChange={set('nombre_contacto')}
-                placeholder="Dirección, Contabilidad…"
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className="text-[11px] text-slate-500 mb-1 block">Correo electrónico<Req /></label>
-              <input type="email" value={f.email} onChange={set('email')} className={inputCls} />
-            </div>
-            <div>
-              <label className="text-[11px] text-slate-500 mb-1 block">Contraseña inicial<Req /></label>
-              <input type="text" value={f.password} onChange={set('password')} placeholder="mínimo 8 caracteres" className={inputCls} />
-            </div>
-          </div>
-
-          <p className="text-[11px] text-slate-400">
-            {f.tipo === 'contratante'
+          <p className="text-[11px] text-slate-500 border-t border-slate-100 pt-3">
+            {esContratante
               ? 'Después, desde su detalle, le armas el padrón de proveedores. Ahí mismo '
                 + 'puedes dar de alta a un proveedor que todavía no sea cliente.'
               : 'Después puedes agregarle más personas desde el detalle del cliente. Las líneas '
                 + 'de crédito se asignan por afianzadora, también desde ahí.'}
           </p>
-          {error && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-700 flex items-start gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      </div>
+
+      {error && (
+        <div className="mx-5 mb-3 rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2 px-5 py-3 border-t border-slate-100 bg-slate-50/60">
+        <button onClick={guardar} disabled={busy} className={btnPrimary}>
+          <Save className="w-4 h-4" /> {busy ? 'Guardando…' : 'Crear cliente'}
+        </button>
+        <button onClick={onCancel} className={btnSecondary}>Cancelar</button>
+        <span className="text-[11px] text-slate-400">
+          Se crea la empresa y su primera cuenta de acceso.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Configuración — lo de la casa, en un solo lugar
+   --------------------------------------------------------------------------
+   Eran cuatro tarjetas sueltas apiladas debajo de la lista de clientes: 252px
+   de cosas que se tocan una vez al año, cada una pidiendo su propio renglón. Se
+   funden en una que ocupa el alto de una.
+
+   Va en pestañas y no en cuatro acordeones anidados porque son cuatro catálogos
+   hermanos, no una jerarquía: acordeón dentro de acordeón obliga a dos clics
+   para ver una lista de diez renglones.
+
+   Y se queda en la COLUMNA, no en una pantalla aparte. Es a propósito: los tipos
+   de documento solo importan cuando estás viendo el expediente de un fiado, y
+   las afianzadoras se agregan a media captura de una fianza. Una pantalla aparte
+   desmontaría el detalle —con el formulario a medio llenar dentro— justo en el
+   momento en que se necesita el catálogo. Aquí conviven a ≥1280px. */
+
+function Configuracion({
+  tipos, docsRequeridos, internos, esAdmin,
+  onTipos, onDocumentos, onAfianzadora, onInternos, flash,
+}) {
+  const [abierta, setAbierta] = useState(false);
+  const [vista, setVista] = useState('afianzadoras');
+
+  const secciones = [
+    { key: 'afianzadoras', label: 'Afianzadoras' },
+    { key: 'tipos', label: 'Tipos de fianza', cuenta: tipos.length },
+    { key: 'documentos', label: 'Documentos', cuenta: docsRequeridos.length },
+    // Las cuentas de Fortex son lo único del admin aquí.
+    ...(esAdmin ? [{ key: 'personal', label: 'Personal', cuenta: internos.length }] : []),
+  ];
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setAbierta((a) => !a)}
+        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
+      >
+        <Settings className="w-4 h-4 text-indigo-600" /> Configuración
+        <span className="text-[11px] font-normal text-slate-400">
+          catálogos de la casa
+        </span>
+        <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${abierta ? 'rotate-45' : ''}`} />
+      </button>
+
+      {abierta && (
+        <>
+          <div className="flex gap-1 border-b border-slate-200 px-2 overflow-x-auto">
+            {secciones.map((s) => (
+              <button
+                key={s.key}
+                onClick={() => setVista(s.key)}
+                className={`px-2.5 py-2 text-xs font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                  vista === s.key
+                    ? 'border-indigo-600 text-indigo-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {s.label}
+                {s.cuenta != null && <span className="tabular-nums text-slate-400"> ({s.cuenta})</span>}
+              </button>
+            ))}
+          </div>
+
+          {vista === 'afianzadoras' && (
+            <div className="p-4">
+              <NuevaAfianzadora onDone={onAfianzadora} embebido />
             </div>
           )}
-          <button onClick={guardar} disabled={busy} className={`${btnPrimary} w-full justify-center`}>
-            <Save className="w-4 h-4" /> {busy ? 'Guardando…' : 'Crear cliente'}
-          </button>
-        </div>
+          {vista === 'tipos' && (
+            <CatalogoTipos tipos={tipos} onChange={onTipos} flash={flash} embebido />
+          )}
+          {vista === 'documentos' && (
+            <CatalogoDocumentos tipos={docsRequeridos} onChange={onDocumentos} flash={flash} embebido />
+          )}
+          {vista === 'personal' && esAdmin && (
+            <PersonalFortex internos={internos} onChange={onInternos} flash={flash} embebido />
+          )}
+        </>
       )}
     </div>
   );
 }
 
-function NuevaAfianzadora({ onDone }) {
+function NuevaAfianzadora({ onDone, embebido }) {
   const [nombre, setNombre] = useState('');
   async function add() {
     if (!nombre) return;
@@ -4429,13 +4588,25 @@ function NuevaAfianzadora({ onDone }) {
     setNombre('');
     onDone();
   }
-  return (
-    <div className="bg-white border border-slate-200 rounded-lg p-4">
-      <h3 className="text-sm font-semibold text-slate-700 mb-2">Agregar afianzadora</h3>
+  const campo = (
+    <>
       <div className="flex gap-2">
         <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre" className={inputCls} />
         <button onClick={add} className={btnPrimary}><Plus className="w-4 h-4" /> Añadir</button>
       </div>
+      <p className="text-[11px] text-slate-400 mt-2">
+        Se agrega al catálogo y queda disponible en las líneas de crédito y en la captura
+        de pólizas.
+      </p>
+    </>
+  );
+
+  if (embebido) return campo;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-4">
+      <h3 className="text-sm font-semibold text-slate-700 mb-2">Agregar afianzadora</h3>
+      {campo}
     </div>
   );
 }
