@@ -11,6 +11,7 @@ import {
   mxn, mxnCents, fmtDate, yaVencio, EstadoBadge, ClaseBadge, InputPesos,
   CumplimientoBadge, TipoClienteBadge, ESTATUS_PROYECTO, etiquetaEstatus,
   ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, pesoArchivo, revisarArchivo,
+  pendientesDelFiado, pendientesDelContratante, estadoDocCliente, obraTienePendiente,
 } from '../lib.jsx';
 
 const inputCls =
@@ -42,6 +43,8 @@ export default function Admin() {
   const [recordatorios, setRecordatorios] = useState([]);
   const [sel, setSel] = useState(null);
   const [detalle, setDetalle] = useState(null);
+  const [busca, setBusca] = useState('');
+  const [altaCliente, setAltaCliente] = useState(false);
   const [msg, setMsg] = useState('');
   const [avisoOp, setAvisoOp] = useState('');
   const [errorCarga, setErrorCarga] = useState('');
@@ -91,6 +94,24 @@ export default function Admin() {
 
   // Cualquier cambio en fianzas puede mover los recordatorios pendientes.
   const refrescarTodo = () => { recargarDetalle(); cargarClientes(); cargarRecordatorios(); };
+
+  // ¿Este cliente tiene algo que atender? Es la misma condición que enciende el
+  // punto ámbar del renglón, escrita una vez para que el filtro y el punto no
+  // puedan discrepar.
+  const tienePendiente = (c) => (c.tipo === 'contratante'
+    ? c.obras_descubiertas > 0
+    : c.fianzas_vencidas > 0 || c.docs_pendientes > 0 || c.papeleria_pendiente > 0
+      || c.fianzas_por_vencer > 0 || c.recordatorios_pendientes > 0);
+
+  const termino = busca.trim().toLowerCase();
+  const visibles = termino
+    ? clientes.filter((c) => `${c.razon_social} ${c.rfc || ''}`.toLowerCase().includes(termino))
+    : clientes;
+  // Cuántos con pendiente está tapando el buscador. Se dice: un filtro que
+  // esconde un pendiente sin avisar es lo mismo que no tenerlo.
+  const ocultosConPendiente = clientes.filter(
+    (c) => tienePendiente(c) && !visibles.includes(c)
+  ).length;
 
   return (
     <div className="portal-shell portal-admin min-h-screen">
@@ -169,46 +190,71 @@ export default function Admin() {
             tercio del ancho, o con un cuarto por debajo de 1280px, no cabía y
             aparecía scroll horizontal. Más angosto que eso se apila y el
             detalle se queda con el ancho completo. */}
-        <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 items-start">
           {/* Columna izquierda */}
           <div className="space-y-4">
-            {/* Nada de esta columna es del vendedor: son cosas de la casa, no
-                de un cliente suyo. */}
-            {puedeOperar && (
-              <>
-                <NuevoCliente
-                  vendedores={vendedores}
-                  onDone={(id) => { cargarClientes(); flash('Cliente creado'); if (id) abrirDetalle(id); }}
-                />
-                {/* Las cuentas de acceso son lo único del admin en esta columna. */}
-                {esAdmin && (
-                  <PersonalFortex
-                    internos={internos}
-                    onChange={() => { cargarInternos(); cargarClientes(); recargarDetalle(); }}
-                    flash={flash}
-                  />
-                )}
-                <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
-                <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
-                {/* Cambiar el catálogo mueve la lista de pendientes de todos los
-                    fiados, así que también se refresca el detalle abierto. */}
-                <CatalogoDocumentos
-                  tipos={docsRequeridos}
-                  onChange={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
-                  flash={flash}
-                />
-              </>
-            )}
-
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
               <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
                 <Users className="w-4 h-4 text-slate-500" />
                 <h3 className="text-sm font-semibold text-slate-700">
                   {esVendedor ? 'Mi cartera' : 'Clientes'} ({clientes.length})
                 </h3>
+                {/* Dar de alta un cliente pertenece a la lista de clientes, no a
+                    un bloque suelto arriba. */}
+                {puedeOperar && (
+                  <button
+                    onClick={() => setAltaCliente((v) => !v)}
+                    className={`${btnSecondary} ml-auto`}
+                  >
+                    <Plus className={`h-3.5 w-3.5 transition-transform ${altaCliente ? 'rotate-45' : ''}`} />
+                    Agregar
+                  </button>
+                )}
               </div>
-              <div className="divide-y divide-slate-100 max-h-[65vh] overflow-y-auto">
-                {clientes.map((c) => {
+
+              {altaCliente && puedeOperar && (
+                <div className="border-b border-slate-200">
+                  <NuevoCliente
+                    vendedores={vendedores}
+                    onDone={(id) => {
+                      setAltaCliente(false);
+                      cargarClientes();
+                      flash('Cliente creado');
+                      if (id) abrirDetalle(id);
+                    }}
+                  />
+                </div>
+              )}
+
+              {clientes.length > 3 && (
+                <div className="px-3 py-2 border-b border-slate-100">
+                  <input
+                    value={busca}
+                    onChange={(e) => setBusca(e.target.value)}
+                    placeholder="Buscar por razón social o RFC"
+                    className={inputCls}
+                  />
+                  {/* Se confiesa qué está tapando el buscador. Un filtro que
+                      esconde un cliente con pendiente y no lo dice es la misma
+                      mentira que un contador en cero. */}
+                  {busca.trim() && ocultosConPendiente > 0 && (
+                    <p className="text-[11px] text-amber-700 mt-1">
+                      {ocultosConPendiente} cliente(s) con pendiente fuera del filtro.{' '}
+                      <button onClick={() => setBusca('')} className="underline hover:no-underline">
+                        Ver todos
+                      </button>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* La clase max-h-[65vh] se CONSERVA literal: index.css engancha en
+                  ella para darle a cada renglón su alto y —lo importante— al
+                  cliente abierto su filete de color a la izquierda. Renombrarla
+                  deja el índice sin marca de qué cliente se está viendo, justo
+                  ahora que el índice queda fijo en pantalla. */}
+              <div className="divide-y divide-slate-100 max-h-[65vh] xl:max-h-[calc(100vh-260px)] overflow-y-auto">
+                {visibles.map((c) => {
                   const esContratante = c.tipo === 'contratante';
                   // Al contratante lo único que se le alarma es que alguno de
                   // sus proveedores tenga una obra sin fianza vigente: no tiene
@@ -264,8 +310,46 @@ export default function Admin() {
                     </button>
                   );
                 })}
+                {!visibles.length && (
+                  <div className="px-4 py-6 text-center text-xs text-slate-400">
+                    {busca.trim() ? 'Ningún cliente coincide con la búsqueda.' : 'Sin clientes.'}
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Los catálogos y el personal van DEBAJO de la lista, no arriba.
+                Son configuración una-vez-y-ya y le estaban robando el primer
+                pantallazo a lo que se usa a diario.
+
+                No van a una pestaña del shell —que fue la primera idea— porque
+                no ahorrarían nada: esta columna y el detalle son hermanas del
+                mismo grid, así que la altura de la fila es la de la más alta, y
+                el detalle siempre lo es. Sacarlas de aquí no acortaría la página
+                ni un píxel, y en cambio se perdería poder ver "Documentos
+                requeridos" al mismo tiempo que el expediente del fiado, que es
+                el único momento en que ese catálogo importa. */}
+            {puedeOperar && (
+              <>
+                <NuevaAfianzadora onDone={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }} />
+                <CatalogoTipos tipos={tipos} onChange={cargarTipos} flash={flash} />
+                {/* Cambiar el catálogo mueve la lista de pendientes de todos los
+                    fiados, así que también se refresca el detalle abierto. */}
+                <CatalogoDocumentos
+                  tipos={docsRequeridos}
+                  onChange={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
+                  flash={flash}
+                />
+                {/* Las cuentas de acceso son lo único del admin en esta columna. */}
+                {esAdmin && (
+                  <PersonalFortex
+                    internos={internos}
+                    onChange={() => { cargarInternos(); cargarClientes(); recargarDetalle(); }}
+                    flash={flash}
+                  />
+                )}
+              </>
+            )}
           </div>
 
           {/* Columna derecha: detalle */}
@@ -618,6 +702,31 @@ function DetalleCliente({
     contratantes = [],
   } = detalle;
   const esContratante = cliente.tipo === 'contratante';
+
+  // La pestaña abierta. Arranca en "Obras y crédito" porque es el trabajo del
+  // día; y al cambiar de cliente vuelve sola al principio, gratis, porque el
+  // shell remonta este componente con key={detalle.cliente.id}.
+  const [vista, setVista] = useState('obras');
+
+  // Los pendientes, de una sola fuente. Los mismos números alimentan la barra
+  // de chips y los contadores de las pestañas.
+  const pendientes = esContratante
+    ? pendientesDelContratante({ metricas, suspendidos, lineas_proveedores: lineasProveedores })
+    : pendientesDelFiado({ fianzas, documentos, papeleria, proyectos, lineas, usuarios });
+
+  // El contador de "Papeles" cuenta lo que de verdad falta, no solo lo que no
+  // se ha subido: un documento VENCIDO se pintaba en rojo en su renglón y el
+  // encabezado decía "completo".
+  const papelesPendientes =
+    documentos.filter((d) => ['pendiente', 'vencido'].includes(estadoDocCliente(d))).length
+    + papeleria.filter((p) => p.estado === 'pendiente').length;
+  const usuariosActivos = usuarios.filter((u) => u.activo).length;
+
+  // Un chip lleva a su vista. Para el contratante no hay pestañas —las dos
+  // columnas se ven a la vez— así que solo hace falta en el fiado.
+  const irA = (destino) => {
+    if (!esContratante && ['obras', 'papeles', 'accesos'].includes(destino)) setVista(destino);
+  };
   // Los contratantes que se le pueden ligar a una obra. Sale de la lista que ya
   // está cargada: no hace falta otra ruta.
   const contratantesDisponibles = clientes.filter((c) => c.tipo === 'contratante');
@@ -826,110 +935,187 @@ function DetalleCliente({
         )}
       </div>
 
-      {/* Quiénes pueden entrar por este fiado */}
-      <UsuariosCliente
-        clienteId={cliente.id}
-        usuarios={usuarios}
-        esAdmin={esAdmin}
-        onChange={onChange}
-        flash={flash}
-      />
+      {/* FUERA del switch a propósito: es lo que hace honesto tabular. */}
+      <BarraPendientes pendientes={pendientes} onIr={irA} />
 
-      {esContratante && (
-        <ProyectosDelContratante
-          contratanteId={cliente.id}
-          contratanteNombre={cliente.razon_social}
-          proyectos={proyectos}
-          proveedores={proveedores}
-          suspendidos={suspendidos}
-          clientes={clientes}
-          obrasInvisibles={obrasInvisibles}
-          tipos={tipos}
-          lineasProveedores={lineasProveedores}
-          puedeLigarContratante={puedeOperar}
-          onChange={onChange}
-          flash={flash}
-          avisar={avisar}
-        />
-      )}
+      {/* El contratante NO se tabula, y es a propósito.
+          Sus dos mitades son dos pendientes de dos personas distintas que se
+          leen juntos: a la izquierda lo que él tiene que contratar, a la derecha
+          quién de sus proveedores quedó en falta. Y es lo que el atajo necesita
+          —se asigna el contratista a la izquierda y se comprueba a la derecha
+          sin perder de vista nada—. Partirlo en pestañas también escondería las
+          obras fuera de proyecto, que solo se ven de un lado.
 
+          Bajo 1280px se apila solo: primero proyectos, luego padrón. */}
       {esContratante && (
-        <PadronProveedores
-          contratanteId={cliente.id}
-          proveedores={proveedores}
-          suspendidos={suspendidos}
-          obras={obras}
-          clientes={clientes}
-          tiposDoc={tiposDocContratante}
-          descargar={descargarPorId}
-          puedeOperar={puedeOperar}
-          onChange={onChange}
-          flash={flash}
-        />
+        <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+          <div className="xl:col-span-3 space-y-4">
+            <ProyectosDelContratante
+              contratanteId={cliente.id}
+              contratanteNombre={cliente.razon_social}
+              proyectos={proyectos}
+              proveedores={proveedores}
+              suspendidos={suspendidos}
+              clientes={clientes}
+              obrasInvisibles={obrasInvisibles}
+              tipos={tipos}
+              puedeLigarContratante={puedeOperar}
+              onChange={onChange}
+              flash={flash}
+              avisar={avisar}
+            />
+          </div>
+
+          <div className="xl:col-span-2 space-y-4">
+            <PadronProveedores
+              contratanteId={cliente.id}
+              proveedores={proveedores}
+              suspendidos={suspendidos}
+              obras={obras}
+              clientes={clientes}
+              tiposDoc={tiposDocContratante}
+              descargar={descargarPorId}
+              puedeOperar={puedeOperar}
+              onChange={onChange}
+              flash={flash}
+            />
+
+            {/* La línea de crédito de sus proveedores sale de dentro de
+                ProyectosDelContratante y se pone junto al padrón, que es de lo
+                que habla: es información por EMPRESA, no por proyecto. */}
+            <LineasDeLosProveedores lineas={lineasProveedores} puedeOperar={puedeOperar} />
+
+            <UsuariosCliente
+              clienteId={cliente.id}
+              usuarios={usuarios}
+              esAdmin={esAdmin}
+              onChange={onChange}
+              flash={flash}
+            />
+          </div>
+        </div>
       )}
 
       {!esContratante && (
-      <>
-      {/* Líneas de crédito por afianzadora */}
-      <LineasCredito
-        clienteId={cliente.id}
-        lineas={lineas}
-        afianzadoras={afianzadoras}
-        puedeEditar={puedeOperar}
-        onChange={() => { onChange(); flash('Línea de crédito actualizada'); }}
-      />
+        <>
+          <TiraPestanas
+            pestanas={[
+              { key: 'obras', label: 'Obras y crédito', icono: Briefcase, cuenta: proyectos.length },
+              { key: 'papeles', label: 'Papeles', icono: FileText, cuenta: papelesPendientes || null },
+              { key: 'accesos', label: 'Accesos', icono: Users, cuenta: usuariosActivos },
+            ]}
+            activa={vista}
+            onCambiar={setVista}
+          />
 
-      {/* Proyectos con sus fianzas */}
-      <Proyectos
-        clienteId={cliente.id}
-        proyectos={proyectos}
-        afianzadoras={afianzadoras}
-        tipos={tipos}
-        tiposDoc={tiposDoc}
-        contratantes={contratantesDisponibles}
-        puedeLigarContratante={puedeOperar}
-        onChange={onChange}
-        flash={flash}
-        avisar={avisar}
-      />
+          {/* Crédito y obras van JUNTAS y en este orden, sin excepción. El
+              selector de afianzadora del formulario de fianza solo imprime el
+              nombre —ni línea, ni comprometido, ni disponible—, así que esta
+              tabla es el único lugar del panel donde se ve cuánto le queda al
+              fiado con cada una. Separarlas convierte "¿con quién le cabe? →
+              capturo ahí" en memorizar cifras entre dos vistas, y es la captura
+              más frecuente que hay. */}
+          {vista === 'obras' && (
+            <>
+              <LineasCredito
+                clienteId={cliente.id}
+                lineas={lineas}
+                afianzadoras={afianzadoras}
+                puedeEditar={puedeOperar}
+                onChange={() => { onChange(); flash('Línea de crédito actualizada'); }}
+              />
+              <Proyectos
+                clienteId={cliente.id}
+                proyectos={proyectos}
+                afianzadoras={afianzadoras}
+                tipos={tipos}
+                tiposDoc={tiposDoc}
+                contratantes={contratantesDisponibles}
+                puedeLigarContratante={puedeOperar}
+                onChange={onChange}
+                flash={flash}
+                avisar={avisar}
+              />
+            </>
+          )}
 
-      {/* Expediente del fiado */}
-      <ExpedienteCliente
-        clienteId={cliente.id}
-        documentos={documentos}
-        descargar={descargar}
-        onChange={onChange}
-        flash={flash}
-      />
+          {vista === 'papeles' && (
+            <>
+              <ExpedienteCliente
+                clienteId={cliente.id}
+                documentos={documentos}
+                descargar={descargar}
+                onChange={onChange}
+                flash={flash}
+              />
+              <PapeleriaCliente
+                clienteId={cliente.id}
+                papeleria={papeleria}
+                afianzadoras={afianzadoras}
+                descargar={descargar}
+                onChange={onChange}
+                flash={flash}
+              />
+            </>
+          )}
 
-      {/* Papelería específica */}
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-          <Files className="w-4 h-4 text-slate-500" />
-          <h3 className="text-sm font-semibold text-slate-700">Papelería específica</h3>
-        </div>
-        <div className="divide-y divide-slate-100">
-          {papeleria.map((p) => (
-            <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm hover:bg-slate-50/40">
-              <span className="flex-1 text-slate-700">
-                {p.descripcion}
-                {p.afianzadora_nombre && <span className="text-slate-400"> · {p.afianzadora_nombre}</span>}
-              </span>
-              <EstadoBadge estado={p.estado} />
-              {p.file_path && (
-                <button onClick={() => descargar(p.file_path)} className={btnSecondary}>
-                  <Download className="h-3.5 w-3.5" /> Ver
-                </button>
-              )}
-            </div>
-          ))}
-          {!papeleria.length && <div className="px-4 py-6 text-center text-xs text-slate-400">Sin solicitudes.</div>}
-        </div>
-        <NuevaPapeleria clienteId={cliente.id} afianzadoras={afianzadoras} onDone={() => { onChange(); flash('Solicitud creada'); }} />
-      </div>
-      </>
+          {vista === 'accesos' && (
+            <UsuariosCliente
+              clienteId={cliente.id}
+              usuarios={usuarios}
+              esAdmin={esAdmin}
+              onChange={onChange}
+              flash={flash}
+            />
+          )}
+        </>
       )}
     </>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Papelería específica
+   --------------------------------------------------------------------------
+   Sale a su propio componente para poder vivir en la pestaña "Papeles". */
+
+function PapeleriaCliente({ clienteId, papeleria = [], afianzadoras, descargar, onChange, flash }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <Files className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Papelería específica</h3>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {papeleria.map((p) => (
+          <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm hover:bg-slate-50/40">
+            <span className="flex-1 text-slate-700">
+              {p.descripcion}
+              {/* El número de póliza lo manda el servidor y el JSX lo tiraba.
+                  Al separar Papeles de Obras se perdía para siempre a qué
+                  póliza pertenece la solicitud; antes se reconstruía con
+                  scroll, y con pestañas ya no habría cómo. */}
+              {p.numero_poliza && (
+                <span className="text-[11px] font-mono text-slate-500"> · {p.numero_poliza}</span>
+              )}
+              {p.afianzadora_nombre && <span className="text-slate-400"> · {p.afianzadora_nombre}</span>}
+            </span>
+            <EstadoBadge estado={p.estado} />
+            {p.file_path && (
+              <button onClick={() => descargar(p.file_path)} className={btnSecondary}>
+                <Download className="h-3.5 w-3.5" /> Ver
+              </button>
+            )}
+          </div>
+        ))}
+        {!papeleria.length && <div className="px-4 py-6 text-center text-xs text-slate-400">Sin solicitudes.</div>}
+      </div>
+      <NuevaPapeleria
+        clienteId={clienteId}
+        afianzadoras={afianzadoras}
+        onDone={() => { onChange(); flash('Solicitud creada'); }}
+      />
+    </div>
   );
 }
 
@@ -1522,7 +1708,7 @@ function PartidasDelProyecto({
 
 function ProyectosDelContratante({
   contratanteId, contratanteNombre, proyectos, proveedores, suspendidos = [],
-  clientes = [], obrasInvisibles = [], tipos, lineasProveedores,
+  clientes = [], obrasInvisibles = [], tipos,
   puedeLigarContratante, onChange, flash, avisar,
 }) {
   const [creando, setCreando] = useState(false);
@@ -1688,40 +1874,65 @@ function ProyectosDelContratante({
         )}
       </div>
 
-      {/* La línea de crédito de sus proveedores. ESTO NO LO VE EL CONTRATANTE:
-          es de la empresa del proveedor y es el dato con el que se le negocia
-          precio. Aquí sirve para contestar "¿le cabe otra fianza en esta obra?". */}
-      {lineasProveedores.length > 0 && (
-        <div className="border-t border-slate-200">
-          <div className="px-4 py-2 bg-slate-50/60 flex items-center gap-2">
-            <CreditCard className="w-3.5 h-3.5 text-slate-500" />
-            <p className="text-[11px] font-medium text-slate-600">
-              Crédito afianzable de sus proveedores
-              <span className="font-normal text-slate-400">
-                {' '}· es de la empresa, no del proyecto. El contratante NO ve esta tabla.
-              </span>
-            </p>
-          </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   El crédito afianzable de sus proveedores — SOLO PARA FORTEX
+   --------------------------------------------------------------------------
+   ESTO NO LO VE EL CONTRATANTE: es de la empresa del proveedor y es el dato con
+   el que se le negocia precio. A él se le dice cuánto aparta su proyecto —la
+   suma de las pólizas que ya ve— y nada más.
+
+   Vive junto al padrón y no dentro de los proyectos porque habla de EMPRESAS,
+   no de obras: el comprometido suma las pólizas de todo lo que ese proveedor
+   hace, para cualquiera.
+
+   Y cuando llega vacía se dice POR QUÉ, en vez de desaparecer: al vendedor el
+   servidor le manda [] a propósito (alcanzar a un contratante no puede ser la
+   puerta trasera a las líneas de sus proveedores, que pueden ser clientes de
+   otro vendedor). Desapareciendo, el operador leería "no tienen línea". */
+
+function LineasDeLosProveedores({ lineas = [], puedeOperar }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <CreditCard className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Crédito de sus proveedores</h3>
+      </div>
+
+      {!lineas.length ? (
+        <p className="px-4 py-6 text-center text-xs text-slate-400">
+          {puedeOperar
+            ? 'Sus proveedores todavía no tienen líneas de crédito capturadas.'
+            : 'Las líneas de crédito las ve un operador: son de la empresa del proveedor, '
+              + 'que puede ser cliente de otro vendedor.'}
+        </p>
+      ) : (
+        <>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-slate-50/60 text-slate-500 uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="text-left px-3 py-2">Proveedor</th>
                   <th className="text-left px-3 py-2">Afianzadora</th>
-                  <th className="text-right px-3 py-2">Línea autorizada</th>
-                  <th className="text-right px-3 py-2">Comprometido (todas sus obras)</th>
+                  <th className="text-right px-3 py-2">Línea</th>
+                  <th className="text-right px-3 py-2">Comprometido</th>
                   <th className="text-right px-3 py-2">Disponible</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {lineasProveedores.map((l) => (
+                {lineas.map((l) => (
                   <tr key={`${l.proveedor_id}:${l.afianzadora_id}`} className="hover:bg-slate-50/40">
-                    <td className="px-3 py-1.5 text-slate-700 font-medium">{nombreDe(l.proveedor_id)}</td>
+                    <td className="px-3 py-1.5 text-slate-700 font-medium">{l.proveedor_nombre}</td>
                     <td className="px-3 py-1.5 text-slate-600">{l.afianzadora_nombre}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{mxn(l.linea_credito)}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxn(l.comprometido_total)}</td>
+                    {/* '<= 0' y no '< 0': en cero no le cabe otra fianza, y
+                        pintarlo verde invita a colocarle una que no pasa. */}
                     <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${
-                      l.disponible < 0 ? 'text-rose-600' : 'text-emerald-700'
+                      l.disponible <= 0 ? 'text-rose-600' : 'text-emerald-700'
                     }`}>
                       {mxn(l.disponible)}
                     </td>
@@ -1730,7 +1941,11 @@ function ProyectosDelContratante({
               </tbody>
             </table>
           </div>
-        </div>
+          <p className="px-4 py-2 text-[11px] text-slate-400 border-t border-slate-100">
+            Es de la empresa, no del proyecto: el comprometido suma todas sus obras, para
+            cualquiera. El contratante NO ve esta tabla.
+          </p>
+        </>
       )}
     </div>
   );
@@ -2859,6 +3074,7 @@ function Pill({ label, valor, tono = 'slate', ayuda }) {
     emerald: 'bg-emerald-50 text-emerald-700',
     sky: 'bg-sky-50 text-sky-700',
     violet: 'bg-violet-50 text-violet-700',
+    amber: 'bg-amber-50 text-amber-700',
     rose: 'bg-rose-50 text-rose-700',
   };
   return (
@@ -2869,6 +3085,89 @@ function Pill({ label, valor, tono = 'slate', ayuda }) {
 }
 
 function Req() { return <span className="text-rose-500">*</span>; }
+
+/* --------------------------------------------------------------------------
+   Lo que falta, siempre a la vista
+   --------------------------------------------------------------------------
+   Esta barra es la condición para poder tabular. Va FUERA del switch de
+   pestañas y por eso el operador ve lo que falta aunque esté en otra vista, y
+   llega de un clic. Sin ella, organizar sería esconder.
+
+   Los chips salen de pendientesDelFiado / pendientesDelContratante (lib.jsx),
+   las mismas funciones que alimentan los contadores de las pestañas y la regla
+   de "esta obra arranca abierta": tres pantallas que no pueden discrepar
+   porque leen del mismo lugar.
+
+   Sin pendientes NO se pinta un banner verde. Se escribe en slate y con el
+   alcance acotado: el panel no sabe de las fianzas que el cliente colocó con
+   otro agente, y "todo al día" prometería de más. */
+
+function ChipPendiente({ texto, tono, onClick }) {
+  const tonos = {
+    rose: 'bg-rose-50 text-rose-700 border-rose-200',
+    amber: 'bg-amber-50 text-amber-800 border-amber-200',
+    slate: 'bg-slate-50 text-slate-600 border-slate-200',
+  };
+  return (
+    <button
+      onClick={onClick}
+      className={`text-xs px-2 py-1 rounded-md border hover:underline ${tonos[tono] || tonos.slate}`}
+    >
+      {texto}
+    </button>
+  );
+}
+
+function BarraPendientes({ pendientes, onIr }) {
+  if (!pendientes.length) {
+    return (
+      <p className="text-[11px] text-slate-500 mb-4">
+        Sin pendientes en lo que Fortex captura.
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mb-4">
+      {pendientes.map((p) => (
+        <ChipPendiente
+          key={p.clave}
+          texto={p.texto}
+          tono={p.tono}
+          onClick={() => onIr(p.destino)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// La tira de pestañas, con las clases del portal del contratante tal cual: el
+// subrayado lo engancha .portal-tab en index.css a partir de
+// 'border-indigo-600 text-indigo-700', y con cualquier otra clase la pestaña
+// activa se ve muerta.
+//
+// El contador solo se pinta si viene un número. Nunca '?? 0': un cero se lee
+// "no hay nada" cuando puede ser "no se pudo consultar".
+function TiraPestanas({ pestanas, activa, onCambiar }) {
+  return (
+    <div className="portal-tabs flex gap-1 border-b border-slate-200 mb-4 overflow-x-auto">
+      {pestanas.map(({ key, label, icono: Icono, cuenta }) => (
+        <button
+          key={key}
+          onClick={() => onCambiar(key)}
+          className={`portal-tab px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+            activa === key
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Icono className="h-3.5 w-3.5" />
+          {label}
+          {cuenta != null && <span className="tabular-nums text-slate-400">({cuenta})</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /* --------------------------------------------------------------------------
    Líneas de crédito
@@ -3055,12 +3354,56 @@ function Proyecto({
   proyecto: p, proyectos, clienteId, afianzadoras, tipos, tiposDoc,
   contratantes = [], puedeLigarContratante, onChange, flash, avisar,
 }) {
-  const [abierto, setAbierto] = useState(true);
+  // El dato decide, no un valor fijo: se abre lo que tiene algo que decir.
+  //
+  // obraTienePendiente vive en lib.jsx y es la MISMA función de la que sale el
+  // chip "n obra(s) sin fianza", así que si el chip la cuenta, la obra está
+  // abierta. Dos reglas separadas se habrían separado más.
+  //
+  // Y si el fiado tiene una sola obra se abre igual: plegar la única cosa de la
+  // pantalla no ahorra nada y cuesta un clic.
+  //
+  // NO se recuerda que el operador la cerró. Guardar eso sería guardar la
+  // decisión de esconder un pendiente; que vuelva a abrirse es a propósito.
+  const [abierto, setAbierto] = useState(
+    () => obraTienePendiente(p) || proyectos.length === 1
+  );
   const [editando, setEditando] = useState(false);
   const [nuevaFianza, setNuevaFianza] = useState(false);
   const [verDocs, setVerDocs] = useState(false);
   const [error, setError] = useState('');
   const docs = p.documentos || [];
+
+  const registros = p.fianzas || [];
+  const emitidas = registros.filter((f) => f.clase !== 'previo');
+  const previos = registros.length - emitidas.length;
+
+  // El resumen de la obra plegada. Tiene que decir lo suficiente para no tener
+  // que abrirla: cuántas pólizas y en qué estado está la peor de ellas.
+  const resumen = () => {
+    if (!emitidas.length) {
+      return previos
+        ? `sin fianza emitida · ${previos} previo(s) en trámite`
+        : 'sin fianza';
+    }
+    const peor = emitidas.some((f) => f.estado === 'vencida') ? 'con alguna vencida'
+      : emitidas.some((f) => !f.fecha_vigencia) ? 'alguna sin fecha de vigencia'
+      : emitidas.some((f) => f.estado === 'por_vencer') ? 'alguna por vencer'
+      : 'vigentes';
+    return `${emitidas.length} póliza(s) ${peor}`
+      + (previos ? ` · ${previos} previo(s)` : '');
+  };
+
+  // Abrir el formulario de fianza abre la obra. Sin esto, con la obra plegada el
+  // formulario se montaría dentro del bloque escondido y desaparecería con todo
+  // lo tecleado.
+  const abrirNuevaFianza = () => {
+    setNuevaFianza((n) => {
+      const siguiente = !n;
+      if (siguiente) setAbierto(true);
+      return siguiente;
+    });
+  };
 
   async function borrar() {
     setError('');
@@ -3090,6 +3433,14 @@ function Proyecto({
               {p.beneficiario && <span> · {p.beneficiario}</span>}
               {p.fecha_termino && <span> · termina {fmtDate(p.fecha_termino)}</span>}
             </p>
+            {/* Plegada tiene que decir lo suficiente para no abrirla. */}
+            {!abierto && (
+              <p className={`text-[11px] mt-0.5 ${
+                emitidas.length ? 'text-slate-500' : 'text-rose-600 font-medium'
+              }`}>
+                {resumen()}
+              </p>
+            )}
             {/* Que se vea sin abrir nada: las pólizas de esta obra las está
                 viendo otra empresa. */}
             {p.contratante_nombre && (
@@ -3113,6 +3464,15 @@ function Proyecto({
                 {p.pct_contrato_afianzado}% del contrato
               </span>
             )}
+            {/* Sube al encabezado a propósito: vivía dentro del bloque
+                plegable, y con la obra sana cerrada agregar la segunda y la
+                tercera póliza de un contrato —anticipo, cumplimiento, buena
+                calidad: el caso normal en obra— habría costado un clic más para
+                siempre. */}
+            <button onClick={abrirNuevaFianza} className={btnSecondary} title="Agregar fianza o previo">
+              <Plus className={`h-3.5 w-3.5 transition-transform ${nuevaFianza ? 'rotate-45' : ''}`} />
+              Fianza o previo
+            </button>
             <button
               onClick={() => setVerDocs((v) => !v)}
               className={`${btnSecondary} ${docs.length ? 'text-indigo-700 border-indigo-200' : ''}`}
@@ -3182,11 +3542,6 @@ function Proyecto({
             onChange={onChange}
             flash={flash}
           />
-          <div className="px-4 py-2.5 border-t border-slate-100">
-            <button onClick={() => setNuevaFianza((n) => !n)} className={btnSecondary}>
-              <Plus className={`h-3.5 w-3.5 transition-transform ${nuevaFianza ? 'rotate-45' : ''}`} /> Agregar fianza o previo a este proyecto
-            </button>
-          </div>
           {nuevaFianza && (
             <FormFianza
               proyectos={proyectos}

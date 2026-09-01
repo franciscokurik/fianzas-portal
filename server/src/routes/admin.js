@@ -1544,7 +1544,7 @@ router.get('/clientes/:id/detalle', async (req, res) => {
     // clientes de otro vendedor: por su detalle recibe un 403, y por aquí
     // estaba entrando lo mismo. Peor todavía, el comprometido_total suma
     // pólizas de obras que ese proveedor hace para OTROS contratantes.
-    const lineasProveedores = esVendedor(req.user) ? [] : await lineasDeLosProveedores(id);
+    const lineasCrudas = esVendedor(req.user) ? [] : await lineasDeLosProveedores(id);
     // Los documentos de su carpeta van con el nombre legible del tipo, igual que
     // en su portal: es la misma pantalla vista desde el otro lado.
     const obras = obrasCrudas.map((o) => ({
@@ -1589,6 +1589,19 @@ router.get('/clientes/:id/detalle', async (req, res) => {
        WHERE p.contratante_id = ? AND cp.activo = 0
        ORDER BY c.razon_social, p.nombre`
     ).all(id);
+
+    // El nombre del proveedor se le pega aquí y no en el front: la tabla de
+    // crédito salió de dentro de los proyectos y ya no tiene a mano el
+    // resolvedor del padrón. Se resuelve contra el padrón COMPLETO —activos y
+    // suspendidos— porque una línea puede ser de alguien que se suspendió
+    // después, y sin esto ese renglón se quedaba sin nombre.
+    const nombrePorId = new Map(
+      [...proveedores, ...suspendidos].map((p) => [p.id, p.razon_social])
+    );
+    const lineasProveedores = lineasCrudas.map((l) => ({
+      ...l,
+      proveedor_nombre: nombrePorId.get(l.proveedor_id) || 'Proveedor (fuera del padrón)',
+    }));
 
     return res.json({
       obras_invisibles: invisibles,

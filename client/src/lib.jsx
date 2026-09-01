@@ -201,6 +201,166 @@ export const estaDescubierta = (estado) =>
 
 // Marca de qué clase de cliente es. Solo se pinta para el contratante: en una
 // lista que casi toda es de fiados, etiquetar cada renglón hace ruido.
+/* --------------------------------------------------------------------------
+   QUÉ FALTA
+   --------------------------------------------------------------------------
+   Estas funciones existen porque el panel va a esconder cosas detrás de
+   pestañas y de secciones plegadas, y eso solo se puede hacer si hay UN lugar
+   que enumere los pendientes. La barra de chips, el contador de cada pestaña y
+   la regla de "esta obra arranca abierta" leen de aquí, así que no pueden
+   contradecirse — que es exactamente lo que pasa cuando cada pantalla cuenta
+   por su lado (el titular decía 1 y el renglón de abajo decía 2).
+
+   Cada pendiente sale con { clave, texto, tono, destino }: el texto lleva el
+   número escrito, no el color, porque en el panel el color no llega —
+   .portal-admin aplana sky y violet a gris.
+
+   Tonos: rose = alguien incumplió o falta algo exigible. amber = hay que
+   mirarlo pronto, o no alcanza para prometer. slate = pendiente de la casa o
+   del propio cliente, no una falta de nadie.
+   -------------------------------------------------------------------------- */
+
+// El estado de un papel del expediente, en un solo lugar.
+//
+// La regla estaba escrita dentro del JSX del renglón y el contador del
+// encabezado usaba otra (`filter(d => !d.uploaded_at)`), así que un documento
+// VENCIDO se pintaba en rojo abajo y no contaba arriba: el encabezado decía
+// "completo" con un financiero vencido a la vista.
+export function estadoDocCliente(d) {
+  if (!d.uploaded_at) return 'pendiente';
+  if (!d.vencimiento) return 'al_dia';
+  const hoy = new Date().toISOString().slice(0, 10);
+  if (d.vencimiento < hoy) return 'vencido';
+  const dias = Math.ceil((new Date(d.vencimiento) - new Date(hoy)) / 86400000);
+  return dias <= (d.alerta_dias ?? 30) ? 'por_vencer' : 'al_dia';
+}
+
+// ¿Esta obra tiene algo que decir? Decide si arranca abierta o plegada.
+//
+// Va aquí y no dentro del componente para que el chip "n obra(s) sin fianza" y
+// el plegado no puedan discrepar: si el chip la cuenta, la obra se abre.
+export function obraTienePendiente(p) {
+  const registros = p.fianzas || [];
+  const emitidas = registros.filter((f) => f.clase !== 'previo');
+  if (!emitidas.length) return true;                                  // sin fianza
+  if (emitidas.some((f) => f.estado === 'vencida')) return true;
+  if (emitidas.some((f) => f.estado === 'por_vencer')) return true;
+  if (emitidas.some((f) => !f.fecha_vigencia)) return true;           // sin fecha
+  // Ligada a un contratante pero fuera de sus proyectos: captura a medias.
+  if (p.contratante_nombre && !p.desarrollo_nombre) return true;
+  if (registros.some((f) => f.dias_para_recordatorio != null && f.dias_para_recordatorio <= 7)) {
+    return true;
+  }
+  return false;
+}
+
+const chip = (clave, texto, tono, destino) => ({ clave, texto, tono, destino });
+
+// Los pendientes de un FIADO, con su destino para poder llevar de un clic.
+export function pendientesDelFiado({
+  fianzas = [], documentos = [], papeleria = [], proyectos = [], lineas = [], usuarios = [],
+} = {}) {
+  const fuera = [];
+  const emitidas = fianzas.filter((f) => f.clase !== 'previo');
+
+  const sinFianza = proyectos.filter(
+    (p) => (p.fianzas || []).every((f) => f.clase === 'previo')
+  ).length;
+  if (sinFianza) fuera.push(chip('sin_fianza', `${sinFianza} obra(s) sin fianza`, 'rose', 'obras'));
+
+  const vencidas = emitidas.filter((f) => f.estado === 'vencida').length;
+  if (vencidas) fuera.push(chip('vencidas', `${vencidas} póliza(s) vencida(s)`, 'rose', 'obras'));
+
+  const porVencer = emitidas.filter((f) => f.estado === 'por_vencer').length;
+  if (porVencer) {
+    fuera.push(chip('por_vencer', `${porVencer} póliza(s) por vencer (≤30 d)`, 'amber', 'obras'));
+  }
+
+  // Sin este chip esa póliza no aparece en ninguna cuenta: estadoFianza
+  // devuelve 'activa' cuando no hay fecha, y para el fiado está bien —es su
+  // propia captura incompleta— pero entonces nadie la nombra.
+  const sinFecha = emitidas.filter((f) => !f.fecha_vigencia).length;
+  if (sinFecha) {
+    fuera.push(chip('sin_fecha', `${sinFecha} póliza(s) sin fecha de vigencia`, 'amber', 'obras'));
+  }
+
+  const docs = documentos.map(estadoDocCliente);
+  const docsMal = docs.filter((e) => e === 'pendiente' || e === 'vencido').length;
+  if (docsMal) fuera.push(chip('expediente', `${docsMal} del expediente`, 'rose', 'papeles'));
+  const docsPronto = docs.filter((e) => e === 'por_vencer').length;
+  if (docsPronto) {
+    fuera.push(chip('expediente_pronto', `${docsPronto} del expediente por vencer`, 'amber', 'papeles'));
+  }
+
+  const papelPend = papeleria.filter((p) => p.estado === 'pendiente').length;
+  if (papelPend) {
+    fuera.push(chip('papeleria', `${papelPend} papelería pendiente`, 'amber', 'papeles'));
+  }
+
+  const sinAgrupar = proyectos.filter(
+    (p) => p.contratante_nombre && !p.desarrollo_nombre
+  ).length;
+  if (sinAgrupar) {
+    fuera.push(chip('sin_agrupar', `${sinAgrupar} obra(s) sin agrupar`, 'amber', 'obras'));
+  }
+
+  // '<= 0' y no '< 0': agotada es agotada, y en cero no le cabe otra fianza.
+  const agotadas = lineas.filter((l) => l.disponible <= 0).length;
+  if (agotadas) {
+    fuera.push(chip('linea', `Sin disponible en ${agotadas} afianzadora(s)`, 'rose', 'obras'));
+  }
+
+  const previos = fianzas.filter((f) => f.clase === 'previo').length;
+  if (previos) fuera.push(chip('previos', `${previos} previo(s) en trámite`, 'amber', 'obras'));
+
+  if (usuarios.length && !usuarios.some((u) => u.activo)) {
+    fuera.push(chip('accesos', 'Sin accesos activos', 'slate', 'accesos'));
+  }
+
+  return fuera;
+}
+
+// Los pendientes de un CONTRATANTE. Salen de las métricas que el servidor ya
+// calcula, para que el panel no vuelva a derivarlas por su cuenta.
+export function pendientesDelContratante({
+  metricas = {}, suspendidos = [], lineas_proveedores: lineasProv = [],
+} = {}) {
+  const m = metricas;
+  const fuera = [];
+
+  if (m.pendientes_sin_fianza) {
+    fuera.push(chip('sin_fianza', `${m.pendientes_sin_fianza} pendiente(s) sin fianza completa`, 'rose', 'proyectos'));
+  }
+  if (m.proveedores_en_falta) {
+    fuera.push(chip('en_falta', `${m.proveedores_en_falta} proveedor(es) en falta`, 'rose', 'padron'));
+  }
+  // En slate: es pendiente del propio desarrollador —le falta contratar—, no un
+  // proveedor que incumplió. Pintarlo rojo acusaría a alguien que no existe.
+  if (m.partidas_sin_contratista) {
+    fuera.push(chip('sin_contratar', `${m.partidas_sin_contratista} partida(s) sin contratar`, 'slate', 'proyectos'));
+  }
+  if (m.obras_sin_proyecto) {
+    fuera.push(chip('sin_proyecto', `${m.obras_sin_proyecto} obra(s) fuera de proyecto`, 'amber', 'proyectos'));
+  }
+  const conObras = suspendidos.filter((s) => s.obras_ligadas > 0);
+  if (conObras.length) {
+    const n = conObras.reduce((s, x) => s + x.obras_ligadas, 0);
+    fuera.push(chip('suspendidos', `${conObras.length} suspendido(s) con ${n} obra(s) ligadas`, 'amber', 'padron'));
+  }
+  if (m.obras_por_vencer) {
+    fuera.push(chip('por_vencer', `${m.obras_por_vencer} obra(s) por vencer`, 'amber', 'proyectos'));
+  }
+  if (m.previos_en_tramite) {
+    fuera.push(chip('previos', `${m.previos_en_tramite} previo(s) en trámite`, 'amber', 'proyectos'));
+  }
+  const agotadas = lineasProv.filter((l) => l.disponible <= 0).length;
+  if (agotadas) {
+    fuera.push(chip('linea', `Sin disponible en ${agotadas} proveedor(es)`, 'rose', 'padron'));
+  }
+
+  return fuera;
+}
+
 export function TipoClienteBadge({ tipo }) {
   if (tipo !== 'contratante') return null;
   return (
