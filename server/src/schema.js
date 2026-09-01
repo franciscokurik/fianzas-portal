@@ -183,6 +183,52 @@ CREATE TABLE IF NOT EXISTS tipos_fianza (
   activo INTEGER NOT NULL DEFAULT 1
 );
 
+-- Las PARTIDAS de un desarrollo: los pedazos de obra que el desarrollador va a
+-- contratar por separado. Muros, electricidad, plomería, cancelería.
+--
+-- Es del CONTRATANTE, no del proveedor, y existe ANTES de saber quién la va a
+-- hacer. Esa es toda la razón de que sea una tabla y no el contrato del
+-- proveedor: al montar el edificio se sabe qué hace falta mucho antes de saber
+-- a quién se le va a dar, y "esta partida todavía no tiene contratista" es un
+-- pendiente distinto de "este contratista no ha presentado su fianza". Sin este
+-- nivel, el primero no se podía ni decir.
+--
+-- El contrato del proveedor (proyectos) apunta a la partida que cumple. Así
+-- queda la cadena completa: partida -> desarrollo -> contratante, y de ahí se
+-- DERIVA todo lo demás, que es lo que impide que las columnas discrepen.
+CREATE TABLE IF NOT EXISTS partidas (
+  id             SERIAL PRIMARY KEY,
+  desarrollo_id  INTEGER NOT NULL REFERENCES desarrollos(id) ON DELETE CASCADE,
+  nombre         TEXT    NOT NULL,
+  alcance        TEXT,
+  monto_estimado BIGINT  NOT NULL DEFAULT 0,
+  -- Para presentarlas en el orden de la obra y no alfabético: primero
+  -- cimentación, al final acabados. Empatados, se ordenan por nombre.
+  orden          INTEGER NOT NULL DEFAULT 50,
+  notas          TEXT,
+  created_at     TEXT    NOT NULL DEFAULT ${TS_DEFAULT}
+);
+CREATE INDEX IF NOT EXISTS idx_partidas_desarrollo ON partidas(desarrollo_id);
+
+-- QUÉ fianzas exige una partida. Es la pieza que faltaba para poder decir
+-- "cubierta" y no solo "tiene una fianza".
+--
+-- Sin esto, una partida con la de cumplimiento pero SIN la de anticipo salía en
+-- verde: el portal no tenía forma de saber que faltaba algo. Con la lista, la
+-- pantalla contesta lo que de verdad importa — qué falta, no si hay algo.
+--
+-- El tipo lo manda el catálogo (tipos_fianza), el mismo que usan las pólizas.
+-- ON DELETE CASCADE por los dos lados: si se va la partida se van sus
+-- requisitos, y un tipo de fianza no se puede borrar del catálogo si alguien lo
+-- usó (tipos_fianza se da de baja lógica, nunca se borra).
+CREATE TABLE IF NOT EXISTS partida_requisitos (
+  id             SERIAL PRIMARY KEY,
+  partida_id     INTEGER NOT NULL REFERENCES partidas(id) ON DELETE CASCADE,
+  tipo_fianza_id INTEGER NOT NULL REFERENCES tipos_fianza(id) ON DELETE CASCADE,
+  UNIQUE(partida_id, tipo_fianza_id)
+);
+CREATE INDEX IF NOT EXISTS idx_requisitos_partida ON partida_requisitos(partida_id);
+
 -- Obras / contratos del cliente. Toda fianza cuelga de un proyecto.
 CREATE TABLE IF NOT EXISTS proyectos (
   id              SERIAL PRIMARY KEY,
@@ -232,6 +278,25 @@ CREATE INDEX IF NOT EXISTS idx_proyectos_contratante ON proyectos(contratante_id
 -- agrupación.
 ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS desarrollo_id INTEGER REFERENCES desarrollos(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_proyectos_desarrollo ON proyectos(desarrollo_id);
+
+-- QUÉ partida del desarrollo cumple este contrato. Es lo que asigna un fiado a
+-- "muros" o a "electricidad".
+--
+-- Sigue siendo AGRUPACIÓN, no permiso: quien autoriza es contratante_id, igual
+-- que antes. Y la cadena se deriva hacia arriba —partida manda sobre desarrollo,
+-- y desarrollo sobre contratante— porque con tres columnas que hablan de lo
+-- mismo, la única forma de que no discrepen es que dos salgan de la primera
+-- (ver resolverPartida en routes/admin.js).
+--
+-- ON DELETE SET NULL: si el desarrollador borra la partida, el contrato del
+-- proveedor se queda —es suyo, con sus pólizas— y nada más deja de estar
+-- asignado a ese pedazo de obra.
+--
+-- Nullable a propósito: una obra puede estar ligada a un contratante sin partida
+-- (así era antes de que existieran), y hay obras que no son para ningún
+-- contratante del portal.
+ALTER TABLE proyectos ADD COLUMN IF NOT EXISTS partida_id INTEGER REFERENCES partidas(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_proyectos_partida ON proyectos(partida_id);
 
 -- El tipo lo manda tipos_fianza. En bases viejas todavía existe la columna de
 -- texto libre 'tipo_fianza'; la migración 003 la tira una vez respaldada.

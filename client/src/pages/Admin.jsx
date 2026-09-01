@@ -3,7 +3,7 @@ import {
   LogOut, Building2, Plus, Save, Download,
   Users, FileText, Files, CheckCircle2, UserPlus, AlertTriangle,
   CreditCard, Trash2, Briefcase, Pencil, X, Bell, ListChecks, Check,
-  Paperclip, Upload, FileDown, Mail, KeyRound, UserCog, ShieldCheck, Link2,
+  Paperclip, Upload, FileDown, Mail, KeyRound, UserCog, ShieldCheck, Link2, Layers,
 } from 'lucide-react';
 import { api, getToken, subirACloudinary } from '../api.js';
 import { useAuth } from '../auth.jsx';
@@ -820,8 +820,8 @@ function DetalleCliente({
         <ProyectosDelContratante
           contratanteId={cliente.id}
           proyectos={proyectos}
-          obras={obras}
           proveedores={proveedores}
+          tipos={tipos}
           lineasProveedores={lineasProveedores}
           onChange={onChange}
           flash={flash}
@@ -918,8 +918,270 @@ function DetalleCliente({
    crédito de cada proveedor y cuánto le queda disponible. Eso es de la empresa
    del proveedor, no de este proyecto, y con eso se le negocia precio. */
 
+/* --------------------------------------------------------------------------
+   Las PARTIDAS de un proyecto de contratante, desde el panel
+   --------------------------------------------------------------------------
+   El desarrollador las captura desde su portal, pero al darle de alta la cuenta
+   hay que armarle la obra antes de que entre: sin partidas no hay a qué
+   asignarle los contratos, y esa asignación sí es de Fortex.
+
+   Se pinta con lo que ya trae el panorama (mismas partidas, mismos requisitos,
+   mismo estado que ve él) — aquí no se vuelve a consultar nada. */
+
+function FormPartidaPanel({ inicial, tipos = [], onSubmit, onCancel }) {
+  const [f, setF] = useState({
+    nombre: inicial?.nombre || '',
+    alcance: inicial?.alcance || '',
+    monto_estimado: inicial?.monto_estimado ?? 0,
+    orden: inicial?.orden ?? 50,
+  });
+  const [requisitos, setRequisitos] = useState(
+    () => new Set((inicial?.requisitos || []).map((r) => r.tipo_fianza_id))
+  );
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  const alternar = (id) => setRequisitos((antes) => {
+    const nuevo = new Set(antes);
+    if (nuevo.has(id)) nuevo.delete(id); else nuevo.add(id);
+    return nuevo;
+  });
+
+  async function guardar() {
+    setError('');
+    if (!f.nombre.trim()) return setError('El nombre de la partida es obligatorio.');
+    setBusy(true);
+    try {
+      await onSubmit({ ...f, requisitos: [...requisitos] });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 ml-3 p-3 rounded-lg border border-indigo-200 bg-indigo-50/40">
+      <p className="text-[11px] font-medium text-slate-600 mb-2">
+        {inicial ? 'Editar partida' : 'Nueva partida'}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+        <div className="sm:col-span-2">
+          <input value={f.nombre} onChange={set('nombre')} placeholder="Muros y albañilería *"
+                 className={inputCls} />
+        </div>
+        <input value={f.alcance} onChange={set('alcance')} placeholder="Alcance" className={inputCls} />
+        <input type="number" value={f.orden} onChange={set('orden')} placeholder="Orden"
+               className={inputCls} title="Menor primero: cimentación 10, acabados 90" />
+        <div className="sm:col-span-2">
+          <InputPesos
+            valor={f.monto_estimado}
+            onChange={(c) => setF((s) => ({ ...s, monto_estimado: c }))}
+            className={inputCls}
+          />
+        </div>
+      </div>
+
+      {/* Sin esto, la partida solo puede decir "tiene fianza", nunca "le falta
+          la de anticipo". Es todo el punto del nivel. */}
+      <p className="text-[11px] text-slate-500 mt-2 mb-1">Qué fianzas exige esta partida:</p>
+      <div className="flex flex-wrap gap-1.5">
+        {tipos.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => alternar(t.id)}
+            className={`text-[11px] px-2 py-1 rounded-md border ${
+              requisitos.has(t.id)
+                ? 'bg-indigo-600 border-indigo-600 text-white'
+                : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
+            }`}
+          >
+            {t.nombre}
+          </button>
+        ))}
+      </div>
+      {requisitos.size === 0 && (
+        <p className="text-[11px] text-amber-700 mt-1.5">
+          Sin nada marcado, esta partida saldrá verde con cualquier fianza.
+        </p>
+      )}
+
+      {error && (
+        <div className="mt-2 rounded border border-rose-200 bg-rose-50 p-2 text-[11px] text-rose-700 flex items-start gap-1.5">
+          <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+      <div className="flex gap-2 mt-2">
+        <button onClick={guardar} disabled={busy} className={btnSecondary}>
+          <Save className="h-3.5 w-3.5" /> {busy ? 'Guardando…' : 'Guardar'}
+        </button>
+        <button onClick={onCancel} className={btnSecondary}>
+          <X className="h-3.5 w-3.5" /> Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PartidasDelProyecto({
+  contratanteId, proyecto, tipos, nombreDe, onChange, flash,
+}) {
+  const [creando, setCreando] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [error, setError] = useState('');
+
+  const partidas = proyecto.partidas || [];
+  const sinPartida = proyecto.obras_sin_partida || [];
+
+  async function borrar(pa) {
+    setError('');
+    if (!confirm(`¿Borrar la partida "${pa.nombre}"? No borra ninguna obra ni póliza.`)) return;
+    try {
+      await api.del(`/admin/clientes/${contratanteId}/partidas/${pa.id}`);
+      onChange();
+      flash('Partida borrada');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-2">
+        <Layers className="w-3.5 h-3.5 text-slate-400" />
+        <p className="text-[11px] font-medium text-slate-600">
+          Partidas ({partidas.length})
+        </p>
+        <button
+          onClick={() => { setCreando((c) => !c); setEditando(null); }}
+          className={`${btnSecondary} ml-auto`}
+        >
+          <Plus className={`h-3 w-3 transition-transform ${creando ? 'rotate-45' : ''}`} />
+          Partida
+        </button>
+      </div>
+
+      {error && (
+        <div className="mt-2 ml-3 rounded border border-rose-200 bg-rose-50 p-2 text-[11px] text-rose-700 flex items-start gap-1.5">
+          <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+
+      {creando && (
+        <FormPartidaPanel
+          tipos={tipos}
+          onCancel={() => setCreando(false)}
+          onSubmit={async (datos) => {
+            await api.post(
+              `/admin/clientes/${contratanteId}/proyectos/${proyecto.id}/partidas`, datos
+            );
+            setCreando(false);
+            onChange();
+            flash('Partida creada');
+          }}
+        />
+      )}
+      {editando && (
+        <FormPartidaPanel
+          inicial={editando}
+          tipos={tipos}
+          onCancel={() => setEditando(null)}
+          onSubmit={async (datos) => {
+            await api.put(`/admin/clientes/${contratanteId}/partidas/${editando.id}`, datos);
+            setEditando(null);
+            onChange();
+            flash('Partida actualizada');
+          }}
+        />
+      )}
+
+      <div className="mt-1.5 pl-3 border-l-2 border-slate-100 space-y-2">
+        {partidas.map((pa) => (
+          <div key={pa.id}>
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="text-slate-700 font-medium">{pa.nombre}</span>
+              {pa.monto_estimado > 0 && (
+                <span className="text-slate-400 tabular-nums">{mxn(pa.monto_estimado)}</span>
+              )}
+              <CumplimientoBadge
+                estado={pa.estado_cobertura}
+                verificada={pa.requisitos.length > 0}
+              />
+              <button onClick={() => { setEditando(pa); setCreando(false); }}
+                      className={btnSecondary} title="Editar partida">
+                <Pencil className="h-3 w-3" />
+              </button>
+              <button onClick={() => borrar(pa)}
+                      className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
+                      title="Borrar partida">
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-500 pl-1">
+              exige:{' '}
+              {pa.requisitos.length
+                ? pa.requisitos.map((r) => {
+                    const falta = pa.faltantes.some((x) => x.tipo_fianza_id === r.tipo_fianza_id);
+                    return (
+                      <span key={r.tipo_fianza_id} className={falta ? 'text-rose-600 font-medium' : ''}>
+                        {r.tipo_fianza}{falta ? ' (falta)' : ''}{' '}
+                      </span>
+                    );
+                  })
+                : <span className="text-amber-700">nada capturado</span>}
+            </p>
+
+            {/* Quién la está haciendo. Es lo único de este nivel que el
+                contratante NO puede capturar: ligar la obra de una empresa le
+                abre sus pólizas. */}
+            {pa.contratos?.length
+              ? pa.contratos.map((o) => (
+                  <p key={o.id} className="text-[11px] text-slate-500 pl-1 flex flex-wrap items-center gap-1.5">
+                    <Briefcase className="w-3 h-3 text-slate-300 shrink-0" />
+                    <span className="text-slate-600">{nombreDe(o.client_id)}</span>
+                    <span className="text-slate-400">{o.nombre}</span>
+                    <CumplimientoBadge estado={o.estado_cobertura} />
+                  </p>
+                ))
+              : (
+                <p className="text-[11px] text-slate-400 pl-1">
+                  sin contratista — se asigna desde la obra del proveedor, en "Partida"
+                </p>
+              )}
+          </div>
+        ))}
+
+        {!partidas.length && !creando && (
+          <p className="text-[11px] text-slate-400">
+            Sin partidas. Puede armarlas él desde su portal, o créaselas aquí para poder
+            asignarle los contratos.
+          </p>
+        )}
+      </div>
+
+      {/* Los contratos que están en el proyecto pero en ninguna partida. Es lo
+          capturado antes de que las partidas existieran: se dice, no se
+          esconde, porque es captura pendiente. */}
+      {sinPartida.length > 0 && (
+        <div className="mt-2 ml-3 rounded-lg border border-amber-200 bg-amber-50/60 p-2">
+          <p className="text-[11px] font-medium text-amber-800">
+            {sinPartida.length} contrato(s) sin partida:
+          </p>
+          {sinPartida.map((o) => (
+            <p key={o.id} className="text-[11px] text-amber-700 pl-1">
+              {nombreDe(o.client_id)} · {o.nombre}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProyectosDelContratante({
-  contratanteId, proyectos, obras, proveedores, lineasProveedores, onChange, flash,
+  contratanteId, proyectos, proveedores, tipos, lineasProveedores, onChange, flash,
 }) {
   const [creando, setCreando] = useState(false);
   const [editando, setEditando] = useState(null);
@@ -984,7 +1246,6 @@ function ProyectosDelContratante({
 
       <div className="divide-y divide-slate-100">
         {proyectos.map((p) => {
-          const suyas = obras.filter((o) => o.desarrollo_id === p.id);
           return (
             <div key={p.id} className="px-4 py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -997,9 +1258,15 @@ function ProyectosDelContratante({
                     {p.monto_inversion > 0 && ` · inversión ${mxn(p.monto_inversion)}`}
                   </p>
                   <p className="text-[11px] text-slate-500 tabular-nums">
+                    {p.total_partidas > 0 && `${p.total_partidas} partida(s) · `}
                     {p.total_proveedores} proveedor(es) · {p.total_obras} obra(s)
-                    {p.obras_descubiertas > 0 && (
-                      <span className="text-rose-600"> · {p.obras_descubiertas} sin fianza vigente</span>
+                    {p.partidas_sin_contratista > 0 && (
+                      <span className="text-slate-500"> · {p.partidas_sin_contratista} sin contratar</span>
+                    )}
+                    {(p.partidas_descubiertas ?? p.obras_descubiertas) > 0 && (
+                      <span className="text-rose-600">
+                        {' · '}{p.partidas_descubiertas ?? p.obras_descubiertas} sin fianza completa
+                      </span>
                     )}
                     {p.monto_afianzado > 0 && (
                       <span className="text-slate-400"> · {mxn(p.monto_afianzado)} afianzado</span>
@@ -1007,7 +1274,10 @@ function ProyectosDelContratante({
                   </p>
                 </div>
                 <div className="ml-auto flex items-center gap-2">
-                  <CumplimientoBadge estado={p.cumplimiento} />
+                  <CumplimientoBadge
+                    estado={p.cumplimiento}
+                    verificada={p.total_partidas > 0 && p.partidas_sin_requisitos === 0}
+                  />
                   <button onClick={() => { setEditando(p); setCreando(false); }} className={btnSecondary} title="Editar proyecto">
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
@@ -1021,26 +1291,17 @@ function ProyectosDelContratante({
                 </div>
               </div>
 
-              {/* Las obras que van adentro, por proveedor. */}
-              {suyas.length > 0 && (
-                <div className="mt-1.5 pl-3 border-l-2 border-slate-100 space-y-1">
-                  {suyas.map((o) => (
-                    <div key={o.id} className="flex flex-wrap items-center gap-2 text-[11px]">
-                      <Briefcase className="w-3 h-3 text-slate-300 shrink-0" />
-                      <span className="text-slate-600 font-medium">{nombreDe(o.client_id)}</span>
-                      <span className="text-slate-500">{o.nombre}</span>
-                      <span className="text-slate-400">{etiquetaEstatus(o.estatus)}</span>
-                      <CumplimientoBadge estado={o.estado_cobertura} />
-                    </div>
-                  ))}
-                </div>
-              )}
-              {!suyas.length && (
-                <p className="mt-1 pl-3 text-[11px] text-slate-400">
-                  Sin obras adentro. Se meten desde la obra del proveedor, en
-                  "Proyecto del contratante".
-                </p>
-              )}
+              {/* Las obras van DENTRO de su partida: es la misma pantalla que
+                  ve el desarrollador, y así el operador captura viendo lo que él
+                  va a leer. */}
+              <PartidasDelProyecto
+                contratanteId={contratanteId}
+                proyecto={p}
+                tipos={tipos}
+                nombreDe={nombreDe}
+                onChange={onChange}
+                flash={flash}
+              />
 
               {/* Lo que este proyecto le aparta a cada proveedor. Es lo que el
                   contratante también ve; la línea completa va abajo y solo aquí. */}
@@ -2845,10 +3106,15 @@ function FormProyecto({
     // el servidor deriva el contratante del proyecto cuando viene, así que las
     // dos columnas no pueden discrepar.
     desarrollo_id: inicial?.desarrollo_id ?? '',
+    // Y dentro de qué PARTIDA de ese proyecto: los muros, la electricidad. Es
+    // el nivel donde de verdad se exige la fianza, y el que manda: el servidor
+    // deriva de ella el proyecto y el contratante.
+    partida_id: inicial?.partida_id ?? '',
   });
   // Los proyectos del contratante elegido. Se piden al elegirlo porque son de
   // él: no hay una lista global que sirva.
   const [proyectosDelContratante, setProyectosDelContratante] = useState([]);
+  const [partidasDelProyecto, setPartidasDelProyecto] = useState([]);
 
   useEffect(() => {
     if (!f.contratante_id) { setProyectosDelContratante([]); return; }
@@ -2858,6 +3124,16 @@ function FormProyecto({
       .catch(() => { if (vigente) setProyectosDelContratante([]); });
     return () => { vigente = false; };
   }, [f.contratante_id]);
+
+  // Las partidas del proyecto elegido, por lo mismo: son de él.
+  useEffect(() => {
+    if (!f.contratante_id || !f.desarrollo_id) { setPartidasDelProyecto([]); return; }
+    let vigente = true;
+    api.get(`/admin/clientes/${f.contratante_id}/proyectos/${f.desarrollo_id}/partidas`)
+      .then((d) => { if (vigente) setPartidasDelProyecto(d.partidas || []); })
+      .catch(() => { if (vigente) setPartidasDelProyecto([]); });
+    return () => { vigente = false; };
+  }, [f.contratante_id, f.desarrollo_id]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -2917,7 +3193,7 @@ function FormProyecto({
                 // formulario mandaba el desarrollo viejo y el servidor volvía a
                 // derivar de él el contratante que se quería quitar.
                 onChange={(e) => setF((s) => ({
-                  ...s, contratante_id: e.target.value, desarrollo_id: '',
+                  ...s, contratante_id: e.target.value, desarrollo_id: '', partida_id: '',
                 }))}
                 className={inputCls}
                 disabled={!contratantes.length}
@@ -2954,7 +3230,13 @@ function FormProyecto({
             </label>
             <select
               value={f.desarrollo_id ?? ''}
-              onChange={(e) => setF((s) => ({ ...s, desarrollo_id: e.target.value }))}
+              // La partida se limpia siempre: era de OTRO proyecto, y dejarla
+              // haría que las tres columnas discreparan. El servidor rechaza esa
+              // combinación con 400, pero mandarla ya sería un error de captura
+              // que el operador no pidió.
+              onChange={(e) => setF((s) => ({
+                ...s, desarrollo_id: e.target.value, partida_id: '',
+              }))}
               className={inputCls}
               disabled={!proyectosDelContratante.length}
             >
@@ -2969,6 +3251,42 @@ function FormProyecto({
               {proyectosDelContratante.length
                 ? 'La obra aparece agrupada dentro de ese proyecto en el portal del contratante.'
                 : 'Ese contratante todavía no tiene proyectos. Puedes crearle uno en su detalle.'}
+            </p>
+          </div>
+        )}
+        {/* Qué PEDAZO del proyecto está haciendo este fiado. Es lo que el
+            desarrollador pidió: no "Vega tiene una obra en la torre", sino
+            "los muros los hace Vega y le exijo cumplimiento y anticipo".
+
+            Elegirla fija también el proyecto y el contratante —el servidor los
+            deriva de ella—, así que las tres columnas nunca discrepan. */}
+        {puedeLigarContratante && f.contratante_id && f.desarrollo_id && (
+          <div>
+            <label className="text-[11px] text-slate-500 mb-1 block">
+              Partida del proyecto
+            </label>
+            <select
+              value={f.partida_id ?? ''}
+              onChange={(e) => setF((s) => ({ ...s, partida_id: e.target.value }))}
+              className={inputCls}
+              disabled={!partidasDelProyecto.length}
+            >
+              <option value="">Sin asignar a ninguna partida</option>
+              {partidasDelProyecto.map((pa) => (
+                <option key={pa.id} value={pa.id}>
+                  {pa.nombre}
+                  {pa.requisitos?.length
+                    ? ` — exige ${pa.requisitos.map((r) => r.tipo_fianza).join(' + ')}`
+                    : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-400 mt-1">
+              {partidasDelProyecto.length
+                ? 'La obra aparece dentro de esa partida, y el portal compara sus fianzas '
+                  + 'contra lo que la partida exige.'
+                : 'Ese proyecto todavía no tiene partidas. Créaselas en el detalle del '
+                  + 'contratante, o déjala sin asignar.'}
             </p>
           </div>
         )}

@@ -25,6 +25,9 @@ import { panoramaDelContratante, lineasDeLosProveedores } from '../services/prov
 import {
   crearDesarrollo, actualizarDesarrollo, eliminarDesarrollo, desarrollosDe,
 } from '../services/desarrollos.js';
+import {
+  crearPartida, actualizarPartida, eliminarPartida, partidasDe,
+} from '../services/partidas.js';
 
 const router = Router();
 
@@ -347,6 +350,60 @@ router.delete('/clientes/:id/proyectos/:proyectoId', async (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Las PARTIDAS de un proyecto de contratante, desde el panel ---
+//
+// El desarrollador las captura desde su portal y Fortex por aquí, igual que los
+// proyectos: al dar de alta la cuenta hay que armarle la obra antes de que él
+// entre, y sin partidas no hay a qué asignarle los contratos.
+
+// La partida tiene que ser de un desarrollo DE ESTE contratante. Se comprueba
+// contra el cliente del path y no solo por id: si no, con el id de una partida
+// ajena se editaría la de otro.
+async function esPartidaDelContratante(contratanteId, partidaId) {
+  const fila = await db.prepare(
+    `SELECT pa.id FROM partidas pa
+     JOIN desarrollos d ON d.id = pa.desarrollo_id
+     WHERE pa.id = ? AND d.contratante_id = ?`
+  ).get(Number(partidaId), Number(contratanteId));
+  return Boolean(fila);
+}
+
+// GET /api/admin/clientes/:id/proyectos/:proyectoId/partidas
+router.get('/clientes/:id/proyectos/:proyectoId/partidas', async (req, res) => {
+  await exigirCliente(req.user, req.params.id);
+  if (!(await exigirProyectoDelContratante(req.params.id, req.params.proyectoId))) {
+    return res.status(404).json({ error: 'Ese proyecto no es de este cliente' });
+  }
+  res.json({ partidas: await partidasDe(req.params.proyectoId) });
+});
+
+router.post('/clientes/:id/proyectos/:proyectoId/partidas', async (req, res) => {
+  await exigirCliente(req.user, req.params.id);
+  if (!(await exigirProyectoDelContratante(req.params.id, req.params.proyectoId))) {
+    return res.status(404).json({ error: 'Ese proyecto no es de este cliente' });
+  }
+  const fila = await crearPartida(req.params.proyectoId, req.body || {});
+  res.json({ ok: true, id: fila.id });
+});
+
+router.put('/clientes/:id/partidas/:partidaId', async (req, res) => {
+  await exigirCliente(req.user, req.params.id);
+  if (!(await esPartidaDelContratante(req.params.id, req.params.partidaId))) {
+    return res.status(404).json({ error: 'Esa partida no es de este cliente' });
+  }
+  await actualizarPartida(req.params.partidaId, req.body || {});
+  res.json({ ok: true });
+});
+
+router.delete('/clientes/:id/partidas/:partidaId', async (req, res) => {
+  await exigirCliente(req.user, req.params.id);
+  if (!(await esPartidaDelContratante(req.params.id, req.params.partidaId))) {
+    return res.status(404).json({ error: 'Esa partida no es de este cliente' });
+  }
+  await eliminarPartida(req.params.partidaId);
+  res.json({ ok: true });
+});
+
 // PUT /api/admin/clientes/:id/tipo  { tipo }
 //
 // Pasar de fiado a contratante (o al revés) cambia la pantalla COMPLETA que ve
@@ -664,7 +721,27 @@ router.delete('/tipos-fianza/:id', soloOperador, async (req, res) => {
 
 const CAMPOS_PROYECTO = ['nombre', 'numero_contrato', 'beneficiario', 'monto_contrato',
                          'fecha_inicio', 'fecha_termino', 'estatus', 'notas',
-                         'contratante_id', 'desarrollo_id'];
+                         'contratante_id', 'desarrollo_id', 'partida_id'];
+
+// La PARTIDA manda sobre el desarrollo, y el desarrollo sobre el contratante.
+// Tres columnas que hablan de lo mismo, y dos que salen de la primera: es la
+// única forma de que no puedan discrepar.
+//
+// Devuelve { partida_id, desarrollo_id, contratante_id } o { error }.
+async function resolverPartida(partidaId) {
+  const pa = await db.prepare(
+    `SELECT pa.id, pa.desarrollo_id, d.contratante_id
+     FROM partidas pa
+     JOIN desarrollos d ON d.id = pa.desarrollo_id
+     WHERE pa.id = ?`
+  ).get(Number(partidaId));
+  if (!pa) return { error: 'Esa partida no existe' };
+  return {
+    partida_id: pa.id,
+    desarrollo_id: pa.desarrollo_id,
+    contratante_id: pa.contratante_id,
+  };
+}
 
 // El DESARROLLO manda sobre el contratante. Si la obra se mete en un proyecto de
 // un contratante, el contratante sale de ahí: no se le cree al body.
@@ -737,7 +814,7 @@ const AVISO_SUSPENDIDO = 'La obra quedó ligada, pero ese proveedor está SUSPEN
   + 'del contratante, así que el contratante todavía no la ve. Reactívalo en su padrón.';
 
 router.post('/proyectos', async (req, res) => {
-  const { client_id, desarrollo_id } = req.body || {};
+  const { client_id } = req.body || {};
   const nombre = String(req.body?.nombre || '').trim();
   if (!client_id || !nombre) {
     return res.status(400).json({ error: 'client_id y nombre son obligatorios' });
@@ -745,11 +822,26 @@ router.post('/proyectos', async (req, res) => {
   await exigirCliente(req.user, client_id);
   await exigirFiado(client_id, 'obras');
 
-  // Si viene el proyecto del contratante, de ahí sale el contratante.
+  // La cadena: partida manda sobre desarrollo, y desarrollo sobre contratante.
   let contratanteId = req.body?.contratante_id || null;
-  let desarrolloId = null;
-  if (desarrollo_id) {
-    const r = await resolverDesarrollo(desarrollo_id);
+  let desarrolloId = req.body?.desarrollo_id || null;
+  let partidaId = null;
+
+  if (req.body?.partida_id) {
+    const r = await resolverPartida(req.body.partida_id);
+    if (r.error) return res.status(400).json({ error: r.error });
+    if ((desarrolloId && Number(desarrolloId) !== r.desarrollo_id)
+        || (contratanteId && Number(contratanteId) !== r.contratante_id)) {
+      return res.status(400).json({
+        error: 'Esa partida es de otro proyecto o de otro contratante. Elige la partida del '
+             + 'proyecto correcto, o déjala sin asignar.',
+      });
+    }
+    partidaId = r.partida_id;
+    desarrolloId = r.desarrollo_id;
+    contratanteId = r.contratante_id;
+  } else if (desarrolloId) {
+    const r = await resolverDesarrollo(desarrolloId);
     if (r.error) return res.status(400).json({ error: r.error });
 
     // Igual que en el PUT: si el body dice a la vez un desarrollo y un
@@ -775,14 +867,15 @@ router.post('/proyectos', async (req, res) => {
   const row = await db.prepare(
     `INSERT INTO proyectos (client_id, nombre, numero_contrato, beneficiario, monto_contrato,
                             fecha_inicio, fecha_termino, estatus, notas,
-                            contratante_id, desarrollo_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+                            contratante_id, desarrollo_id, partida_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
   ).get(Number(client_id), nombre,
         req.body.numero_contrato || null, req.body.beneficiario || null,
         centavos(req.body.monto_contrato),
         req.body.fecha_inicio || null, req.body.fecha_termino || null,
         req.body.estatus || 'en_proceso', req.body.notas || null,
-        contratanteId ? Number(contratanteId) : null, desarrolloId);
+        contratanteId ? Number(contratanteId) : null,
+        desarrolloId ? Number(desarrolloId) : null, partidaId);
 
   const aviso = await asegurarEnPadron(contratanteId, client_id);
   res.json({ ok: true, id: row.id, aviso: aviso ? AVISO_SUSPENDIDO : null });
@@ -795,8 +888,45 @@ router.put('/proyectos/:id', async (req, res) => {
   const body = { ...(req.body || {}) };
   if ('monto_contrato' in body) body.monto_contrato = centavos(body.monto_contrato);
 
-  // El desarrollo va PRIMERO porque, cuando viene, es el que fija el
-  // contratante: la guarda de abajo se aplica igual sobre el valor derivado.
+  // La PARTIDA va primero de todo, porque es la que fija el desarrollo y con él
+  // el contratante. Asignarle un fiado a "muros" es, en una sola operación,
+  // decir de qué obra es y quién la va a ver.
+  //
+  // Vaciarla desasigna el contrato de ese pedazo de obra pero NO lo saca del
+  // desarrollo ni lo desliga del contratante: son tres cosas y se piden aparte.
+  if ('partida_id' in body) {
+    const pedido = body.partida_id ? Number(body.partida_id) : null;
+    if (pedido === null) {
+      body.partida_id = null;
+    } else {
+      const r = await resolverPartida(pedido);
+      if (r.error) return res.status(400).json({ error: r.error });
+
+      // Si el body ADEMÁS nombra un desarrollo o un contratante que no son los
+      // de esa partida, se rechaza en vez de derivar en silencio. Es la misma
+      // razón que abajo: derivando, una petición que pedía una cosa guardaba
+      // otra y contestaba 200.
+      const contradice = (campo, esperado) => {
+        if (!(campo in body)) return false;
+        const v = body[campo] ? Number(body[campo]) : null;
+        return v !== esperado;
+      };
+      if (contradice('desarrollo_id', r.desarrollo_id)
+          || contradice('contratante_id', r.contratante_id)) {
+        return res.status(400).json({
+          error: 'Esa partida es de otro proyecto o de otro contratante. Elige la partida '
+               + 'del proyecto correcto, o déjala sin asignar.',
+        });
+      }
+
+      body.partida_id = r.partida_id;
+      body.desarrollo_id = r.desarrollo_id;
+      body.contratante_id = r.contratante_id;
+    }
+  }
+
+  // El desarrollo va DESPUÉS de la partida y ANTES del contratante, por lo
+  // mismo: cuando viene, es el que fija el contratante.
   //
   // Vaciarlo saca la obra del proyecto pero NO la desliga del contratante: son
   // dos cosas distintas y la segunda se pide aparte, vaciando "Para".
@@ -829,6 +959,10 @@ router.put('/proyectos/:id', async (req, res) => {
 
       body.desarrollo_id = r.desarrollo_id;
       body.contratante_id = r.contratante_id;
+      // Cambiar de desarrollo desasigna la partida: era de OTRO desarrollo, y
+      // dejarla haría que las tres columnas discreparan. Si la petición nombró
+      // la partida, el bloque de arriba ya la puso y ya comprobó que cuadra.
+      if (!('partida_id' in body)) body.partida_id = null;
     }
   }
 
@@ -860,6 +994,8 @@ router.put('/proyectos/:id', async (req, res) => {
       // otro. Cuando la petición SÍ nombró un desarrollo, el bloque de arriba ya
       // lo puso y ya comprobó que el contratante coincide.
       if (!('desarrollo_id' in body)) body.desarrollo_id = null;
+      // Y con el desarrollo se va la partida, que colgaba de él.
+      if (!('partida_id' in body)) body.partida_id = null;
     }
   }
 

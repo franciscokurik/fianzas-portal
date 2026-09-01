@@ -168,6 +168,26 @@ export async function exigirDesarrollo(contratanteId, desarrolloId) {
   return id;
 }
 
+// Que esa partida sea de un desarrollo de este contratante.
+//
+// Igual que exigirDesarrollo, se autoriza por PROPIEDAD y no por alcance: la
+// partida es suya, la escribió él, y no depende de ningún proveedor. La cadena
+// es partida -> desarrollo -> contratante, y se comprueba completa en la misma
+// consulta para que no haya un paso intermedio donde confiarse.
+export async function exigirPartida(contratanteId, partidaId) {
+  const id = idValido(partidaId);
+  if (id === null) throw negar('No existe esa partida', 404);
+
+  const fila = await db.prepare(
+    `SELECT pa.id
+     FROM partidas pa
+     JOIN desarrollos d ON d.id = pa.desarrollo_id
+     WHERE pa.id = ? AND d.contratante_id = ?`
+  ).get(id, Number(contratanteId));
+  if (!fila) throw negar('No existe esa partida', 404);
+  return id;
+}
+
 // Que esa obra esté dentro del alcance del contratante. Es la puerta de todo lo
 // que se hace SOBRE una obra: subirle un archivo, listarlo, borrarlo.
 //

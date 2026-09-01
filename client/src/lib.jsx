@@ -138,6 +138,18 @@ const ESTADOS = {
 const CUMPLIMIENTO = {
   cubierta:     { label: 'Con fianza',   cls: 'bg-emerald-100 text-emerald-700',
                   ayuda: 'Tiene fianza emitida y vigente para esta obra.' },
+  // Nadie la está haciendo todavía. Va en gris y NO en rojo a propósito: es un
+  // pendiente del desarrollador —le falta contratar—, no un proveedor que
+  // incumplió. Pintarlo de rojo sería acusar a alguien que ni existe.
+  sin_contratista: { label: 'Sin contratista', cls: 'bg-slate-100 text-slate-600',
+                  ayuda: 'Esta partida todavía no tiene contratista asignado. Cuando lo '
+                       + 'contrates, dile a Fortex y te ligan su obra aquí.' },
+  // Hay cobertura viva pero falta alguno de los tipos que la partida exige. Es
+  // el falso OK que el portal arrastraba: con la de cumplimiento y sin la de
+  // anticipo, antes salía en verde.
+  incompleta:   { label: 'Incompleta',   cls: 'bg-amber-100 text-amber-800',
+                  ayuda: 'Tiene fianza vigente, pero le falta alguno de los tipos que esta '
+                       + 'partida exige. Abajo dice cuál.' },
   por_vencer:   { label: 'Por vencer',   cls: 'bg-amber-100 text-amber-700',
                   ayuda: 'La fianza vigente vence en 30 días o menos.' },
   sin_vigencia: { label: 'Sin fecha',    cls: 'bg-amber-100 text-amber-700',
@@ -160,14 +172,24 @@ const CUMPLIMIENTO = {
                        + 'cobertura que exigirle.' },
 };
 
-export function CumplimientoBadge({ estado }) {
+// 'verificada' significa "sabemos QUÉ se exigía y está todo". Solo entonces se
+// dice "Cubierta"; sin requisitos capturados, lo único que se puede afirmar es
+// que hay una fianza, y eso es lo que dice la etiqueta.
+//
+// Prometer completitud sin saber qué se exige sería el mismo falso OK con otro
+// nombre, y es el que costó tres entregas quitar.
+export function CumplimientoBadge({ estado, verificada }) {
   const e = CUMPLIMIENTO[estado] || { label: estado, cls: 'bg-slate-100 text-slate-600' };
+  const cubiertaDeVerdad = estado === 'cubierta' && verificada;
+
   return (
     <span
       className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${e.cls}`}
-      title={e.ayuda}
+      title={cubiertaDeVerdad
+        ? 'Tiene vigente cada uno de los tipos de fianza que esta partida exige.'
+        : e.ayuda}
     >
-      {e.label}
+      {cubiertaDeVerdad ? 'Cubierta' : e.label}
     </span>
   );
 }
@@ -175,7 +197,7 @@ export function CumplimientoBadge({ estado }) {
 // ¿Este estado significa que la obra NO está respaldada hoy? Tiene que coincidir
 // con DESCUBIERTA de server/src/services/proveedores.js.
 export const estaDescubierta = (estado) =>
-  ['sin_fianza', 'vencida', 'sin_vigencia'].includes(estado);
+  ['sin_fianza', 'vencida', 'sin_vigencia', 'incompleta'].includes(estado);
 
 // Marca de qué clase de cliente es. Solo se pinta para el contratante: en una
 // lista que casi toda es de fiados, etiquetar cada renglón hace ruido.

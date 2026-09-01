@@ -67,7 +67,7 @@ test('borra los clientes y todo lo que cuelga de ellos', async () => {
 
   assert.deepEqual(resumen, {
     clientes: 2, contratantes: 1, padron: 1, proyectos: 2,
-    proyectos_de_contratante: 1, fianzas: 1, admins_conservados: 1,
+    proyectos_de_contratante: 1, partidas: 0, fianzas: 1, admins_conservados: 1,
   });
 
   assert.equal(await contar('proyectos'), 0);
@@ -108,7 +108,7 @@ test('correrlo dos veces no falla ni borra de más', async () => {
   const resumen = await reiniciarVacio();
   assert.deepEqual(resumen, {
     clientes: 0, contratantes: 0, padron: 0, proyectos: 0,
-    proyectos_de_contratante: 0, fianzas: 0, admins_conservados: 1,
+    proyectos_de_contratante: 0, partidas: 0, fianzas: 0, admins_conservados: 1,
   });
   assert.equal(await contar('clients'), 0);
 });

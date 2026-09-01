@@ -23,7 +23,8 @@ export async function seed() {
   // lista es la documentación de facto de qué se borra.
   await db.query(`TRUNCATE notifications, papeleria_requests, client_documents,
     client_proveedores, documentos, client_credit_lines, fianzas, proyectos,
-    desarrollos, users, clients, document_types, afianzadoras
+    partida_requisitos, partidas, desarrollos,
+    users, clients, document_types, afianzadoras
     RESTART IDENTITY CASCADE`);
 
   // --- Afianzadoras ---
@@ -208,28 +209,70 @@ export async function seed() {
     'Recién capturado: todavía no se le asignan proveedores.'
   );
 
-  // Las obras de los proveedores van DENTRO del proyecto. desarrollo_id es la
-  // agrupación; contratante_id sigue siendo lo que autoriza (y se deriva del
-  // desarrollo, ver routes/admin.js). 'beneficiario' se llena igual porque es
-  // el respaldo legible, pero el texto no autoriza nada.
+  // Las PARTIDAS de la torre: los pedazos que Delta contrata por separado, con
+  // lo que exige cada uno. Existen antes de saber quién las hace, y de eso se
+  // trata todo este nivel.
+  const insPartida = db.prepare(
+    `INSERT INTO partidas (desarrollo_id, nombre, alcance, monto_estimado, orden)
+     VALUES (?, ?, ?, ?, ?) RETURNING id`
+  );
+  const insRequisito = db.prepare(
+    `INSERT INTO partida_requisitos (partida_id, tipo_fianza_id) VALUES (?, ?)`
+  );
+  // Se le cuelgan los tipos que exige. Del MISMO catálogo que las pólizas: si
+  // fuera otra lista, una partida podría exigir algo incumplible.
+  const partida = async (nombre, alcance, monto, orden, exige) => {
+    const { id } = await insPartida.get(dTorre, nombre, alcance, pesos(monto), orden);
+    for (const tipo of exige) await insRequisito.run(id, tipoIdPorNombre.get(tipo));
+    return id;
+  };
+
+  const paCimentacion = await partida(
+    'Cimentación y estructura', 'Pilotes, losas y estructura de concreto', 12500000, 10,
+    // Exige DOS y Vega solo presentó una: es el renglón que sale INCOMPLETA, y
+    // el falso OK que el portal arrastraba (con el cumplimiento y sin el
+    // anticipo, antes salía en verde).
+    ['Cumplimiento', 'Anticipo']
+  );
+  // Partida capturada y todavía SIN CONTRATISTA: el otro pendiente, el que es
+  // del desarrollador y no del proveedor. Antes no se podía ni decir.
+  await partida(
+    'Muros y albañilería', 'Muros divisorios, aplanados y firmes', 6800000, 15,
+    ['Cumplimiento']
+  );
+  const paInstalaciones = await partida(
+    'Instalaciones hidrosanitarias y eléctricas', 'Hidráulica, sanitaria y eléctrica', 8300000, 20,
+    ['Cumplimiento']
+  );
+  const paAcabados = await partida(
+    'Acabados y cancelería', 'Pisos, pintura, cancelería de aluminio', 4100000, 30,
+    ['Cumplimiento']
+  );
+
+  // Las obras de los proveedores van DENTRO de una partida del proyecto.
+  // partida_id y desarrollo_id son agrupación; contratante_id sigue siendo lo
+  // que autoriza, y los tres se derivan de la partida (ver resolverPartida en
+  // routes/admin.js). 'beneficiario' se llena igual porque es el respaldo
+  // legible, pero el texto no autoriza nada.
   const insObraPara = db.prepare(
-    `INSERT INTO proyectos (client_id, contratante_id, desarrollo_id, nombre, numero_contrato,
-                            beneficiario, monto_contrato, fecha_inicio, fecha_termino, estatus)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+    `INSERT INTO proyectos (client_id, contratante_id, desarrollo_id, partida_id, nombre,
+                            numero_contrato, beneficiario, monto_contrato,
+                            fecha_inicio, fecha_termino, estatus)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
   );
   const DELTA = 'Desarrollos Delta SA de CV';
   const oVega = (await insObraPara.get(
-    pVega, delta, dTorre, 'Cimentación y estructura', 'DD-2025-014', DELTA,
+    pVega, delta, dTorre, paCimentacion, 'Cimentación y estructura – Vega', 'DD-2025-014', DELTA,
     pesos(12500000), addMonths(hoy, -6), addMonths(hoy, 9), 'en_proceso'
   )).id;
   const oHerrera = (await insObraPara.get(
-    pHerrera, delta, dTorre, 'Instalaciones hidrosanitarias y eléctricas', 'DD-2025-021', DELTA,
+    pHerrera, delta, dTorre, paInstalaciones, 'Instalaciones – Herrera', 'DD-2025-021', DELTA,
     pesos(8300000), addMonths(hoy, -4), addMonths(hoy, 10), 'en_proceso'
   )).id;
   // Obra en proceso y SIN NINGUNA FIANZA en Fortex: es el renglón que Delta
   // quiere cazar, y la razón de ser de toda esta pantalla.
   const oSolis = (await insObraPara.get(
-    pSolis, delta, dTorre, 'Acabados y cancelería', 'DD-2025-033', DELTA,
+    pSolis, delta, dTorre, paAcabados, 'Acabados – Solís', 'DD-2025-033', DELTA,
     pesos(4100000), addMonths(hoy, -1), addMonths(hoy, 11), 'en_proceso'
   )).id;
 
@@ -352,7 +395,7 @@ export async function seed() {
   ).run(c1, afiIds['aserta'], null, 'Aserta requiere carta de no adeudo del SAT (formato 32-D) para renovar la línea.');
 
   return {
-    clientes: 5, contratantes: 1, proyectos_de_contratante: 2,
+    clientes: 5, contratantes: 1, proyectos_de_contratante: 2, partidas: 4,
     usuarios: 10, afianzadoras: afianzadoras.length,
   };
 }
@@ -388,6 +431,7 @@ export async function reiniciarVacio() {
     padron: await contar('client_proveedores'),
     proyectos: await contar('proyectos'),
     proyectos_de_contratante: await contar('desarrollos'),
+    partidas: await contar('partidas'),
     fianzas: await contar('fianzas'),
   };
 

@@ -14,7 +14,7 @@
 //                 la pregunta de la mañana: ¿a quién le falta la fianza?
 import { useCallback, useEffect, useState } from 'react';
 import {
-  LogOut, ShieldCheck, AlertTriangle, Building2, Users, CheckCircle2,
+  LogOut, ShieldCheck, AlertTriangle, Building2, Users, CheckCircle2, Layers,
 } from 'lucide-react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
@@ -130,15 +130,18 @@ export default function Proveedores() {
           </div>
         )}
 
-        {/* Lo primero de la pantalla es lo que falta, no un total. */}
-        {m?.obras_descubiertas > 0 && (
+        {/* Lo primero de la pantalla es lo que falta, no un total.
+            'pendientes_sin_fianza' y no 'obras_descubiertas': con partidas, una
+            obra puede tener su fianza y aun así faltarle la que la partida
+            exige. Ver el comentario en services/proveedores.js. */}
+        {m?.pendientes_sin_fianza > 0 && (
           <div className="portal-alert rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 flex items-start gap-2 mb-5">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
             <div>
               <span className="font-medium">
-                {m.obras_descubiertas} obra(s) sin fianza vigente
+                {m.pendientes_sin_fianza} pendiente(s) sin fianza completa
               </span>
-              {' '}en {m.proveedores_en_falta} proveedor(es).{' '}
+              {m.proveedores_en_falta > 0 && <> en {m.proveedores_en_falta} proveedor(es)</>}.{' '}
               <button
                 onClick={() => { setTab('padron'); setSoloEnFalta(true); }}
                 className="underline hover:no-underline"
@@ -149,10 +152,28 @@ export default function Proveedores() {
           </div>
         )}
 
-        {m?.obras_descubiertas === 0 && m?.obras_vivas > 0 && (
+        {/* El verde solo cuando no falta NADA en ningún nivel. Con el número de
+            obras, una partida incompleta lo dejaba decir "todas tienen fianza". */}
+        {m?.pendientes_sin_fianza === 0 && m?.obras_vivas > 0 && (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-center gap-2 mb-5">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
-            Todas tus obras vigentes tienen fianza registrada.
+            {m.partidas > 0
+              ? 'Cada partida tiene vigente lo que le exiges.'
+              : 'Todas tus obras vigentes tienen fianza registrada.'}
+          </div>
+        )}
+
+        {/* Aparte, y en ámbar y no en rojo: contratar es pendiente TUYO, no de
+            un proveedor que incumplió. */}
+        {m?.partidas_sin_contratista > 0 && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 flex items-start gap-2 mb-5">
+            <Layers className="w-4 h-4 mt-0.5 shrink-0 text-slate-400" />
+            <span>
+              <span className="font-medium">
+                {m.partidas_sin_contratista} partida(s) todavía sin contratista
+              </span>
+              . Cuando contrates, dile a Fortex y te liga su obra con sus fianzas.
+            </span>
           </div>
         )}
 
@@ -160,8 +181,20 @@ export default function Proveedores() {
           {/* "Vigentes" y no "en curso": el conjunto incluye las terminadas y
               entregadas a propósito, porque ahí vive la fianza de vicios
               ocultos. Las cerradas y canceladas se listan pero no cuentan. */}
-          <Kpi tone="rose" label="Obras sin fianza vigente" value={m?.obras_descubiertas ?? '—'}
-               sub={m ? `de ${m.obras_vivas} obra(s) vigente(s)` : null} />
+          {/* La unidad cambia con lo que el desarrollador capturó: si armó
+              partidas, el pendiente es la partida —es donde exige la fianza—; si
+              no, la obra. La etiqueta dice cuál para que el número no se lea
+              contra la otra cifra de la pantalla. */}
+          {m?.partidas > 0 ? (
+            <Kpi tone="rose" label="Partidas sin fianza completa"
+                 value={m?.pendientes_sin_fianza ?? '—'}
+                 sub={m ? `de ${m.partidas} partida(s)`
+                        + (m.pendientes_sueltos ? ` · ${m.pendientes_sueltos} obra(s) sin partida` : '')
+                        : null} />
+          ) : (
+            <Kpi tone="rose" label="Obras sin fianza vigente" value={m?.obras_descubiertas ?? '—'}
+                 sub={m ? `de ${m.obras_vivas} obra(s) vigente(s)` : null} />
+          )}
           <Kpi tone="emerald" label="Obras con fianza" value={m?.obras_cubiertas ?? '—'}
                sub="fianza emitida y vigente" />
           <Kpi tone="amber" label="Por vencer (< 30 días)" value={m?.obras_por_vencer ?? '—'} />

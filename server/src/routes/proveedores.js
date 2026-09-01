@@ -15,13 +15,14 @@ import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth, requireContratante } from '../auth/middleware.js';
 import {
-  exigirProveedor, exigirObraDelContratante, exigirDesarrollo,
+  exigirProveedor, exigirObraDelContratante, exigirDesarrollo, exigirPartida,
   urlDeDocumentoParaContratante,
 } from '../lib/permisos.js';
 import { panoramaDelContratante } from '../services/proveedores.js';
 import {
   crearDesarrollo, actualizarDesarrollo, eliminarDesarrollo,
 } from '../services/desarrollos.js';
+import { crearPartida, actualizarPartida, eliminarPartida } from '../services/partidas.js';
 import { adoptarArchivo } from '../services/subidas.js';
 import { borrarArchivo } from '../lib/upload.js';
 import {
@@ -43,6 +44,18 @@ const paraElFront = (obras) => obras.map((o) => ({
   fianzas: o.fianzas.map((f) => ({ ...f, documentos: conNombres(f.documentos) })),
   mis_documentos: conNombresPropios(o.mis_documentos),
 }));
+
+// GET /api/proveedores/tipos-fianza -> el catálogo, para que el contratante
+// marque qué exige cada partida.
+//
+// Es el MISMO catálogo que usan las pólizas (tipos_fianza): si fuera otra lista,
+// una partida podría exigir algo que ninguna póliza puede cumplir.
+router.get('/tipos-fianza', requireAuth, requireContratante, async (req, res) => {
+  const tipos = await db
+    .prepare('SELECT id, nombre FROM tipos_fianza WHERE activo = 1 ORDER BY orden, nombre')
+    .all();
+  res.json({ tipos });
+});
 
 // GET /api/proveedores/tipos-documento -> qué puede subir el contratante
 router.get('/tipos-documento', requireAuth, requireContratante, (req, res) => {
@@ -113,22 +126,69 @@ router.delete('/proyectos/:id', requireAuth, requireContratante, async (req, res
   res.json({ ok: true });
 });
 
-// GET /api/proveedores/proyectos/:id -> el proyecto con todo lo que cuelga
+// --- Las PARTIDAS de un proyecto ---
+//
+// Los pedazos de obra que el desarrollador contrata por separado, con lo que
+// exige cada uno. Las captura él —es su plan— y Fortex por la misma puerta.
+//
+// Lo que NO puede hacer es asignarles el contratista: eso es de Fortex, porque
+// ligar la obra de una empresa le abre sus pólizas y no se deshace.
+
+// POST /api/proveedores/proyectos/:id/partidas
+router.post('/proyectos/:id/partidas', requireAuth, requireContratante, async (req, res) => {
+  const desarrolloId = await exigirDesarrollo(req.user.client_id, req.params.id);
+  const fila = await crearPartida(desarrolloId, req.body || {});
+  res.json({ ok: true, id: fila.id });
+});
+
+router.put('/partidas/:id', requireAuth, requireContratante, async (req, res) => {
+  const id = await exigirPartida(req.user.client_id, req.params.id);
+  await actualizarPartida(id, req.body || {});
+  res.json({ ok: true });
+});
+
+router.delete('/partidas/:id', requireAuth, requireContratante, async (req, res) => {
+  const id = await exigirPartida(req.user.client_id, req.params.id);
+  await eliminarPartida(id);
+  res.json({ ok: true });
+});
+
+// GET /api/proveedores/proyectos/:id -> el proyecto, organizado POR PARTIDA
+//
+// Por partida y no por proveedor a propósito: la partida es el pedazo de obra, y
+// existe aunque nadie la esté haciendo. Agrupando por proveedor, una partida sin
+// contratista no tendría dónde aparecer — y es justo el pendiente que hay que
+// ver. El padrón sigue siendo la vista por empresa.
 router.get('/proyectos/:id', requireAuth, requireContratante, async (req, res) => {
   const contratanteId = req.user.client_id;
   const id = await exigirDesarrollo(contratanteId, req.params.id);
 
-  const { proyectos, obras, proveedores } = await panoramaDelContratante(contratanteId);
+  const { proyectos, proveedores } = await panoramaDelContratante(contratanteId);
   const proyecto = proyectos.find((p) => p.id === id);
-  const suyas = obras.filter((o) => o.desarrollo_id === id);
 
-  // Los proveedores que de verdad tienen obra en ESTE proyecto, con su ficha del
-  // padrón. Los demás no salen: el proyecto no es el padrón completo.
-  const asignados = proveedores
-    .filter((p) => suyas.some((o) => o.client_id === p.id))
-    .map((p) => ({ ...p, obras: paraElFront(suyas.filter((o) => o.client_id === p.id)) }));
+  // El nombre del proveedor se le pega a cada contrato: la obra trae su
+  // client_id, y sin esto la pantalla no tendría cómo decir de quién es.
+  const nombreDe = (clientId) =>
+    proveedores.find((p) => p.id === clientId)?.razon_social || 'Proveedor';
+  const conProveedor = (obras) =>
+    paraElFront(obras).map((o) => ({ ...o, proveedor_nombre: nombreDe(o.client_id) }));
 
-  res.json({ proyecto, proveedores: asignados });
+  res.json({
+    proyecto: {
+      ...proyecto,
+      partidas: (proyecto?.partidas || []).map((pa) => ({
+        ...pa,
+        contratos: conProveedor(pa.contratos || []),
+      })),
+      obras_sin_partida: conProveedor(proyecto?.obras_sin_partida || []),
+      // El consumo trae proveedor_id; se le pega el nombre aquí para no tener
+      // que mandar el padrón entero solo para resolver cuatro renglones.
+      consumo: (proyecto?.consumo || []).map((c) => ({
+        ...c,
+        proveedor_nombre: nombreDe(c.proveedor_id),
+      })),
+    },
+  });
 });
 
 // GET /api/proveedores/:id -> las obras que ese proveedor ejecuta PARA MÍ,

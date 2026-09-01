@@ -6,13 +6,14 @@
 // otra empresa y no se deshace.
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Building2, Plus, Save, X, ArrowLeft, AlertTriangle, Pencil, Trash2, CreditCard, Users,
+  Building2, Plus, Save, X, ArrowLeft, AlertTriangle, Pencil, Trash2, CreditCard, Layers,
 } from 'lucide-react';
 import { api } from '../api.js';
 import {
   mxn, fmtDate, CumplimientoBadge, ESTATUS_PROYECTO, etiquetaEstatus, InputPesos,
 } from '../lib.jsx';
 import Obra, { btnChico } from './ObraContratante.jsx';
+import PartidasContratante from './PartidasContratante.jsx';
 
 const inputCls =
   'w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100';
@@ -112,8 +113,10 @@ function FormProyecto({ inicial, onSubmit, onCancel }) {
       </div>
 
       <p className="text-[11px] text-slate-400 mt-3">
-        Los proveedores los asigna Fortex: ligar la obra de una empresa a tu proyecto
-        te abre sus pólizas, y eso no se deshace. Dinos a quién contrataste y lo hacen.
+        Después de guardarlo, entra al proyecto y arma sus <span className="font-medium">partidas</span>:
+        muros, electricidad, acabados. Los contratistas los asigna Fortex —ligar la obra de una
+        empresa te abre sus pólizas y eso no se deshace—, así que dinos a quién contrataste
+        para cada partida y lo hacen.
       </p>
     </div>
   );
@@ -127,9 +130,8 @@ function FormProyecto({ inicial, onSubmit, onCancel }) {
    nuevo — es la suma de los montos afianzados de las pólizas que ya se ven una
    por una; lo que aporta es no tener que sacar la calculadora. */
 
-function Consumo({ consumo, proveedores }) {
+function Consumo({ consumo }) {
   if (!consumo?.length) return null;
-  const nombreDe = (id) => proveedores.find((p) => p.id === id)?.razon_social || '—';
 
   return (
     <div className="portal-card bg-white border border-slate-200 rounded-lg overflow-hidden mb-4">
@@ -152,7 +154,7 @@ function Consumo({ consumo, proveedores }) {
           <tbody className="divide-y divide-slate-100">
             {consumo.map((c) => (
               <tr key={`${c.proveedor_id}:${c.afianzadora_id}`} className="hover:bg-slate-50/40">
-                <td className="px-3 py-1.5 text-slate-700 font-medium">{nombreDe(c.proveedor_id)}</td>
+                <td className="px-3 py-1.5 text-slate-700 font-medium">{c.proveedor_nombre}</td>
                 <td className="px-3 py-1.5 text-slate-600">{c.afianzadora_nombre}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{c.polizas}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-slate-800">
@@ -175,8 +177,10 @@ function Consumo({ consumo, proveedores }) {
    El detalle de un proyecto
    -------------------------------------------------------------------------- */
 
-function DetalleProyecto({ detalle, clienteId, tipos, onVolver, onCambio, avisar }) {
-  const { proyecto, proveedores = [] } = detalle;
+function DetalleProyecto({
+  detalle, clienteId, tipos, tiposFianza, onVolver, onCambio, avisar, flash,
+}) {
+  const { proyecto } = detalle;
 
   return (
     <>
@@ -200,7 +204,17 @@ function DetalleProyecto({ detalle, clienteId, tipos, onVolver, onCambio, avisar
             </p>
             {proyecto?.notas && <p className="text-[11px] text-slate-400 mt-1">{proyecto.notas}</p>}
           </div>
-          <CumplimientoBadge estado={proyecto?.cumplimiento} />
+          {/* "Cubierta" solo si de verdad se sabe qué se exigía: basta que UNA
+              partida no tenga requisitos para que el proyecto no pueda
+              prometerlo, porque esa partida saldría verde sin haber
+              comprobado nada. */}
+          <CumplimientoBadge
+            estado={proyecto?.cumplimiento}
+            verificada={
+              (proyecto?.partidas?.length || 0) > 0
+              && proyecto.partidas.every((pa) => pa.requisitos.length > 0)
+            }
+          />
         </div>
 
         <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
@@ -216,52 +230,41 @@ function DetalleProyecto({ detalle, clienteId, tipos, onVolver, onCambio, avisar
             <p className="text-[10px] uppercase tracking-wider text-slate-400">Afianzado a tu favor</p>
             <p className="tabular-nums font-semibold text-sky-700">{mxn(proyecto?.monto_afianzado)}</p>
           </div>
+          {/* Las dos cuentas van SEPARADAS a propósito: "sin contratista" es un
+              pendiente tuyo —te falta contratar— y "sin fianza" es de quien ya
+              está trabajando. Sumadas, el número no diría qué hacer. */}
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-slate-400">Sin fianza vigente</p>
-            <p className={`tabular-nums font-semibold ${
-              proyecto?.obras_descubiertas ? 'text-rose-600' : 'text-emerald-700'
+            <p className="text-[10px] uppercase tracking-wider text-slate-400">Partidas</p>
+            <p className="tabular-nums font-semibold text-slate-800">
+              {proyecto?.total_partidas ?? 0}
+              {proyecto?.partidas_sin_contratista > 0 && (
+                <span className="text-slate-500 font-normal text-[11px]">
+                  {' · '}{proyecto.partidas_sin_contratista} sin contratar
+                </span>
+              )}
+            </p>
+            <p className={`text-[11px] tabular-nums ${
+              proyecto?.partidas_descubiertas ? 'text-rose-600 font-medium' : 'text-emerald-700'
             }`}>
-              {proyecto?.obras_descubiertas ?? 0}
+              {proyecto?.partidas_descubiertas
+                ? `${proyecto.partidas_descubiertas} sin fianza completa`
+                : 'todas con fianza'}
             </p>
           </div>
         </div>
       </div>
 
-      <Consumo consumo={proyecto?.consumo} proveedores={proveedores} />
+      <Consumo consumo={proyecto?.consumo} />
 
-      <div className="space-y-4">
-        {proveedores.map((p) => (
-          <div key={p.id} className="portal-card bg-white border border-slate-200 rounded-lg overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <Users className="w-4 h-4 text-slate-500 shrink-0" />
-              <h3 className="text-sm font-semibold text-slate-700">{p.razon_social}</h3>
-              <span className="text-[11px] text-slate-500">
-                {p.alias && `${p.alias} · `}{p.rfc || 'Sin RFC'}
-              </span>
-              <div className="ml-auto"><CumplimientoBadge estado={p.cumplimiento} /></div>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {p.obras.map((o) => (
-                <Obra
-                  key={o.id}
-                  obra={o}
-                  clienteId={clienteId}
-                  tipos={tipos}
-                  onCambio={onCambio}
-                  avisar={avisar}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
-
-        {!proveedores.length && (
-          <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-400">
-            Todavía no hay proveedores asignados a este proyecto. Dile a Fortex a quién
-            contrataste y ellos los ligan.
-          </div>
-        )}
-      </div>
+      <PartidasContratante
+        proyecto={proyecto}
+        clienteId={clienteId}
+        tiposDoc={tipos}
+        tiposFianza={tiposFianza}
+        onCambio={onCambio}
+        avisar={avisar}
+        flash={flash}
+      />
     </>
   );
 }
@@ -276,6 +279,7 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
   const [detalle, setDetalle] = useState(null);
   const [creando, setCreando] = useState(false);
   const [editando, setEditando] = useState(null);
+  const [tiposFianza, setTiposFianza] = useState([]);
   const [error, setError] = useState('');
 
   const cargar = useCallback(
@@ -294,6 +298,15 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
   );
 
   useEffect(() => { cargar(); }, [cargar]);
+
+  // El catálogo se pide una vez y su falla se traga: es para la checklist de
+  // requisitos, y sin él la pantalla sigue sirviendo para todo lo demás. Meterlo
+  // al error de arriba taparía la lista de proyectos por un desplegable.
+  useEffect(() => {
+    api.get('/proveedores/tipos-fianza')
+      .then((r) => setTiposFianza(r.tipos || []))
+      .catch(() => setTiposFianza([]));
+  }, []);
 
   // Al subir o quitar un archivo se recargan las tres cosas: la lista de
   // proyectos, el detalle abierto y las cifras de arriba, que viven en la shell.
@@ -328,9 +341,11 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
         detalle={detalle}
         clienteId={clienteId}
         tipos={tipos}
+        tiposFianza={tiposFianza}
         onVolver={() => { setSel(null); setDetalle(null); }}
         onCambio={recargar}
         avisar={avisar}
+        flash={flash}
       />
     ) : (
       <div className="text-sm text-slate-400 py-10 text-center">Cargando…</div>
@@ -387,7 +402,8 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
           <div
             key={p.id}
             className={`portal-card bg-white border rounded-lg ${
-              p.obras_descubiertas > 0 ? 'border-rose-200' : 'border-slate-200'
+              (p.partidas_descubiertas ?? p.obras_descubiertas) > 0
+                ? 'border-rose-200' : 'border-slate-200'
             }`}
           >
             <div className="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -402,9 +418,19 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
                   {p.ubicacion && ` · ${p.ubicacion}`}
                 </p>
                 <p className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
-                  {p.total_proveedores} proveedor(es) · {p.total_obras} obra(s)
-                  {p.obras_descubiertas > 0 && (
-                    <span className="text-rose-600"> · {p.obras_descubiertas} sin fianza vigente</span>
+                  {/* Con partidas se cuentan partidas; sin ellas, obras. Mezclar
+                      las dos cuentas en un renglón haría que los números no
+                      sumaran con nada. */}
+                  {p.total_partidas > 0
+                    ? `${p.total_partidas} partida(s) · ${p.total_proveedores} contratista(s)`
+                    : `${p.total_proveedores} proveedor(es) · ${p.total_obras} obra(s)`}
+                  {p.partidas_sin_contratista > 0 && (
+                    <span className="text-slate-500"> · {p.partidas_sin_contratista} sin contratar</span>
+                  )}
+                  {(p.partidas_descubiertas ?? p.obras_descubiertas) > 0 && (
+                    <span className="text-rose-600">
+                      {' · '}{p.partidas_descubiertas ?? p.obras_descubiertas} sin fianza completa
+                    </span>
                   )}
                   {p.monto_afianzado > 0 && (
                     <span className="text-slate-400"> · {mxn(p.monto_afianzado)} afianzado a tu favor</span>
@@ -412,7 +438,10 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
                 </p>
               </button>
               <div className="flex items-center gap-2">
-                <CumplimientoBadge estado={p.cumplimiento} />
+                <CumplimientoBadge
+                  estado={p.cumplimiento}
+                  verificada={p.total_partidas > 0 && p.partidas_sin_requisitos === 0}
+                />
                 <button
                   onClick={() => { setEditando(p); setCreando(false); }}
                   className={btnChico}
@@ -435,9 +464,10 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
         {data && !data.proyectos.length && !creando && (
           <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-400">
             <span className="flex flex-col items-center gap-2">
-              <Building2 className="w-5 h-5 text-slate-300" />
-              Todavía no tienes proyectos. Registra el primero y pídele a Fortex
-              que te asigne los proveedores.
+              <Layers className="w-5 h-5 text-slate-300" />
+              Todavía no tienes proyectos. Registra el primero, arma sus partidas
+              —muros, electricidad, acabados— y pídele a Fortex que te asigne el
+              contratista de cada una.
             </span>
           </div>
         )}

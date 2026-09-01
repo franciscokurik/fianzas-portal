@@ -205,6 +205,8 @@ Eso es `clients.tipo`, y son dos negocios, no dos niveles de permiso:
 | Obras propias, pólizas, líneas de crédito, expediente | ✅ | ❌ (el servidor las rechaza) |
 | Padrón de proveedores | ❌ | ✅ |
 | Registra proyectos (desarrollos) | ❌ (captura obras) | ✅ |
+| Define partidas y qué fianza exige cada una | ❌ | ✅ |
+| Asigna el contratista de una partida | ❌ | ❌ (solo Fortex) |
 | Sube archivos | su expediente y su papelería | solo su carpeta por obra (lo que le entregó el proveedor) |
 | Al entrar ve | "Mis fianzas" | "Mis proyectos" y "Proveedores" |
 
@@ -212,41 +214,54 @@ Va como una columna sobre la misma tabla, y no como una tabla aparte, porque un
 contratante tiene la **misma ficha** que un fiado (razón social, RFC, teléfono,
 vendedor titular) y sus accesos se dan igual. Lo único que cambia es qué ve.
 
-### Tres niveles, y cada uno es de alguien distinto
+### Cuatro niveles, y cada uno es de alguien distinto
 
 Es la parte del modelo que más conviene tener clara antes de tocar nada:
 
 | | tabla | de quién es | quién lo captura |
 |---|---|---|---|
 | **Desarrollo** — la torre, el fraccionamiento | `desarrollos` | del **contratante** | él desde su portal, o Fortex por él |
+| **Partida** — los muros, la electricidad | `partidas` | del **contratante** | él o Fortex |
 | **Obra / contrato** — lo que le toca a un proveedor | `proyectos` | del **proveedor** | Fortex |
 | **Fianza** | `fianzas` | del **proveedor** | Fortex |
 
 Y son tablas distintas porque son cosas distintas: una fianza la presenta **una**
-empresa por **un** contrato, siempre. El desarrollo es el nivel de arriba, el que
-le faltaba al desarrollador para ver la torre completa en un lugar en vez de sus
-obras sueltas, una por proveedor.
+empresa por **un** contrato, siempre. El desarrollo es el techo —la torre
+completa en un lugar—, y la partida es el pedazo que se contrata por separado.
 
-Una obra se mete en un desarrollo con `proyectos.desarrollo_id`. Eso es
-**agrupación, no permiso**: lo que autoriza sigue siendo `contratante_id`, la
-única columna que aparece en el alcance de `lib/permisos.js`.
+La partida es el nivel donde de verdad **se exige** la fianza, y por eso existe
+antes de saber quién la va a hacer: al montar el edificio se sabe qué hace falta
+mucho antes de saber a quién se le da. De ahí sale un estado que antes no se
+podía ni decir —`sin_contratista`— y que se cuenta **aparte** de las descubiertas:
+que nadie esté haciendo los muros es un pendiente del desarrollador, no un
+proveedor que incumplió.
 
-Las dos columnas y no una, a propósito. Si el alcance dependiera del desarrollo
+Una obra se mete en una partida con `proyectos.partida_id` y en un desarrollo con
+`proyectos.desarrollo_id`. Las dos son **agrupación, no permiso**: lo que autoriza
+sigue siendo `contratante_id`, la única columna que aparece en el alcance de
+`lib/permisos.js`.
+
+Tres columnas y no una, a propósito. Si el alcance dependiera del desarrollo
 habría que rehacer y volver a probar toda la maquinaria de privacidad, y una obra
-ligada a un contratante que todavía no tiene desarrollo dejaría de verse. Y para
-que no puedan discrepar, **`contratante_id` se deriva del desarrollo** cuando hay
-uno: el servidor lo saca de ahí y no le cree al body, aunque venga otro
-(`resolverDesarrollo` en `routes/admin.js`, con su prueba).
+ligada a un contratante que todavía no tiene desarrollo dejaría de verse.
+
+Y para que las tres no puedan discrepar, **cada una se deriva de la de arriba**:
+la partida fija el desarrollo, y el desarrollo fija el contratante. El servidor
+los saca de ahí y no le cree al body, aunque venga otro (`resolverPartida` y
+`resolverDesarrollo` en `routes/admin.js`, cada uno con su prueba). Asignarle un
+fiado a "muros" es, en una sola operación, decir de qué obra es y quién la va a
+ver.
 
 De ahí salen dos reglas que parecen detalles y no lo son:
 
 - **Sacar una obra del desarrollo NO la desliga del contratante.** Son dos cosas:
   deja de estar agrupada, se sigue viendo. Aparece en "obras que todavía no están
   en ningún proyecto", porque desaparecerla se leería como que se perdió.
-- **Desligarla del contratante SÍ la saca del desarrollo** —y cambiarla a otro
-  contratante, también. Si no, quedaría dentro del proyecto de alguien que ya no
-  la alcanza: la obra contaría en las métricas de uno y aparecería en el proyecto
-  del otro, que es justo lo que este par de columnas existe para evitar.
+- **Desligarla del contratante SÍ la saca del desarrollo y de la partida** —y
+  cambiarla a otro contratante, también; y cambiarla de desarrollo la saca de la
+  partida, que era del anterior. Si no, quedaría dentro del proyecto de alguien
+  que ya no la alcanza: la obra contaría en las métricas de uno y aparecería en el
+  proyecto del otro, que es justo lo que estas columnas existen para evitar.
 - **Un cuerpo que se contradice se rechaza con 400, no se deriva.** Si la
   petición trae a la vez un desarrollo y un contratante que no es su dueño, la
   ruta contesta "sácala del proyecto antes de cambiarle el contratante". Derivar
@@ -255,6 +270,36 @@ De ahí salen dos reglas que parecen detalles y no lo son:
   de antes. Una revocación que falla callada es lo peor que puede hacer una ruta
   de permisos, y por eso hay guarda en los dos lados —el formulario limpia el
   proyecto al cambiar de contratante, y el servidor rechaza el par imposible.
+
+### Qué exige cada partida, y por qué eso cambia todo
+
+Cada partida declara **qué tipos de fianza** le pide a su contratista
+(`partida_requisitos`, contra el mismo catálogo `tipos_fianza` que usan las
+pólizas — si fuera otra lista, una partida podría exigir algo que ninguna póliza
+puede cumplir).
+
+Sin eso, el portal solo podía contestar "tiene fianza" o "no tiene". Con la de
+cumplimiento y sin la de anticipo, una obra salía **en verde**. Ese era el último
+falso OK que quedaba, y es el que los requisitos vinieron a quitar: ahora la
+partida dice `incompleta` y **cuál** falta.
+
+De ahí sale que la etiqueta verde tenga dos textos distintos, y no es cosmético:
+
+| lo que se sabe | etiqueta | por qué |
+|---|---|---|
+| hay póliza vigente, nadie dijo qué se exigía | **Con fianza** | es todo lo que se puede afirmar |
+| hay vigente **cada** tipo que la partida exige | **Cubierta** | ahora sí se comprobó contra algo |
+
+Prometer completitud sin saber qué se exige sería el mismo falso OK con otro
+nombre. Por eso `CumplimientoBadge` recibe `verificada` y el proyecto entero solo
+dice "Cubierta" si **todas** sus partidas declararon requisitos: basta una sin
+ellos para que no se pueda prometer.
+
+Y por lo mismo, el número del titular (`pendientes_sin_fianza`) suma las partidas
+descubiertas **más** las obras vivas que no están en ninguna partida. Las dos
+mitades hacen falta: contando solo obras vuelve el falso OK, y contando solo
+partidas desaparecería una obra que Fortex ligó sin asignarle partida. Cambiar de
+unidad no puede **esconder** un faltante.
 
 ### Un proveedor es un fiado normal
 

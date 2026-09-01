@@ -18,6 +18,7 @@
 import db from '../db.js';
 import { estadoCumplimiento, daysUntil, todayISO } from '../lib/dates.js';
 import { ALCANCE, JOIN_PADRON, SQL_DOCS_DEL_CONTRATANTE } from '../lib/permisos.js';
+import { conRequisitos } from './partidas.js';
 
 const SQL_PADRON = `
   SELECT cp.proveedor_id AS id, c.razon_social, c.rfc, cp.alias, cp.notas, cp.created_at
@@ -34,8 +35,18 @@ const SQL_DESARROLLOS = `
   WHERE d.contratante_id = ?
   ORDER BY d.estatus, d.nombre`;
 
+// Las PARTIDAS de todos sus desarrollos. Existen aunque nadie las haya
+// contratado todavía: es su lista de pendientes de obra.
+const SQL_PARTIDAS = `
+  SELECT pa.id, pa.desarrollo_id, pa.nombre, pa.alcance, pa.monto_estimado,
+         pa.orden, pa.notas
+  FROM partidas pa
+  JOIN desarrollos d ON d.id = pa.desarrollo_id
+  WHERE d.contratante_id = ?
+  ORDER BY pa.orden, pa.nombre`;
+
 const SQL_OBRAS = `
-  SELECT p.id, p.client_id, p.desarrollo_id, p.nombre, p.numero_contrato,
+  SELECT p.id, p.client_id, p.desarrollo_id, p.partida_id, p.nombre, p.numero_contrato,
          p.monto_contrato, p.fecha_inicio, p.fecha_termino, p.estatus
   FROM proyectos p
   ${JOIN_PADRON}
@@ -48,7 +59,8 @@ const SQL_OBRAS = `
 const SQL_FIANZAS = `
   SELECT f.id, f.client_id, f.proyecto_id, f.clase, f.numero_poliza,
          f.monto_afianzado, f.fecha_inicio, f.fecha_vigencia,
-         f.afianzadora_id, a.nombre AS afianzadora_nombre, t.nombre AS tipo_fianza
+         f.afianzadora_id, a.nombre AS afianzadora_nombre,
+         f.tipo_fianza_id, t.nombre AS tipo_fianza
   FROM fianzas f
   JOIN proyectos p    ON p.id = f.proyecto_id
   ${JOIN_PADRON}
@@ -94,12 +106,77 @@ export const obraViva = (estatus) => ESTATUS_VIVOS.includes(estatus);
 // una fianza a la que nadie le capturó hasta cuándo cubre no se puede dar por
 // buena, aunque el problema sea de captura y no del proveedor. Se distinguen
 // para que cada uno lo arregle donde le toca.
-const DESCUBIERTA = ['sin_fianza', 'vencida', 'sin_vigencia'];
+const DESCUBIERTA = ['sin_fianza', 'vencida', 'sin_vigencia', 'incompleta'];
 export const obraDescubierta = (estado) => DESCUBIERTA.includes(estado);
 
-// De mejor a peor. El cumplimiento de un proveedor es el de su PEOR obra viva:
-// tener una obra cubierta no arregla la que está descubierta.
-const DE_MEJOR_A_PEOR = ['cubierta', 'por_vencer', 'sin_vigencia', 'vencida', 'sin_fianza'];
+// 'sin_contratista' se cuenta APARTE y no como descubierta: es un pendiente del
+// desarrollador —le falta contratar— y no un proveedor que no cumplió. Meterlos
+// en el mismo número haría que la pantalla acusara a alguien que ni existe.
+export const partidaSinContratista = (estado) => estado === 'sin_contratista';
+
+// De mejor a peor. El cumplimiento de un proveedor —o de un desarrollo— es el de
+// su PEOR pedazo vivo: tener una parte cubierta no arregla la que está
+// descubierta.
+// El orden es por RIESGO, no por incomodidad, y 'sin_contratista' va temprano a
+// propósito: que nadie esté haciendo los muros todavía no expone a nadie. Un
+// contratista trabajando sin fianza sí. Si estuviera al final, un proyecto con
+// una partida sin contratar y otra sin fianza gritaría "sin contratista" y
+// taparía justo lo único que sí es un riesgo vivo.
+const DE_MEJOR_A_PEOR = ['cubierta', 'por_vencer', 'sin_contratista', 'incompleta',
+                         'sin_vigencia', 'vencida', 'sin_fianza'];
+
+// ¿Está viva y cubriendo hoy? Se pregunta en tres lugares y tenía que ser una
+// sola función.
+const cubreHoy = (f) => f.clase !== 'previo' && (f.estado === 'activa' || f.estado === 'por_vencer');
+
+// El cumplimiento de una PARTIDA, que es lo único que puede contestar de verdad
+// "¿está cubierta?".
+//
+//   'sin_contratista' -> nadie la está haciendo todavía. Es un pendiente del
+//                        desarrollador, no del proveedor, y hasta ahora no se
+//                        podía ni decir.
+//   'sin_fianza'      -> hay contrato y ninguna póliza emitida.
+//   'vencida' /
+//   'sin_vigencia'    -> hubo pólizas y hoy ninguna cubre.
+//   'incompleta'      -> hay cobertura viva, pero FALTA alguno de los tipos que
+//                        la partida exige. Es el falso OK que el portal llevaba
+//                        arrastrando: una partida con la de cumplimiento y sin
+//                        la de anticipo salía en verde, porque no había forma de
+//                        saber que faltaba algo.
+//   'por_vencer' /
+//   'cubierta'        -> todo lo exigido está vivo.
+//
+// Y si la partida NO tiene requisitos capturados, no se puede afirmar que esté
+// cubierta: se cae al significado de antes —"tiene fianza"— y el front lo dice
+// con esas palabras. Prometer completitud sin saber qué se exige sería el mismo
+// falso OK con otro nombre.
+export function estadoDePartida(requisitos, contratos, fianzas) {
+  if (!contratos.length) return { estado: 'sin_contratista', faltantes: [] };
+
+  const emitidas = fianzas.filter((f) => f.clase !== 'previo');
+  if (!emitidas.length) return { estado: 'sin_fianza', faltantes: requisitos };
+
+  const vivas = emitidas.filter(cubreHoy);
+  if (!vivas.length) {
+    // Se distingue "se venció" de "nunca se capturó la fecha": lo primero es del
+    // proveedor y lo segundo de Fortex, y se arreglan en lugares distintos.
+    return {
+      estado: emitidas.some((f) => f.estado === 'sin_vigencia') ? 'sin_vigencia' : 'vencida',
+      faltantes: requisitos,
+    };
+  }
+
+  // Hay cobertura viva. ¿Cubre TODO lo que se exige?
+  const faltantes = requisitos.filter(
+    (r) => !vivas.some((f) => f.tipo_fianza_id === r.tipo_fianza_id)
+  );
+  if (faltantes.length) return { estado: 'incompleta', faltantes };
+
+  return {
+    estado: vivas.some((f) => f.estado === 'por_vencer') ? 'por_vencer' : 'cubierta',
+    faltantes: [],
+  };
+}
 
 // ¿Está cubierta esta obra, hoy?
 //   'cubierta'     -> hay al menos una fianza emitida y vigente
@@ -190,6 +267,7 @@ export async function panoramaDelContratante(contratanteId) {
 
   const padron = await db.prepare(SQL_PADRON).all(id);
   const desarrollos = await db.prepare(SQL_DESARROLLOS).all(id);
+  const partidasRows = await conRequisitos(await db.prepare(SQL_PARTIDAS).all(id));
   const obrasRows = await db.prepare(SQL_OBRAS).all(id);
   const fianzasRows = await db.prepare(SQL_FIANZAS).all(id);
   const docsRows = await db.prepare(SQL_DOCUMENTOS).all(id);
@@ -266,15 +344,68 @@ export async function panoramaDelContratante(contratanteId) {
     };
   });
 
+  // Las partidas, cada una con los contratos que la cumplen y su cumplimiento
+  // contra lo que exige. Es el nivel donde de verdad se puede decir "cubierta".
+  const partidas = partidasRows.map((pa) => {
+    const contratos = obras.filter((o) => o.partida_id === pa.id);
+    // Se JUZGA con los vivos y se MUESTRAN todos. La misma regla que en la obra:
+    // a un contrato cerrado o cancelado no hay cobertura que exigirle, y una
+    // partida cuyo único contrato se canceló saldría en rojo —y contaría como
+    // descubierta— por algo que ya no existe. Ocultarlo sería peor, así que se
+    // sigue listando con su propio estatus; lo que no hace es dictar el
+    // veredicto.
+    //
+    // Y los montos se suman de los vivos por lo mismo: "contratado" con las
+    // canceladas dentro, junto a "afianzado" que solo cuenta vigentes, hace que
+    // el porcentaje que uno saca de cabeza salga falso.
+    const vivos = contratos.filter((o) => o.viva);
+    const fianzasDeLaPartida = vivos.flatMap((o) => o.fianzas);
+    const { estado, faltantes } = estadoDePartida(pa.requisitos, vivos, fianzasDeLaPartida);
+
+    return {
+      ...pa,
+      contratos,
+      total_contratos: vivos.length,
+      total_proveedores: new Set(vivos.map((o) => o.client_id)).size,
+      monto_contratado: vivos.reduce((s, o) => s + (o.monto_contrato || 0), 0),
+      monto_afianzado: fianzasDeLaPartida
+        .filter(cubreHoy)
+        .reduce((s, f) => s + (f.monto_afianzado || 0), 0),
+      estado_cobertura: estado,
+      // QUÉ falta, no solo que falta algo: es lo único que se puede accionar.
+      faltantes,
+    };
+  });
+
   // Los proyectos del contratante, con lo que cuelga de cada uno. Es el nivel
   // que le faltaba: antes tenía las obras sueltas, una por proveedor, y ningún
   // lugar donde ver la torre completa.
   const proyectos = desarrollos.map((d) => {
     const suyas = obras.filter((o) => o.desarrollo_id === d.id);
     const vivasDeEste = suyas.filter((o) => o.viva);
+    const susPartidas = partidas.filter((pa) => pa.desarrollo_id === d.id);
+    // Las obras que están en el desarrollo pero en ninguna partida. Es el estado
+    // normal de todo lo capturado antes de que las partidas existieran, así que
+    // se dice en vez de esconderlo.
+    const sinPartida = suyas.filter((o) => o.partida_id == null);
+
     return {
       ...d,
       viva: obraViva(d.estatus),
+      partidas: susPartidas,
+      obras_sin_partida: sinPartida,
+      total_partidas: susPartidas.length,
+      partidas_sin_contratista: susPartidas.filter(
+        (pa) => partidaSinContratista(pa.estado_cobertura)
+      ).length,
+      partidas_descubiertas: susPartidas.filter(
+        (pa) => obraDescubierta(pa.estado_cobertura)
+      ).length,
+      // Cuántas no declararon qué exigen. Va hasta la lista porque es lo que
+      // decide si el chip del proyecto puede decir "Cubierta": basta una sin
+      // requisitos para que no se pueda prometer, y esa partida sale verde sin
+      // haber comprobado nada.
+      partidas_sin_requisitos: susPartidas.filter((pa) => !pa.requisitos.length).length,
       total_proveedores: new Set(suyas.map((o) => o.client_id)).size,
       total_obras: suyas.length,
       obras_vivas: vivasDeEste.length,
@@ -284,9 +415,15 @@ export async function panoramaDelContratante(contratanteId) {
       // ponía "contratado" (con las canceladas dentro) junto a "afianzado" (solo
       // vivas), y el porcentaje que uno saca de cabeza salía falso.
       monto_contratado: vivasDeEste.reduce((s, o) => s + (o.monto_contrato || 0), 0),
-      cumplimiento: vivasDeEste.length
-        ? peorDe(vivasDeEste.map((o) => o.estado_cobertura))
-        : (suyas.length ? 'sin_obras_vivas' : 'sin_obra'),
+      // Si el desarrollo tiene partidas, su cumplimiento sale de ELLAS: son el
+      // pedazo de obra de verdad, e incluyen las que todavía no tiene
+      // contratadas. Sin partidas se cae al comportamiento de antes, para que
+      // los desarrollos capturados sin ellas sigan diciendo algo cierto.
+      cumplimiento: susPartidas.length
+        ? peorDe(susPartidas.map((pa) => pa.estado_cobertura))
+        : (vivasDeEste.length
+          ? peorDe(vivasDeEste.map((o) => o.estado_cobertura))
+          : (suyas.length ? 'sin_obras_vivas' : 'sin_obra')),
       consumo: consumoPorAfianzadora(suyas.flatMap((o) => o.fianzas)),
     };
   });
@@ -312,9 +449,41 @@ export async function panoramaDelContratante(contratanteId) {
     proyectos: proyectos.length,
     proyectos_vivos: proyectos.filter((p) => p.viva).length,
     obras_sin_proyecto: obrasSinProyecto.length,
+    partidas: partidas.length,
+    // Los dos pendientes, contados aparte porque son de dos personas distintas:
+    // contratar es del desarrollador, presentar la fianza es del proveedor.
+    partidas_sin_contratista: partidas.filter(
+      (pa) => partidaSinContratista(pa.estado_cobertura)
+    ).length,
+    partidas_descubiertas: partidas.filter(
+      (pa) => obraDescubierta(pa.estado_cobertura)
+    ).length,
+    partidas_incompletas: partidas.filter((pa) => pa.estado_cobertura === 'incompleta').length,
   };
 
-  return { proveedores, proyectos, obras, obrasSinProyecto, metricas };
+  // EL número del titular: todo lo que hoy le falta cobertura, sin que importe
+  // en qué nivel esté capturado.
+  //
+  // Es la suma de las partidas descubiertas MÁS las obras vivas que no están en
+  // ninguna partida y andan descubiertas. Las dos mitades hacen falta:
+  //
+  //   · contando solo obras, una partida que exige cumplimiento Y anticipo con
+  //     solo el cumplimiento no aparece — la obra tiene su fianza. Es el falso
+  //     OK que las partidas vinieron a quitar, y dejarlo en el titular lo
+  //     devolvía en la primera pantalla.
+  //   · contando solo partidas, una obra que Fortex ligó sin asignarle partida
+  //     desaparece del titular. Cambiar de unidad no puede ESCONDER un
+  //     faltante; sería el mismo error al revés.
+  //
+  // Mezcla dos unidades y por eso la etiqueta no promete ninguna: dice
+  // "pendientes", no "obras" ni "partidas".
+  const sueltasDescubiertas = vivas.filter(
+    (o) => o.partida_id == null && obraDescubierta(o.estado_cobertura)
+  ).length;
+  metricas.pendientes_sin_fianza = metricas.partidas_descubiertas + sueltasDescubiertas;
+  metricas.pendientes_sueltos = sueltasDescubiertas;
+
+  return { proveedores, proyectos, partidas, obras, obrasSinProyecto, metricas };
 }
 
 // La línea de crédito de los proveedores de un contratante, con lo que llevan

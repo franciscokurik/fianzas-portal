@@ -201,7 +201,7 @@ test('un body que se contradice se RECHAZA, no se deriva en silencio', async () 
 });
 
 test('el proyecto agrupa la obra y suma lo que aparta por afianzadora', async () => {
-  const { proyecto, proveedores } = await (
+  const { proyecto } = await (
     await pedir(`/api/proveedores/proyectos/${proyectoDelta}`, delta)
   ).json();
 
@@ -211,16 +211,24 @@ test('el proyecto agrupa la obra y suma lo que aparta por afianzadora', async ()
   assert.equal(proyecto.monto_contratado, 12500000);
   assert.equal(proyecto.cumplimiento, 'cubierta');
 
-  // El proveedor sale con su obra adentro.
-  assert.equal(proveedores.length, 1);
-  assert.equal(proveedores[0].razon_social, 'Cimentaciones Vega');
-  assert.deepEqual(proveedores[0].obras.map((o) => o.nombre), ['Cimentación']);
+  // Este proyecto no tiene partidas, así que su única obra sale en el apartado
+  // de "todavía sin partida" —que es a propósito: es captura pendiente y se
+  // dice, no se esconde— con el nombre del proveedor pegado, porque agrupado
+  // por partida el renglón ya no tiene encabezado que diga de quién es.
+  assert.deepEqual(proyecto.partidas, []);
+  assert.equal(proyecto.obras_sin_partida.length, 1);
+  assert.equal(proyecto.obras_sin_partida[0].nombre, 'Cimentación');
+  assert.equal(proyecto.obras_sin_partida[0].proveedor_nombre, 'Cimentaciones Vega');
 
   // El consumo va por afianzadora, no revuelto. Es la suma de las pólizas que
   // ya ve una por una: no es información nueva, es no sacar la calculadora.
   const porAfi = Object.fromEntries(proyecto.consumo.map((c) => [c.afianzadora_nombre, c.comprometido]));
   assert.deepEqual(porAfi, { Aserta: MONTO_ASERTA, Chubb: MONTO_CHUBB });
   assert.equal(proyecto.consumo.every((c) => c.proveedor_id === VEGA), true);
+  assert.equal(
+    proyecto.consumo.every((c) => c.proveedor_nombre === 'Cimentaciones Vega'), true,
+    'el consumo trae el nombre pegado: el detalle ya no manda el padrón entero'
+  );
 });
 
 test('al contratante NO se le dice la línea autorizada de su proveedor', async () => {
