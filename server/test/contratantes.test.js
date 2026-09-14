@@ -557,6 +557,33 @@ test('una fianza sin fecha de vigencia NO se pinta como cubierta', async () => {
   }
 });
 
+// La ventana de los KPI es más ancha que la del chip de la fila: 60 días contra
+// 30. Se prueba en los dos bordes y junto con el color, porque son dos reglas
+// distintas sobre el mismo dato y es justo donde alguien las va a "unificar".
+test('el KPI de "por vencer" mira a 60 días, y el chip de la fila sigue en 30', async () => {
+  const enDias = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  const vencerEn = (n) => memoria.query(
+    `UPDATE fianzas SET fecha_vigencia = '${enDias(n)}' WHERE numero_poliza = 'DELTA-1'`
+  );
+  try {
+    await vencerEn(45);
+    const aMedio = await (await pedir('/api/proveedores', delta)).json();
+    assert.equal(aMedio.metricas.obras_por_vencer, 1,
+      'a 45 días el KPI ya lo cuenta: es lo que hay que renovar este bimestre');
+    assert.equal(aMedio.proveedores[0].cumplimiento, 'cubierta',
+      'pero la fila no se pinta de ámbar todavía; eso es de los 30 días');
+
+    await vencerEn(75);
+    const lejos = await (await pedir('/api/proveedores', delta)).json();
+    assert.equal(lejos.metricas.obras_por_vencer, 0,
+      'a 75 días no hay nada que planear todavía');
+  } finally {
+    await memoria.query(
+      `UPDATE fianzas SET fecha_vigencia = '2099-01-01' WHERE numero_poliza = 'DELTA-1'`
+    );
+  }
+});
+
 test('un previo no cubre nada: la obra sigue descubierta', async () => {
   await memoria.query(`UPDATE fianzas SET clase = 'previo' WHERE numero_poliza = 'DELTA-1'`);
   try {

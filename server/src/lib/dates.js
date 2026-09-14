@@ -20,6 +20,13 @@ export function addMonths(isoDate, months) {
   return d.toISOString().slice(0, 10);
 }
 
+// Ventana de los KPI de "por vencer". Es más ancha que la de estadoFianza a
+// propósito, y no contesta lo mismo: el chip ámbar avisa de lo que YA urge, y el
+// KPI es de planeación —qué le toca renovar al bimestre—. Unificarlas dejaría
+// mintiendo a una de las dos: o el chip grita dos meses antes, o el KPI se
+// entera cuando ya no hay tiempo de mover la renovación.
+export const VENTANA_KPI_DIAS = 60;
+
 // Estado de una fianza según su fecha de vigencia
 //   activa      -> vence en más de 30 días
 //   por_vencer  -> vence en 30 días o menos (pero aún no vence)

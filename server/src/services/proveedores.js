@@ -16,7 +16,7 @@
 // lista blanca. Así el día que alguien agregue una columna a 'fianzas', se
 // entera aquí y no en la pantalla de un cliente.
 import db from '../db.js';
-import { estadoCumplimiento, daysUntil, todayISO } from '../lib/dates.js';
+import { estadoCumplimiento, daysUntil, todayISO, VENTANA_KPI_DIAS } from '../lib/dates.js';
 import { ALCANCE, JOIN_PADRON, SQL_DOCS_DEL_CONTRATANTE } from '../lib/permisos.js';
 import { conRequisitos } from './partidas.js';
 
@@ -128,6 +128,21 @@ const DE_MEJOR_A_PEOR = ['cubierta', 'por_vencer', 'sin_contratista', 'incomplet
 // ¿Está viva y cubriendo hoy? Se pregunta en tres lugares y tenía que ser una
 // sola función.
 const cubreHoy = (f) => f.clase !== 'previo' && (f.estado === 'activa' || f.estado === 'por_vencer');
+
+// La obra que hay que renovar pronto, para el KPI. Mira a 60 días y no al
+// estado 'por_vencer' (30) por lo que dice VENTANA_KPI_DIAS: el número de
+// arriba es para planear, el chip de la fila es para correr.
+//
+// Se exige que HOY esté cubierta a propósito. Una obra incompleta ya se cuenta
+// en el KPI de al lado; si además entrara aquí, los dos números sumarían más
+// obras de las que hay y el contratante no sabría cuál creerle.
+const obraPorVencerPronto = (o) => {
+  if (o.estado_cobertura !== 'cubierta' && o.estado_cobertura !== 'por_vencer') return false;
+  const dias = o.fianzas.filter(cubreHoy)
+    .map((f) => f.dias_para_vencer)
+    .filter((d) => d !== null && d >= 0);
+  return dias.length > 0 && Math.min(...dias) <= VENTANA_KPI_DIAS;
+};
 
 // El cumplimiento de una PARTIDA, que es lo único que puede contestar de verdad
 // "¿está cubierta?".
@@ -486,7 +501,7 @@ export async function panoramaDelContratante(contratanteId) {
     proveedores: proveedores.length,
     obras_vivas: vivas.length,
     obras_cubiertas: vivas.filter((o) => o.estado_cobertura === 'cubierta').length,
-    obras_por_vencer: vivas.filter((o) => o.estado_cobertura === 'por_vencer').length,
+    obras_por_vencer: vivas.filter(obraPorVencerPronto).length,
     obras_descubiertas: vivas.filter((o) => obraDescubierta(o.estado_cobertura)).length,
     proveedores_en_falta: proveedores.filter((p) => p.obras_descubiertas > 0).length,
     // La cobertura vigente a favor de este contratante, sumando sus obras vivas.

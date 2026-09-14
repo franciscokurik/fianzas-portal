@@ -145,6 +145,22 @@ test('al fiado se le muestra el previo marcado, pero fuera de sus cifras', async
   assert.equal(metricas.lineas[0].comprometido, MONTO);
 });
 
+// El KPI del fiado mira la misma ventana ancha que el del contratante (60 días,
+// VENTANA_KPI_DIAS) y no el estado 'por_vencer' de la póliza, que sigue en 30.
+// El aviso por correo se queda con los 30: es la prueba de aquí abajo.
+test('el KPI de "por vencer" del fiado cuenta a 60 días', async () => {
+  const enDias = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+
+  await memoria.query('UPDATE fianzas SET fecha_vigencia = $1', [enDias(45)]);
+  const aMedio = await (await pedir('/api/dashboard', cliente)).json();
+  assert.equal(aMedio.metricas.fianzas_por_vencer, 1,
+    'a 45 días ya hay que ponerse a renovar; el previo no cuenta porque no hay qué renovar');
+
+  await memoria.query('UPDATE fianzas SET fecha_vigencia = $1', [enDias(75)]);
+  const lejos = await (await pedir('/api/dashboard', cliente)).json();
+  assert.equal(lejos.metricas.fianzas_por_vencer, 0);
+});
+
 test('el previo no dispara avisos de vencimiento', async () => {
   // Se le pone vigencia dentro de la ventana de 30 días a los dos registros:
   // el aviso tiene que salir solo por la póliza emitida.

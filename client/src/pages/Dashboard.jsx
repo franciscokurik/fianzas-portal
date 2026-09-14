@@ -37,7 +37,7 @@ export default function Dashboard() {
   const m = data?.metricas;
   const a = data?.alertas;
   const pendientes = [];
-  if (m?.fianzas_por_vencer_30 > 0) pendientes.push(`${m.fianzas_por_vencer_30} fianza(s) por vencer`);
+  if (m?.fianzas_por_vencer > 0) pendientes.push(`${m.fianzas_por_vencer} fianza(s) por vencer`);
   if (a?.documentos_pendientes > 0) pendientes.push(`${a.documentos_pendientes} documento(s) faltante(s)`);
   if (a?.papeleria_pendiente > 0) pendientes.push(`${a.papeleria_pendiente} solicitud(es) de papelería`);
 
@@ -112,8 +112,8 @@ export default function Dashboard() {
               de su recibo; la neta va abajo para cuadrar con la afianzadora. */}
           <Kpi tone="violet" label="Prima total pagada" value={mxn(m?.suma_prima_total)}
                sub={m ? `prima neta ${mxn(m.suma_prima_neta)}` : 'lo que pagas por tus fianzas'} />
-          <Kpi tone="amber" label="Por vencer (< 30 días)" value={m?.fianzas_por_vencer_30 ?? '—'}
-               sub={m ? (m.fianzas_por_vencer_30 > 0
+          <Kpi tone="amber" label="Por vencer (< 60 días)" value={m?.fianzas_por_vencer ?? '—'}
+               sub={m ? (m.fianzas_por_vencer > 0
                  ? 'conviene renovarlas ya'
                  : 'ninguna renovación urgente') : null} />
         </div>

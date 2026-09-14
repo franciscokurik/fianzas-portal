@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth, requireFiado } from '../auth/middleware.js';
-import { estadoFianza } from '../lib/dates.js';
+import { estadoFianza, daysUntil, VENTANA_KPI_DIAS } from '../lib/dates.js';
 
 const router = Router();
 
@@ -27,7 +27,7 @@ router.get('/', requireAuth, requireFiado, async (req, res) => {
     .get(clientId)).c;
 
   let activas = 0;
-  let porVencer30 = 0;
+  let porVencerKpi = 0;
   let sumaPrimaNeta = 0;       // la tarifa de la afianzadora
   let sumaPrimaTotal = 0;      // lo que el fiado PAGA (neta + derecho + IVA)
   let montoAfianzadoTotal = 0; // lo que las fianzas CUBREN (vigentes)
@@ -46,7 +46,12 @@ router.get('/', requireAuth, requireFiado, async (req, res) => {
         (comprometidoPorAfi.get(f.afianzadora_id) || 0) + (f.monto_afianzado || 0)
       );
     }
-    if (estado === 'por_vencer') porVencer30 += 1;
+    // A 60 días y no al estado 'por_vencer' (30): el KPI se lee para planear
+    // renovaciones, y con un mes de aviso ya no da tiempo de mover una.
+    const diasRestantes = daysUntil(f.fecha_vigencia);
+    if (diasRestantes !== null && diasRestantes >= 0 && diasRestantes <= VENTANA_KPI_DIAS) {
+      porVencerKpi += 1;
+    }
   }
 
   // Líneas de crédito por afianzadora del cliente
@@ -103,7 +108,7 @@ router.get('/', requireAuth, requireFiado, async (req, res) => {
       monto_afianzado_total: montoAfianzadoTotal,
       suma_prima_neta: sumaPrimaNeta,
       suma_prima_total: sumaPrimaTotal,
-      fianzas_por_vencer_30: porVencer30,
+      fianzas_por_vencer: porVencerKpi,
       proyectos_activos: proyectosActivos,
     },
     alertas: {
