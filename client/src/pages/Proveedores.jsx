@@ -197,7 +197,10 @@ export default function Proveedores() {
           )}
           <Kpi tone="emerald" label="Obras con fianza" value={m?.obras_cubiertas ?? '—'}
                sub="fianza emitida y vigente" />
-          <Kpi tone="amber" label="Por vencer (< 30 días)" value={m?.obras_por_vencer ?? '—'} />
+          <Kpi tone="amber" label="Por vencer (< 30 días)" value={m?.obras_por_vencer ?? '—'}
+               sub={m ? (m.obras_por_vencer > 0
+                 ? 'pídele la renovación al proveedor'
+                 : 'ninguna renovación urgente') : null} />
           {/* Es la cobertura A TU FAVOR: lo que las fianzas vigentes de tus
               proveedores cubren hoy. No es dinero tuyo ni un pasivo tuyo. */}
           <Kpi tone="sky" label="Cobertura a tu favor" value={mxn(m?.monto_afianzado)}

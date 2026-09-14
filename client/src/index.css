@@ -217,7 +217,6 @@ body {
   min-height: 132px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   padding: 17px 18px 18px !important;
   background: #ffffff !important;
   border: 1px solid var(--line) !important;
@@ -239,6 +238,9 @@ body {
 
 .portal-kpi-label {
   max-width: calc(100% - 24px);
+  /* Dos renglones reservados: sin esto, un rótulo que cae a una sola línea
+     sube su cifra y la fila de KPI queda escalonada. */
+  min-height: 2.7em;
   color: #555555 !important;
   font-size: 9px !important;
   line-height: 1.35;
@@ -255,7 +257,10 @@ body {
 }
 
 .portal-kpi-sub {
-  margin-top: 8px !important;
+  /* Al pie de la tarjeta, no repartido: antes el space-between del contenedor
+     empujaba la cifra hasta abajo en las tarjetas sin este renglón. */
+  margin-top: auto !important;
+  padding-top: 8px;
   color: #999999 !important;
   font-size: 9px !important;
   line-height: 1.35;

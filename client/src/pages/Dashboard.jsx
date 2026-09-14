@@ -112,7 +112,10 @@ export default function Dashboard() {
               de su recibo; la neta va abajo para cuadrar con la afianzadora. */}
           <Kpi tone="violet" label="Prima total pagada" value={mxn(m?.suma_prima_total)}
                sub={m ? `prima neta ${mxn(m.suma_prima_neta)}` : 'lo que pagas por tus fianzas'} />
-          <Kpi tone="amber" label="Por vencer (< 30 días)" value={m?.fianzas_por_vencer_30 ?? '—'} />
+          <Kpi tone="amber" label="Por vencer (< 30 días)" value={m?.fianzas_por_vencer_30 ?? '—'}
+               sub={m ? (m.fianzas_por_vencer_30 > 0
+                 ? 'conviene renovarlas ya'
+                 : 'ninguna renovación urgente') : null} />
         </div>
 
         {/* Líneas de crédito por afianzadora */}
