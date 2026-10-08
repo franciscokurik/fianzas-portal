@@ -3,8 +3,8 @@ import {
   LogOut, Building2, Plus, Save, Download,
   Users, FileText, Files, CheckCircle2, UserPlus, AlertTriangle,
   CreditCard, Trash2, Briefcase, Pencil, X, Bell, ListChecks, Check,
-  Paperclip, Upload, FileDown, Mail, KeyRound, UserCog, ShieldCheck, Link2, Layers,
-  Settings,
+  Paperclip, Upload, FileDown, Mail, KeyRound, UserCog, ShieldCheck, Link2,
+  Settings, ChevronRight,
 } from 'lucide-react';
 import { api, getToken, subirACloudinary } from '../api.js';
 import { useAuth } from '../auth.jsx';
@@ -21,6 +21,68 @@ const btnPrimary =
   'flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50';
 const btnSecondary =
   'flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300';
+
+// Los grupos en que se pintan los pendientes, en este orden. El tono de cada
+// pendiente (lib.jsx) dice a qué grupo va. Se pinta UNA etiqueta por grupo y el
+// texto de cada pendiente en gris: antes cada chip llevaba su propio color y con
+// seis encendidos la pantalla parecía un semáforo descompuesto.
+const GRUPOS_PENDIENTE = [
+  { tono: 'rose',   label: 'Atender ya',    punto: 'bg-rose-500',   texto: 'text-rose-700' },
+  { tono: 'amber',  label: 'Pronto',        punto: 'bg-amber-500',  texto: 'text-amber-700' },
+  { tono: 'slate',  label: 'Por completar', punto: 'bg-slate-400',  texto: 'text-slate-500' },
+  { tono: 'violet', label: 'En trámite',    punto: 'bg-slate-300',  texto: 'text-slate-500' },
+];
+
+// La marca de cada renglón de la lista de clientes, por tono.
+const TONO_ALERTA = {
+  rose:  'bg-rose-50 text-rose-700 border-rose-200',
+  amber: 'bg-amber-50 text-amber-800 border-amber-200',
+};
+
+// Lo que cada renglón de la lista de clientes tiene que decir, de más a menos
+// grave. Solo lo que pide moverse: vencido, por vencer, recordatorios y
+// papelería. El expediente incompleto NO entra aquí a propósito: le falta algún
+// papel a casi todos los fiados, así que prendía la marca en todos los
+// renglones y la marca dejó de significar algo. Se sigue viendo dentro del
+// cliente, en "Pronto".
+//
+// Es la misma regla para la marca, para "Para atender" y para el aviso del
+// buscador: escrita una vez, no pueden discrepar.
+function alertasDelCliente(c) {
+  const a = [];
+  if (c.tipo === 'contratante') {
+    if (c.obras_descubiertas > 0) {
+      a.push({ tono: 'rose', corto: `${c.obras_descubiertas} sin fianza`,
+               texto: `${c.obras_descubiertas} contrato(s) sin fianza completa` });
+    }
+    return a;
+  }
+  if (c.fianzas_vencidas > 0) {
+    a.push({ tono: 'rose', corto: `${c.fianzas_vencidas} vencida(s)`,
+             texto: `${c.fianzas_vencidas} póliza(s) vencida(s)` });
+  }
+  if (c.recordatorios_pendientes > 0) {
+    a.push({ tono: 'amber', corto: `${c.recordatorios_pendientes} recordatorio(s)`,
+             texto: `${c.recordatorios_pendientes} recordatorio(s) para esta semana` });
+  }
+  if (c.fianzas_por_vencer > 0) {
+    a.push({ tono: 'amber', corto: `${c.fianzas_por_vencer} por vencer`,
+             texto: `${c.fianzas_por_vencer} póliza(s) vencen en 30 días o menos` });
+  }
+  if (c.papeleria_pendiente > 0) {
+    a.push({ tono: 'amber', corto: 'papelería',
+             texto: `${c.papeleria_pendiente} solicitud(es) de papelería pendiente(s)` });
+  }
+  return a;
+}
+
+// "VENCIDO 30D" se leía como una póliza vencida hace un mes, y lo que estaba
+// atrasado era el RECORDATORIO. "EN 0D" quería decir hoy.
+function cuandoRecordatorio(dias) {
+  if (dias < 0) return { texto: `Atrasado ${Math.abs(dias)} día(s)`, cls: 'bg-rose-50 text-rose-700' };
+  if (dias === 0) return { texto: 'Hoy', cls: 'bg-amber-50 text-amber-800' };
+  return { texto: `En ${dias} día(s)`, cls: 'bg-slate-100 text-slate-600' };
+}
 
 export default function Admin() {
   const { user, logout } = useAuth();
@@ -70,8 +132,14 @@ export default function Admin() {
   useEffect(() => {
     cargarClientes(); cargarAfianzadoras(); cargarTipos();
     cargarRecordatorios(); cargarTiposDoc();
-    // Al vendedor estas dos le responden 403 y solo le llenarían la pantalla de
-    // errores por algo que no necesita.
+    // Al vendedor no se le piden, y no por lo mismo cada una: /usuarios/internos
+    // sí le contesta 403 (es soloOperador), pero /documentos-requeridos le
+    // contestaría 200 —es un catálogo de la casa, no dato de nadie— y aun así no
+    // le sirve de nada. Se salta la petición, no el permiso.
+    //
+    // 'internos' se carga para todo puedeOperar aunque la tarjeta de Personal
+    // sea solo del admin: el operador la necesita para el selector de vendedor
+    // del alta de cliente.
     if (puedeOperar) { cargarDocsRequeridos(); cargarInternos(); }
   }, [puedeOperar]);
 
@@ -101,13 +169,23 @@ export default function Admin() {
   // ya no está viendo.
   const abrirCliente = (id) => { setAltaCliente(false); abrirDetalle(id); };
 
-  // ¿Este cliente tiene algo que atender? Es la misma condición que enciende el
-  // punto ámbar del renglón, escrita una vez para que el filtro y el punto no
-  // puedan discrepar.
-  const tienePendiente = (c) => (c.tipo === 'contratante'
-    ? c.obras_descubiertas > 0
-    : c.fianzas_vencidas > 0 || c.docs_pendientes > 0 || c.papeleria_pendiente > 0
-      || c.fianzas_por_vencer > 0 || c.recordatorios_pendientes > 0);
+  // ¿Este cliente tiene algo que atender? La misma regla que pinta la marca del
+  // renglón (alertasDelCliente), para que el filtro y la marca no discrepen.
+  const tienePendiente = (c) => alertasDelCliente(c).length > 0;
+
+  // La bandeja es el panel sin cliente abierto. Su número es lo que hay que
+  // mover hoy: recordatorios más clientes con alguna marca.
+  const enBandeja = !altaCliente && !detalle;
+  const verBandeja = () => { setAltaCliente(false); setSel(null); setDetalle(null); };
+  const totalBandeja = recordatorios.length + clientes.filter(tienePendiente).length;
+
+  // Atender un recordatorio mueve también la marca del cliente en la lista.
+  // Antes no se recargaba la lista y el renglón seguía diciendo "2
+  // recordatorio(s)" con los dos ya atendidos.
+  const recordatorioAtendido = () => {
+    cargarRecordatorios(); recargarDetalle(); cargarClientes();
+    flash('Recordatorio marcado como atendido');
+  };
 
   const termino = busca.trim().toLowerCase();
   const visibles = termino
@@ -130,7 +208,11 @@ export default function Admin() {
               <small>{esVendedor ? 'CARTERA DE CLIENTES' : 'ADMINISTRACIÓN DE FIANZAS'}</small>
             </span>
           </div>
-          <div className="portal-topbar-actions">
+          {/* Quién está adentro va aquí y no en un titular: la barra ya dice
+              dónde estás, y el titular de 35px se comía el primer pantallazo
+              para repetirlo. */}
+          <div className="portal-topbar-actions flex items-center gap-3">
+            <span className="portal-user-chip text-sm text-slate-500 hidden sm:inline">{user?.nombre}</span>
             <button onClick={logout} className={`${btnSecondary} portal-logout`}>
               <LogOut className="h-3.5 w-3.5" /> Salir
             </button>
@@ -139,31 +221,21 @@ export default function Admin() {
       </header>
 
       <main className="portal-main max-w-[1400px] mx-auto px-6 py-6">
-        <div className="portal-page-heading flex flex-wrap items-end justify-between gap-3 mb-5">
-          <div>
-            <p className="portal-eyebrow">{esVendedor ? 'Mi cartera' : 'Centro de operaciones'}</p>
-            <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-indigo-600" />
-              {esVendedor ? 'Mis clientes' : 'Panel de administración'}
-            </h1>
-            <p className="text-sm text-slate-500 mt-0.5">
-              {user?.nombre} · {esVendedor
-                ? 'proyectos, pólizas y documentos de tus clientes'
-                : 'gestión de clientes, proyectos y pólizas'}
-            </p>
-          </div>
-        </div>
-
         {avisoOp && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-start gap-2 mb-4">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
             <span className="flex-1">{avisoOp}</span>
-            <button onClick={() => setAvisoOp('')} className="text-amber-500 hover:text-amber-800 shrink-0">✕</button>
+            <button onClick={() => setAvisoOp('')} className="text-amber-500 hover:text-amber-800 shrink-0">
+              <X className="h-4 w-4" />
+            </button>
           </div>
         )}
 
+        {/* Flotando y no arriba del contenido: como banner empujaba toda la
+            pantalla hacia abajo tres segundos y luego la regresaba, justo
+            cuando uno iba a darle clic a algo. */}
         {msg && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 flex items-center gap-2 mb-4">
+          <div className="fixed bottom-5 right-5 z-40 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-sm text-emerald-700 flex items-center gap-2 shadow-sm">
             <CheckCircle2 className="w-4 h-4 shrink-0" /> {msg}
           </div>
         )}
@@ -185,11 +257,11 @@ export default function Admin() {
           </div>
         )}
 
-        <Recordatorios
-          recordatorios={recordatorios}
-          onAbrirCliente={abrirDetalle}
-          onAtendido={() => { cargarRecordatorios(); recargarDetalle(); flash('Recordatorio marcado como atendido'); }}
-        />
+        {/* Los recordatorios ya no van en una franja fija encima de todo: viven
+            en "Para atender" (todos) y dentro de cada cliente (los suyos). La
+            franja se veía igual estuviera uno donde estuviera, empujaba la
+            pantalla, y con el cliente abierto competía con sus propios
+            pendientes. */}
 
         {/* Cuatro columnas y a partir de xl, no tres desde lg: el detalle lleva
             la tabla de fianzas, que son diez columnas y pide ~805px. Con un
@@ -217,6 +289,22 @@ export default function Admin() {
                   </button>
                 )}
               </div>
+
+              {/* La bandeja: lo de hoy en toda la cartera. Va como primer
+                  renglón de la lista porque es el lugar al que se regresa
+                  después de atender a un cliente. */}
+              <button
+                onClick={verBandeja}
+                className={`w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm border-b border-slate-100 transition-colors border-l-[3px] ${
+                  enBandeja ? 'bg-slate-50 border-l-slate-800 font-semibold text-slate-800' : 'border-l-transparent text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <Bell className="h-4 w-4 text-slate-500 shrink-0" />
+                <span className="flex-1">Para atender</span>
+                {totalBandeja > 0 && (
+                  <span className="text-[11px] tabular-nums font-semibold text-slate-600">{totalBandeja}</span>
+                )}
+              </button>
 
               {clientes.length > 3 && (
                 <div className="px-3 py-2 border-b border-slate-100">
@@ -247,58 +335,46 @@ export default function Admin() {
                   ahora que el índice queda fijo en pantalla. */}
               <div className="divide-y divide-slate-100 max-h-[65vh] xl:max-h-[calc(100vh-260px)] overflow-y-auto">
                 {visibles.map((c) => {
-                  const esContratante = c.tipo === 'contratante';
-                  // Al contratante lo único que se le alarma es que alguno de
-                  // sus proveedores tenga una obra sin fianza vigente: no tiene
-                  // pólizas propias, ni expediente, ni papelería.
-                  const alerta = esContratante
-                    ? c.obras_descubiertas > 0
-                    : c.fianzas_vencidas > 0 || c.docs_pendientes > 0
-                      || c.papeleria_pendiente > 0 || c.fianzas_por_vencer > 0
-                      || c.recordatorios_pendientes > 0;
+                  // Una sola marca por renglón: lo más grave que tiene, en
+                  // palabras, y "+n" si hay más. Antes eran un punto ámbar
+                  // —prendido en TODOS— y pedazos de texto en cuatro colores.
+                  // El detalle completo va en el title y al abrir el cliente.
+                  const alertas = alertasDelCliente(c);
+                  const principal = alertas[0];
                   return (
                     <button
                       key={c.id}
                       onClick={() => abrirCliente(c.id)}
                       className={`w-full text-left px-4 py-2.5 hover:bg-slate-50/60 ${sel === c.id ? 'bg-indigo-50/60' : ''}`}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-slate-700 flex items-center gap-1.5 min-w-0">
-                          <span className="truncate">{c.razon_social}</span>
-                          <TipoClienteBadge tipo={c.tipo} />
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-sm font-medium text-slate-700 truncate" title={c.razon_social}>
+                          {c.razon_social}
                         </span>
-                        {alerta && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />}
+                        <TipoClienteBadge tipo={c.tipo} />
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
-                        {esContratante ? (
-                          <>
-                            {c.total_proveedores} proveedor(es) en su padrón
-                            {c.obras_descubiertas > 0 && (
-                              <span className="text-rose-600"> · {c.obras_descubiertas} obra(s) sin fianza vigente</span>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            {c.total_proyectos} proyectos · {c.total_fianzas} fianzas · {c.fianzas_vencidas} vencidas
-                            {c.total_previos > 0 && (
-                              <span className="text-violet-600"> · {c.total_previos} previo(s)</span>
-                            )}
-                            {c.recordatorios_pendientes > 0 && (
-                              <span className="text-amber-600"> · {c.recordatorios_pendientes} recordatorio(s)</span>
-                            )}
-                            {c.total_contratantes > 0 && (
-                              <span className="text-sky-600"> · le surte a {c.total_contratantes} contratante(s)</span>
-                            )}
-                          </>
+                      {/* La marca abre la segunda línea y no cierra la primera:
+                          a la derecha del nombre le cortaba la razón social, y
+                          aquí quedan todas alineadas en columna, que es como se
+                          recorre la lista buscando qué atender. Lo que tiene va
+                          después, en gris. */}
+                      <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                        {principal && (
+                          <span
+                            className={`shrink-0 text-[10px] font-medium px-1.5 py-px rounded border tabular-nums whitespace-nowrap ${TONO_ALERTA[principal.tono]}`}
+                            title={alertas.map((a) => a.texto).join('\n')}
+                          >
+                            {principal.corto}{alertas.length > 1 && ` +${alertas.length - 1}`}
+                          </span>
                         )}
-                      </p>
-                      {/* El vendedor titular de la cuenta. */}
-                      <p className="text-[11px] mt-0.5">
-                        {c.vendedor_nombre
-                          ? <span className="text-slate-400">{c.vendedor_nombre}</span>
-                          : <span className="text-slate-300">Sin vendedor</span>}
-                        <span className="text-slate-300"> · {c.total_usuarios} usuario(s)</span>
-                      </p>
+                        <span className="text-[11px] text-slate-400 tabular-nums truncate">
+                          {c.tipo === 'contratante'
+                            ? `${c.total_proveedores} proveedor(es)`
+                            : `${c.total_proyectos} obra(s) · ${c.total_fianzas} fianza(s)`}
+                          {' · '}
+                          {c.vendedor_nombre || 'Sin vendedor'}
+                        </span>
+                      </div>
                     </button>
                   );
                 })}
@@ -360,13 +436,20 @@ export default function Admin() {
                 }}
               />
             ) : !detalle ? (
-              <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-400">
-                {clientes.length
-                  ? 'Selecciona un cliente para ver y gestionar su información.'
-                  : esVendedor
+              clientes.length ? (
+                <ParaAtender
+                  recordatorios={recordatorios}
+                  clientes={clientes}
+                  onAbrirCliente={abrirCliente}
+                  onAtendido={recordatorioAtendido}
+                />
+              ) : (
+                <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-400">
+                  {esVendedor
                     ? 'Aún no tienes clientes asignados. Te los asigna un operador.'
                     : 'Todavía no hay clientes. Da de alta el primero desde "Agregar".'}
-              </div>
+                </div>
+              )
             ) : (
               <DetalleCliente
                 // Remonta el detalle al cambiar de cliente. Sin esto, el
@@ -381,6 +464,8 @@ export default function Admin() {
                 vendedores={vendedores}
                 clientes={clientes}
                 tiposDocContratante={tiposDocContratante}
+                recordatorios={recordatorios.filter((r) => r.client_id === detalle.cliente.id)}
+                onRecordatorioAtendido={recordatorioAtendido}
                 avisar={avisar}
                 onEliminado={() => {
                   setSel(null);
@@ -405,55 +490,147 @@ export default function Admin() {
 
 /* --------------------------------------------------------------------------
    Recordatorios internos (solo Fortex; el cliente no los ve)
-   -------------------------------------------------------------------------- */
+   --------------------------------------------------------------------------
+   Un renglón por recordatorio, y la NOTA primero: es lo que hay que hacer
+   ("solicitar liberación a Berkley"). La póliza, la obra y la afianzadora van
+   después, en gris, como referencia. Antes era al revés y la tarea quedaba al
+   final del renglón, después de cuatro datos que no se leían. */
 
-function Recordatorios({ recordatorios, onAbrirCliente, onAtendido }) {
-  if (!recordatorios.length) return null;
+function RenglonRecordatorio({ r, conCliente, onAbrirCliente, onAtendido }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const cuando = cuandoRecordatorio(r.dias_restantes);
 
-  async function atender(id) {
-    await api.put(`/admin/fianzas/${id}/recordatorio`, { atendido: true });
-    onAtendido();
+  async function atender() {
+    setError('');
+    setBusy(true);
+    try {
+      await api.put(`/admin/fianzas/${r.id}/recordatorio`, { atendido: true });
+      onAtendido();
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="bg-white border border-amber-200 rounded-lg overflow-hidden mb-4">
-      <div className="px-4 py-2.5 border-b border-amber-200 bg-amber-50 flex items-center gap-2">
-        <Bell className="w-4 h-4 text-amber-600" />
-        <h3 className="text-sm font-semibold text-amber-800">
-          Recordatorios ({recordatorios.length})
-        </h3>
-        <span className="text-[11px] text-amber-700/70 ml-auto">Uso interno · no visible para el cliente</span>
+    <div className="flex items-start gap-3 px-4 py-2.5">
+      <span className={`shrink-0 w-[6.5rem] text-center text-[10px] font-medium px-1.5 py-0.5 rounded tabular-nums ${cuando.cls}`}>
+        {cuando.texto}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-slate-800">
+          {r.nota_recordatorio || 'Dar seguimiento a esta póliza'}
+        </p>
+        <p className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-1.5">
+          {conCliente && (
+            <>
+              <button
+                onClick={() => onAbrirCliente(r.client_id)}
+                className="text-slate-600 font-medium hover:underline"
+              >
+                {r.razon_social}
+              </button>
+              <span>·</span>
+            </>
+          )}
+          <ClaseBadge clase={r.clase} />
+          <span className="font-mono">{r.numero_poliza}</span>
+          {r.proyecto_nombre && <span>· {r.proyecto_nombre}</span>}
+          <span>· {r.afianzadora_nombre}</span>
+        </p>
+        {error && <p className="text-[11px] text-rose-600 mt-0.5">{error}</p>}
       </div>
-      <div className="divide-y divide-slate-100">
-        {recordatorios.map((r) => (
-          <div key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm hover:bg-amber-50/30">
-            <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium shrink-0 ${
-              r.dias_restantes < 0 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
-            }`}>
-              {r.dias_restantes < 0 ? `Vencido ${Math.abs(r.dias_restantes)}d` : `En ${r.dias_restantes}d`}
-            </span>
-            <button
-              onClick={() => onAbrirCliente(r.client_id)}
-              className="text-slate-700 font-medium hover:text-indigo-700 hover:underline"
-            >
-              {r.razon_social}
-            </button>
-            <span className="text-xs text-slate-500 flex items-center gap-1.5">
-              <ClaseBadge clase={r.clase} />
-              <span className="font-mono">{r.numero_poliza}</span>
-              <span>
-                {r.proyecto_nombre && `· ${r.proyecto_nombre} `}· {r.afianzadora_nombre}
-              </span>
-            </span>
-            {r.nota_recordatorio && (
-              <span className="text-xs text-slate-600 basis-full sm:basis-auto flex-1">{r.nota_recordatorio}</span>
-            )}
-            <button onClick={() => atender(r.id)} className={`${btnSecondary} ml-auto`}>
-              <Check className="h-3.5 w-3.5" /> Atendido
-            </button>
-          </div>
-        ))}
+      <button onClick={atender} disabled={busy} className={`${btnSecondary} shrink-0`}>
+        <Check className="h-3.5 w-3.5" /> {busy ? 'Guardando…' : 'Atendido'}
+      </button>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Para atender: el panel sin cliente abierto
+   --------------------------------------------------------------------------
+   Lo que hay que mover hoy en toda la cartera, en dos listas: los recordatorios
+   de la casa y los clientes con alguna marca, de lo más grave a lo menos. La
+   lista de la izquierda va por nombre; esta va por urgencia. Antes este panel
+   decía "Selecciona un cliente" y los recordatorios vivían en una franja fija
+   arriba de todo. */
+
+const PESO_TONO = { rose: 0, amber: 1 };
+
+function ParaAtender({ recordatorios, clientes, onAbrirCliente, onAtendido }) {
+  const conAlertas = clientes
+    .map((c) => ({ c, alertas: alertasDelCliente(c) }))
+    .filter((x) => x.alertas.length)
+    .sort((x, y) => (PESO_TONO[x.alertas[0].tono] - PESO_TONO[y.alertas[0].tono])
+      || x.c.razon_social.localeCompare(y.c.razon_social, 'es'));
+
+  const encabezado = (titulo, nota) => (
+    <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-baseline gap-2">
+      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{titulo}</p>
+      {nota && <p className="text-[11px] text-slate-400">{nota}</p>}
+    </div>
+  );
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+        <Bell className="w-4 h-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Para atender</h3>
       </div>
+
+      {!recordatorios.length && !conAlertas.length ? (
+        <p className="px-4 py-10 text-center text-sm text-slate-400">
+          Nada pendiente en la cartera por ahora. Abre un cliente de la lista para ver su información.
+        </p>
+      ) : (
+        <div className="divide-y divide-slate-200">
+          {recordatorios.length > 0 && (
+            <div>
+              {encabezado(`Recordatorios (${recordatorios.length})`, 'uso interno, el cliente no los ve')}
+              <div className="divide-y divide-slate-100">
+                {recordatorios.map((r) => (
+                  <RenglonRecordatorio
+                    key={r.id}
+                    r={r}
+                    conCliente
+                    onAbrirCliente={onAbrirCliente}
+                    onAtendido={onAtendido}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {conAlertas.length > 0 && (
+            <div>
+              {encabezado(`Clientes con pendientes (${conAlertas.length})`)}
+              <div className="divide-y divide-slate-100">
+                {conAlertas.map(({ c, alertas }) => (
+                  <button
+                    key={c.id}
+                    onClick={() => onAbrirCliente(c.id)}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-slate-50 transition-colors group"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      alertas[0].tono === 'rose' ? 'bg-rose-500' : 'bg-amber-500'
+                    }`} />
+                    <span className="w-64 shrink-0 min-w-0 flex items-center gap-1.5">
+                      <span className="text-xs font-medium text-slate-800 truncate">{c.razon_social}</span>
+                      <TipoClienteBadge tipo={c.tipo} />
+                    </span>
+                    <span className="flex-1 min-w-0 text-xs text-slate-600 truncate">
+                      {alertas.map((a) => a.texto).join(' · ')}
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-600 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -698,6 +875,7 @@ function CatalogoDocumentos({ tipos, onChange, flash, embebido }) {
 
 function DetalleCliente({
   detalle, esAdmin, puedeOperar, vendedores, clientes = [], tiposDocContratante = [],
+  recordatorios = [], onRecordatorioAtendido,
   afianzadoras, tipos, tiposDoc, onChange, onEliminado, flash, avisar,
 }) {
   const {
@@ -734,10 +912,15 @@ function DetalleCliente({
     + papeleria.filter((p) => p.estado === 'pendiente').length;
   const usuariosActivos = usuarios.filter((u) => u.activo).length;
 
-  // Un chip lleva a su vista. Para el contratante no hay pestañas —las dos
-  // columnas se ven a la vez— así que solo hace falta en el fiado.
+  // Un chip lleva a su vista. El contratante no tiene pestañas —todo está en una
+  // sola columna—, así que ahí el chip baja hasta la sección de la que habla.
   const irA = (destino) => {
-    if (!esContratante && ['obras', 'papeles', 'accesos'].includes(destino)) setVista(destino);
+    if (esContratante) {
+      document.getElementById(destino === 'padron' ? 'ct-padron' : 'ct-contratos')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (['obras', 'papeles', 'accesos'].includes(destino)) setVista(destino);
   };
   // Los contratantes que se le pueden ligar a una obra. Sale de la lista que ya
   // está cargada: no hace falta otra ruta.
@@ -746,10 +929,9 @@ function DetalleCliente({
   const lineaTotal = lineas.reduce((s, l) => s + (l.linea_credito || 0), 0);
   const disponibleTotal = lineas.reduce((s, l) => s + (l.disponible || 0), 0);
   // Los previos quedan fuera de todas las cifras de dinero: son lo que se
-  // cotizó, no lo que la afianzadora emitió. Se cuentan aparte para saber
-  // cuántos están en trámite.
+  // cotizó, no lo que la afianzadora emitió. Cuántos van en trámite lo dicen
+  // los pendientes ("En trámite").
   const emitidas = fianzas.filter((f) => f.clase !== 'previo');
-  const previos = fianzas.length - emitidas.length;
   const afianzadoTotal = emitidas
     .filter((f) => f.estado !== 'vencida')
     .reduce((s, f) => s + (f.monto_afianzado || 0), 0);
@@ -881,33 +1063,33 @@ function DetalleCliente({
             <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {errorBaja}
           </div>
         )}
-        <div className="mt-2 flex flex-wrap gap-2">
+        {/* Aquí van los hechos y abajo las faltas. La de "Sin fianza vigente"
+            se fue a propósito: era la misma falta que el primer pendiente,
+            contada con otra palabra. Y "Previos" también: ya sale en "En
+            trámite", con el número. */}
+        <div className="mt-3 flex flex-wrap gap-x-8 gap-y-2">
           {esContratante ? (
             <>
-              <Pill label="Proveedores" valor={String(metricas?.proveedores ?? 0)}
+              <Dato label="Proveedores" valor={String(metricas?.proveedores ?? 0)}
                     ayuda="Empresas en su padrón: a quién le exige fianza" />
-              <Pill label="Obras vigentes" valor={String(metricas?.obras_vivas ?? 0)}
-                    ayuda="Obras de sus proveedores ligadas a él que todavía se juzgan (en proceso, terminadas o entregadas). Las cerradas y canceladas se listan pero no cuentan." />
-              <Pill label="Sin fianza vigente" valor={String(metricas?.obras_descubiertas ?? 0)}
-                    tono={metricas?.obras_descubiertas ? 'rose' : 'emerald'}
-                    ayuda="Obras sin ninguna póliza vigente registrada en Fortex. Es su lista de pendientes —y la de venta." />
-              <Pill label="Cobertura a su favor" valor={mxn(metricas?.monto_afianzado)} tono="sky"
+              <Dato label="Contratos activos" valor={String(metricas?.obras_vivas ?? 0)}
+                    ayuda="Contratos de sus proveedores ligados a él que todavía se juzgan (en proceso, terminados o entregados). Los cerrados y cancelados se listan pero no cuentan." />
+              <Dato label="Cobertura a su favor" valor={mxn(metricas?.monto_afianzado)}
                     ayuda="Suma de lo que cubren hoy las fianzas de sus proveedores" />
             </>
           ) : (
             <>
-              <Pill label="Línea total" valor={mxn(lineaTotal)} />
-              <Pill label="Disponible" valor={mxn(disponibleTotal)} tono="emerald" />
-              <Pill label="Monto afianzado" valor={mxn(afianzadoTotal)} tono="sky"
+              <Dato label="Línea total" valor={mxn(lineaTotal)} />
+              {/* En rojo solo si hay línea y ya no queda nada: en cero no le
+                  cabe otra fianza. Sin línea capturada, cero no es una alarma. */}
+              <Dato label="Disponible" valor={mxn(disponibleTotal)}
+                    alerta={lineaTotal > 0 && disponibleTotal <= 0} />
+              <Dato label="Afianzado vigente" valor={mxn(afianzadoTotal)}
                     ayuda="Suma de lo que cubren las fianzas vigentes. No incluye previos: todavía no se emiten." />
-              <Pill label="Prima total" valor={mxn(sumaPrimaTotal)} tono="violet"
+              <Dato label="Prima total" valor={mxn(sumaPrimaTotal)}
                     ayuda="Lo que el fiado paga: prima neta + derecho de póliza + IVA. Sin previos." />
-              <Pill label="Prima neta" valor={mxn(sumaPrimaNeta)}
+              <Dato label="Prima neta" valor={mxn(sumaPrimaNeta)}
                     ayuda="La tarifa de la afianzadora, sin derecho de póliza ni IVA" />
-              {previos > 0 && (
-                <Pill label="Previos" valor={String(previos)}
-                      ayuda="Capturados pero sin emitir: no cuentan en las cifras de arriba" />
-              )}
             </>
           )}
         </div>
@@ -945,66 +1127,65 @@ function DetalleCliente({
             })}
           </div>
         )}
+
+        {/* FUERA del switch a propósito: es lo que hace honesto tabular. Y
+            dentro de la tarjeta del cliente, no suelto debajo: quién es, cómo
+            anda y qué le falta se leen como una sola cosa. */}
+        <Pendientes
+          pendientes={pendientes}
+          recordatorios={recordatorios}
+          onIr={irA}
+          onRecordatorioAtendido={onRecordatorioAtendido}
+        />
       </div>
 
-      {/* FUERA del switch a propósito: es lo que hace honesto tabular. */}
-      <BarraPendientes pendientes={pendientes} onIr={irA} />
-
-      {/* El contratante NO se tabula, y es a propósito.
-          Sus dos mitades son dos pendientes de dos personas distintas que se
-          leen juntos: a la izquierda lo que él tiene que contratar, a la derecha
-          quién de sus proveedores quedó en falta. Y es lo que el atajo necesita
-          —se asigna el contratista a la izquierda y se comprueba a la derecha
-          sin perder de vista nada—. Partirlo en pestañas también escondería las
-          obras fuera de proyecto, que solo se ven de un lado.
-
-          Bajo 1280px se apila solo: primero proyectos, luego padrón. */}
+      {/* El contratante NO se tabula, y tampoco se parte en dos columnas.
+          Antes eran dos árboles de los MISMOS contratos —por proyecto a la
+          izquierda, por proveedor a la derecha— y el estado solo se veía de un
+          lado: se asignaba a la izquierda y había que ir a buscar a la derecha
+          si había quedado cubierto. Ahora cada contrato sale una sola vez, en su
+          partida y con su estado al lado, y el padrón de abajo habla de las
+          EMPRESAS (quiénes son, cómo andan, cuánto crédito les queda), no de
+          sus obras otra vez. Todo a lo ancho, de arriba abajo: qué pasa, con
+          quién, y quién entra al portal. */}
       {esContratante && (
-        <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-          <div className="xl:col-span-3 space-y-4">
-            <ProyectosDelContratante
-              contratanteId={cliente.id}
-              contratanteNombre={cliente.razon_social}
-              proyectos={proyectos}
-              proveedores={proveedores}
-              suspendidos={suspendidos}
-              clientes={clientes}
-              obrasInvisibles={obrasInvisibles}
-              tipos={tipos}
-              puedeLigarContratante={puedeOperar}
-              onChange={onChange}
-              flash={flash}
-              avisar={avisar}
-            />
-          </div>
+        <div className="space-y-4">
+          <ProyectosDelContratante
+            contratanteId={cliente.id}
+            contratanteNombre={cliente.razon_social}
+            proyectos={proyectos}
+            obras={obras}
+            proveedores={proveedores}
+            suspendidos={suspendidos}
+            clientes={clientes}
+            obrasInvisibles={obrasInvisibles}
+            tipos={tipos}
+            tiposDoc={tiposDocContratante}
+            descargar={descargarPorId}
+            puedeLigarContratante={puedeOperar}
+            onChange={onChange}
+            flash={flash}
+            avisar={avisar}
+          />
 
-          <div className="xl:col-span-2 space-y-4">
-            <PadronProveedores
-              contratanteId={cliente.id}
-              proveedores={proveedores}
-              suspendidos={suspendidos}
-              obras={obras}
-              clientes={clientes}
-              tiposDoc={tiposDocContratante}
-              descargar={descargarPorId}
-              puedeOperar={puedeOperar}
-              onChange={onChange}
-              flash={flash}
-            />
+          <PadronProveedores
+            contratanteId={cliente.id}
+            proveedores={proveedores}
+            suspendidos={suspendidos}
+            lineas={lineasProveedores}
+            clientes={clientes}
+            puedeOperar={puedeOperar}
+            onChange={onChange}
+            flash={flash}
+          />
 
-            {/* La línea de crédito de sus proveedores sale de dentro de
-                ProyectosDelContratante y se pone junto al padrón, que es de lo
-                que habla: es información por EMPRESA, no por proyecto. */}
-            <LineasDeLosProveedores lineas={lineasProveedores} puedeOperar={puedeOperar} />
-
-            <UsuariosCliente
-              clienteId={cliente.id}
-              usuarios={usuarios}
-              esAdmin={esAdmin}
-              onChange={onChange}
-              flash={flash}
-            />
-          </div>
+          <UsuariosCliente
+            clienteId={cliente.id}
+            usuarios={usuarios}
+            esAdmin={esAdmin}
+            onChange={onChange}
+            flash={flash}
+          />
         </div>
       )}
 
@@ -1138,9 +1319,10 @@ function PapeleriaCliente({ clienteId, papeleria = [], afianzadoras, descargar, 
    la misma puerta, porque al dar de alta la cuenta hay que capturarlos antes de
    que él entre por primera vez, y sin proyecto no hay a qué ligarle las obras.
 
-   Aquí se ve además lo que el portal del contratante NO le muestra: la línea de
-   crédito de cada proveedor y cuánto le queda disponible. Eso es de la empresa
-   del proveedor, no de este proyecto, y con eso se le negocia precio. */
+   Se pinta como UNA tabla: proyecto, partida y un renglón por contrato con su
+   estado y lo que le falta. Es la respuesta a "¿quién de sus contratistas no
+   está cubierto?" sin tener que cruzar con nada. El crédito de cada proveedor
+   —que el contratante no ve— va en el padrón, que habla de empresas. */
 
 /* --------------------------------------------------------------------------
    Las PARTIDAS de un proyecto de contratante, desde el panel
@@ -1484,25 +1666,194 @@ function AsignarContratista({
   );
 }
 
-function PartidasDelProyecto({
-  contratanteId, contratanteNombre, proyecto, tipos, nombreDe,
-  proveedores = [], suspendidos = [], clientes = [], obrasInvisibles = [],
-  puedeLigarContratante, onChange, flash, avisar,
+// Las columnas de la tabla de contratos, escritas una sola vez: el encabezado y
+// cada renglón las comparten, y así no se desalinean.
+const COLS_CONTRATOS =
+  'grid grid-cols-[minmax(0,13rem)_minmax(0,1fr)_7.5rem_7.5rem_2rem] gap-x-3';
+
+// Un botón de puro icono para las acciones de una partida. Tenue a propósito:
+// editar o borrar una partida es raro, y en cada renglón compite con el estado,
+// que es lo que se viene a ver.
+function BotonIcono({ title, onClick, peligro, children }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`p-0.5 rounded text-slate-300 transition-colors ${
+        peligro ? 'hover:text-rose-600' : 'hover:text-slate-700'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Lo que hay que hacer con un contrato, en palabras. El chip dice el estado y
+// esta línea dice QUÉ falta, que es lo único accionable: "Sin fecha" a secas no
+// le decía al operador que lo que falta es capturar un dato de Fortex, y "Sin
+// registro" no decía que ya hay dos previos en trámite.
+//
+// Solo para contratos vivos: a uno cerrado no hay cobertura que exigirle.
+function notaDelContrato(o) {
+  if (!o.viva) return null;
+  const falta = (o.faltantes || []).map((f) => f.tipo_fianza).join(' y ');
+  const previos = o.total_previos > 0 ? `${o.total_previos} previo(s) en trámite` : null;
+  const partes = {
+    sin_vigencia: ['Falta capturar la vigencia de su póliza', 'text-amber-700'],
+    vencida:      ['Su póliza ya venció', 'text-rose-600'],
+    incompleta:   [`Le falta ${falta}`, 'text-rose-600 font-medium'],
+    sin_fianza:   [falta ? `Le falta ${falta}` : null, 'text-rose-600 font-medium'],
+  }[o.estado_cobertura] || [null, 'text-slate-500'];
+  const texto = [partes[0], previos].filter(Boolean).join(' · ');
+  return texto ? { texto, cls: partes[1] } : null;
+}
+
+// La celda de la partida: nombre, monto y qué exige. Va solo en el primer
+// renglón de la partida; los demás contratos de la misma partida la dejan en
+// blanco, como en cualquier tabla agrupada.
+function CeldaPartida({ pa, conContratos, puedeLigar, onAsignar, onEditar, onBorrar }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex items-start gap-1">
+        <p className="text-xs font-medium text-slate-700 leading-snug flex-1 min-w-0">{pa.nombre}</p>
+        <div className="flex items-center shrink-0 -mt-0.5">
+          {/* Con contratista ya puesto, el atajo queda aquí para un segundo
+              contrato; sin él, va grande en la celda de al lado, que es donde
+              se ve el hueco. Al vendedor no se le ofrece: el servidor le
+              contestaría 403. */}
+          {conContratos && puedeLigar && (
+            <BotonIcono title="Asignar otro contratista a esta partida" onClick={onAsignar}>
+              <UserPlus className="h-3.5 w-3.5" />
+            </BotonIcono>
+          )}
+          <BotonIcono title="Editar partida" onClick={onEditar}>
+            <Pencil className="h-3.5 w-3.5" />
+          </BotonIcono>
+          <BotonIcono title="Borrar partida" onClick={onBorrar} peligro>
+            <Trash2 className="h-3.5 w-3.5" />
+          </BotonIcono>
+        </div>
+      </div>
+      {pa.monto_estimado > 0 && (
+        <p className="text-[11px] text-slate-400 tabular-nums">{mxn(pa.monto_estimado)}</p>
+      )}
+      {/* Sin esto la partida solo puede decir "tiene fianza", nunca "le falta
+          la de anticipo". La falta en sí va en el renglón del contratista, que
+          es a quien se le pide. */}
+      <p className="text-[11px] text-slate-500">
+        {pa.requisitos.length
+          ? <>exige {pa.requisitos.map((r) => r.tipo_fianza).join(', ')}</>
+          : <span className="text-amber-700">no dice qué fianzas exige</span>}
+      </p>
+    </div>
+  );
+}
+
+// Un contrato: quién lo hace, cómo está y qué le falta, con la carpeta del
+// contratante detrás del clip. Es el único lugar de la pantalla donde aparece;
+// antes salía también dentro del padrón y había que juntar las dos mitades.
+function FilaContrato({
+  obra: o, partida, nombreDe, contratanteId, tiposDoc, descargar, onChange, flash,
 }) {
-  // Los contratos que existen y esta pantalla no muestra, por partida. Vienen
-  // del panel (obras_invisibles) y no del panorama, porque el panorama es lo que
-  // ve el contratante y él no ve a sus suspendidos.
-  const invisiblesDe = (partidaId) =>
-    obrasInvisibles.filter((o) => o.partida_id === partidaId);
+  const [abierta, setAbierta] = useState(false);
+  const docs = o.mis_documentos || [];
+  const polizas = o.fianzas.filter((f) => f.clase !== 'previo').length;
+  const nota = notaDelContrato(o);
+  const proveedor = nombreDe(o.client_id);
+
+  return (
+    <>
+      {/* Uno cerrado o cancelado se sigue listando —el contrato existe— pero
+          atenuado y con su estatus en vez de un veredicto: exigirle cobertura
+          lo pintaría de rojo por algo que ya terminó. */}
+      <div className={`${COLS_CONTRATOS} px-4 py-2 items-start hover:bg-slate-50/60 transition-colors ${
+        o.viva ? '' : 'opacity-60'
+      }`}>
+        <div className="min-w-0">{partida}</div>
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-slate-800 truncate" title={proveedor}>{proveedor}</p>
+          <p className="text-[11px] text-slate-400 truncate" title={o.nombre}>
+            {o.nombre}
+            {o.numero_contrato && <span className="font-mono"> · {o.numero_contrato}</span>}
+          </p>
+          {nota && <p className={`text-[11px] ${nota.cls}`}>{nota.texto}</p>}
+        </div>
+        <div>
+          {o.viva
+            ? <CumplimientoBadge estado={o.estado_cobertura} verificada={o.cobertura_verificada} />
+            : (
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-500 whitespace-nowrap">
+                {etiquetaEstatus(o.estatus)}
+              </span>
+            )}
+        </div>
+        <div className="text-right tabular-nums">
+          <p className="text-xs text-slate-700">{o.monto_afianzado > 0 ? mxn(o.monto_afianzado) : '—'}</p>
+          <p className="text-[10px] text-slate-400">{polizas} póliza(s)</p>
+        </div>
+        <div className="flex justify-end">
+          <button
+            onClick={() => setAbierta((a) => !a)}
+            className={`p-1 rounded transition-colors flex items-center gap-0.5 ${
+              docs.length ? 'text-slate-700 hover:bg-slate-100' : 'text-slate-300 hover:text-slate-600'
+            }`}
+            title="Documentos que el contratante recibió de este contrato"
+          >
+            <Paperclip className="h-3.5 w-3.5" />
+            {docs.length > 0 && <span className="text-[10px] tabular-nums">{docs.length}</span>}
+          </button>
+        </div>
+      </div>
+
+      {abierta && (
+        <div className="px-4 pb-2">
+          <CarpetaDelContratante
+            contratanteId={contratanteId}
+            obraId={o.id}
+            documentos={docs}
+            tipos={tiposDoc}
+            descargar={descargar}
+            onChange={onChange}
+            flash={flash}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+// Un proyecto del contratante: su encabezado y, debajo, un renglón por contrato
+// agrupado por partida. Los contratos sin partida van al final del proyecto con
+// su estado como cualquier otro; antes salían en un recuadro ámbar con el puro
+// nombre, y para saber si tenían fianza había que buscarlos en el padrón.
+function ProyectoDelContratante({
+  p, contratanteId, contratanteNombre, tipos, tiposDoc, nombreDe, resolver, descargar,
+  proveedores = [], suspendidos = [], clientes = [], obrasInvisibles = [],
+  puedeLigarContratante, onEditar, onBorrar, onChange, flash, avisar,
+}) {
   const [creando, setCreando] = useState(false);
   const [editando, setEditando] = useState(null);
   const [asignando, setAsignando] = useState(null);
   const [error, setError] = useState('');
 
-  const partidas = proyecto.partidas || [];
-  const sinPartida = proyecto.obras_sin_partida || [];
+  const partidas = p.partidas || [];
+  const sinPartida = (p.obras_sin_partida || []).map(resolver);
 
-  async function borrar(pa) {
+  // Los contratos que existen y esta pantalla no muestra, por partida. Vienen
+  // del panel (obras_invisibles) y no del panorama, porque el panorama es lo que
+  // ve el contratante y él no ve a sus suspendidos.
+  const invisiblesDe = (partidaId) =>
+    obrasInvisibles.filter((o) => o.partida_id === partidaId);
+
+  // Solo una cosa abierta a la vez dentro del proyecto: dos formularios
+  // encimados en la misma tabla no se sabe a qué renglón pertenecen.
+  const abrir = (que, id = null) => {
+    setCreando(que === 'crear' ? (c) => !c : false);
+    setEditando(que === 'editar' ? id : null);
+    setAsignando(que === 'asignar' ? (a) => (a === id ? null : id) : null);
+  };
+
+  async function borrarPartida(pa) {
     setError('');
     if (!confirm(`¿Borrar la partida "${pa.nombre}"? No borra ninguna obra ni póliza.`)) return;
     try {
@@ -1514,213 +1865,212 @@ function PartidasDelProyecto({
     }
   }
 
+  const filaProps = { nombreDe, contratanteId, tiposDoc, descargar, onChange, flash };
+
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-2">
-        <Layers className="w-3.5 h-3.5 text-slate-400" />
-        <p className="text-[11px] font-medium text-slate-600">
-          Partidas ({partidas.length})
-        </p>
-        <button
-          onClick={() => { setCreando((c) => !c); setEditando(null); }}
-          className={`${btnSecondary} ml-auto`}
-        >
-          <Plus className={`h-3 w-3 transition-transform ${creando ? 'rotate-45' : ''}`} />
-          Partida
-        </button>
+    <div>
+      {/* Encabezado del proyecto. Sin chip de estado a propósito: el "peor de sus
+          partes" pintaba un SIN REGISTRO rojo junto al nombre de un proyecto que
+          tenía contratistas cubiertos, y se leía como si todo el proyecto
+          estuviera mal. Aquí se CUENTA, y el renglón dice quién. */}
+      <div className="px-4 py-2.5 flex flex-wrap items-start gap-x-3 gap-y-1">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-800">
+            {p.nombre}
+            {p.clave && <span className="text-[11px] font-mono font-normal text-slate-500"> {p.clave}</span>}
+          </p>
+          <p className="text-[11px] text-slate-500">
+            {etiquetaEstatus(p.estatus)}
+            {p.ubicacion && ` · ${p.ubicacion}`}
+            {p.monto_inversion > 0 && ` · inversión ${mxn(p.monto_inversion)}`}
+          </p>
+          <p className="text-[11px] text-slate-500 tabular-nums">
+            {p.total_partidas} partida(s) · {p.obras_vivas} contrato(s) activo(s)
+            {p.obras_descubiertas > 0 && (
+              <span className="text-rose-600 font-medium"> · {p.obras_descubiertas} sin fianza completa</span>
+            )}
+            {p.partidas_sin_contratista > 0 && ` · ${p.partidas_sin_contratista} partida(s) sin contratar`}
+            {p.monto_afianzado > 0 && (
+              <span className="text-slate-400"> · {mxn(p.monto_afianzado)} afianzado</span>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => abrir('crear')} className={btnSecondary}>
+            <Plus className={`h-3.5 w-3.5 transition-transform ${creando ? 'rotate-45' : ''}`} />
+            Partida
+          </button>
+          <button onClick={onEditar} className={btnSecondary} title="Editar proyecto">
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={onBorrar}
+            className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
+            title="Borrar proyecto"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {error && (
-        <div className="mt-2 ml-3 rounded border border-rose-200 bg-rose-50 p-2 text-[11px] text-rose-700 flex items-start gap-1.5">
+        <div className="mx-4 mb-2 rounded border border-rose-200 bg-rose-50 p-2 text-[11px] text-rose-700 flex items-start gap-1.5">
           <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" /> {error}
         </div>
       )}
 
       {creando && (
-        <FormPartidaPanel
-          tipos={tipos}
-          onCancel={() => setCreando(false)}
-          onSubmit={async (datos) => {
-            await api.post(
-              `/admin/clientes/${contratanteId}/proyectos/${proyecto.id}/partidas`, datos
-            );
-            setCreando(false);
-            onChange();
-            flash('Partida creada');
-          }}
-        />
-      )}
-      {editando && (
-        <FormPartidaPanel
-          inicial={editando}
-          tipos={tipos}
-          onCancel={() => setEditando(null)}
-          onSubmit={async (datos) => {
-            await api.put(`/admin/clientes/${contratanteId}/partidas/${editando.id}`, datos);
-            setEditando(null);
-            onChange();
-            flash('Partida actualizada');
-          }}
-        />
+        <div className="px-4 pb-3">
+          <FormPartidaPanel
+            tipos={tipos}
+            onCancel={() => setCreando(false)}
+            onSubmit={async (datos) => {
+              await api.post(
+                `/admin/clientes/${contratanteId}/proyectos/${p.id}/partidas`, datos
+              );
+              setCreando(false);
+              onChange();
+              flash('Partida creada');
+            }}
+          />
+        </div>
       )}
 
-      <div className="mt-1.5 pl-3 border-l-2 border-slate-100 space-y-2">
-        {partidas.map((pa) => (
-          <div key={pa.id}>
-            <div className="flex flex-wrap items-center gap-2 text-[11px]">
-              <span className="text-slate-700 font-medium">{pa.nombre}</span>
-              {pa.monto_estimado > 0 && (
-                <span className="text-slate-400 tabular-nums">{mxn(pa.monto_estimado)}</span>
-              )}
-              <CumplimientoBadge
-                estado={pa.estado_cobertura}
-                verificada={pa.requisitos.length > 0}
-              />
-              {/* El atajo va en la partida porque es donde se ve el hueco.
-                  Solo para quien puede ligar: al vendedor el servidor le
-                  contestaría 403, así que ofrecerle el botón sería ofrecerle un
-                  error. */}
-              {puedeLigarContratante && (
-                <button
-                  onClick={() => {
-                    setAsignando(asignando === pa.id ? null : pa.id);
-                    setCreando(false); setEditando(null);
-                  }}
-                  className={btnSecondary}
-                  title="Asignar contratista a esta partida"
-                >
-                  <UserPlus className="h-3 w-3" />
-                  {!pa.contratos?.length && <span>Asignar contratista</span>}
-                </button>
-              )}
-              <button onClick={() => { setEditando(pa); setCreando(false); setAsignando(null); }}
-                      className={btnSecondary} title="Editar partida">
-                <Pencil className="h-3 w-3" />
-              </button>
-              <button onClick={() => borrar(pa)}
-                      className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
-                      title="Borrar partida">
-                <Trash2 className="h-3 w-3" />
-              </button>
-            </div>
+      <div className="divide-y divide-slate-100 border-t border-slate-100">
+        {partidas.map((pa) => {
+          const contratos = (pa.contratos || []).map(resolver);
+          const celda = (
+            <CeldaPartida
+              pa={pa}
+              conContratos={contratos.length > 0}
+              puedeLigar={puedeLigarContratante}
+              onAsignar={() => abrir('asignar', pa.id)}
+              onEditar={() => abrir('editar', pa.id)}
+              onBorrar={() => borrarPartida(pa)}
+            />
+          );
+          const ocultos = invisiblesDe(pa.id);
 
-            <p className="text-[11px] text-slate-500 pl-1">
-              exige:{' '}
-              {pa.requisitos.length
-                ? pa.requisitos.map((r) => {
-                    const falta = pa.faltantes.some((x) => x.tipo_fianza_id === r.tipo_fianza_id);
-                    return (
-                      <span key={r.tipo_fianza_id} className={falta ? 'text-rose-600 font-medium' : ''}>
-                        {r.tipo_fianza}{falta ? ' (falta)' : ''}{' '}
-                      </span>
-                    );
-                  })
-                : <span className="text-amber-700">nada capturado</span>}
-            </p>
-
-            {asignando === pa.id && (
-              <AsignarContratista
-                partida={pa}
-                contratanteId={contratanteId}
-                contratanteNombre={contratanteNombre}
-                proveedores={proveedores}
-                suspendidos={suspendidos}
-                clientes={clientes}
-                onCancel={() => setAsignando(null)}
-                onListo={async (r) => {
-                  onChange();
-                  if (r?.aviso) {
-                    // Sin verde: la obra quedó ligada pero el contratante no la
-                    // ve, así que "Contratista asignado" prometería algo que no
-                    // pasó. El formulario tampoco se cierra —queda a la vista
-                    // con el aviso— porque esta pantalla filtra por padrón
-                    // activo y la partida va a seguir diciendo "sin
-                    // contratista": cerrando, el operador vuelve a asignar y
-                    // deja una segunda obra fantasma. Pasó al probarlo.
-                    avisar?.(r.aviso);
-                    return;
-                  }
-                  setAsignando(null);
-                  flash('Contratista asignado');
-                }}
-              />
-            )}
-
-            {/* Quién la está haciendo. Es lo único de este nivel que el
-                contratante NO puede capturar: ligar la obra de una empresa le
-                abre sus pólizas. */}
-            {pa.contratos?.length
-              ? pa.contratos.map((o) => (
-                  <p key={o.id} className="text-[11px] text-slate-500 pl-1 flex flex-wrap items-center gap-1.5">
-                    <Briefcase className="w-3 h-3 text-slate-300 shrink-0" />
-                    <span className="text-slate-600">{nombreDe(o.client_id)}</span>
-                    <span className="text-slate-400">{o.nombre}</span>
-                    <CumplimientoBadge
-                      estado={o.estado_cobertura}
-                      verificada={o.cobertura_verificada}
-                    />
-                    {/* A QUIÉN se le pide qué. Con dos contratistas en la misma
-                        partida, el faltante del encabezado no dice de quién es. */}
-                    {o.faltantes?.length > 0 && (
-                      <span className="text-rose-600 font-medium">
-                        le falta {o.faltantes.map((f) => f.tipo_fianza).join(' y ')}
-                      </span>
+          return (
+            <div key={pa.id}>
+              {contratos.length ? contratos.map((o, i) => (
+                <FilaContrato key={o.id} obra={o} partida={i === 0 ? celda : null} {...filaProps} />
+              )) : (
+                <div className={`${COLS_CONTRATOS} px-4 py-2 items-start`}>
+                  {celda}
+                  <div className="min-w-0">
+                    {/* El atajo va aquí porque aquí se ve el hueco. Hace lo
+                        mismo que capturar la obra en el detalle del proveedor. */}
+                    {puedeLigarContratante ? (
+                      <button onClick={() => abrir('asignar', pa.id)} className={btnSecondary}>
+                        <UserPlus className="h-3.5 w-3.5" /> Asignar contratista
+                      </button>
+                    ) : (
+                      <p className="text-[11px] text-slate-400">Sin contratista — lo asigna un operador</p>
                     )}
-                  </p>
-                ))
-              : (
-                <>
-                  <p className="text-[11px] text-slate-400 pl-1">
-                    {puedeLigarContratante
-                      ? 'sin contratista — usa "Asignar contratista" aquí arriba'
-                      : 'sin contratista — lo asigna un operador'}
-                  </p>
-                  {/* Y si SÍ hay contratos pero esta pantalla no los muestra
-                      porque su proveedor está suspendido, se dice. Sin esto la
-                      pantalla se contradice: invita a asignar lo que ya está
-                      asignado, y el segundo clic deja una obra fantasma. */}
-                  {invisiblesDe(pa.id).length > 0 && (
-                    <p className="text-[11px] text-amber-700 pl-1">
-                      {invisiblesDe(pa.id).length} contrato(s) ya asignado(s) que no se ven
-                      aquí: {invisiblesDe(pa.id).map((o) => o.proveedor_nombre).join(', ')}
-                      {' '}está(n) suspendido(s) en el padrón. Reactívalo(s) abajo.
-                    </p>
-                  )}
-                </>
+                    {/* Y si SÍ hay contratos pero no se ven porque su proveedor
+                        está suspendido, se dice. Sin esto la pantalla invita a
+                        asignar lo que ya está asignado, y el segundo clic deja
+                        una obra fantasma. */}
+                    {ocultos.length > 0 && (
+                      <p className="text-[11px] text-amber-700 mt-1">
+                        {ocultos.length} contrato(s) ya asignado(s) que no se ven
+                        aquí: {ocultos.map((o) => o.proveedor_nombre).join(', ')}
+                        {' '}está(n) suspendido(s) en el padrón. Reactívalo(s) abajo.
+                      </p>
+                    )}
+                  </div>
+                  <div><CumplimientoBadge estado={pa.estado_cobertura} /></div>
+                  <div className="text-right text-xs text-slate-300">—</div>
+                  <div />
+                </div>
               )}
-          </div>
-        ))}
 
-        {!partidas.length && !creando && (
-          <p className="text-[11px] text-slate-400">
-            Sin partidas. Puede armarlas él desde su portal, o créaselas aquí para poder
-            asignarle los contratos.
+              {asignando === pa.id && (
+                <div className="px-4 pb-3">
+                  <AsignarContratista
+                    partida={pa}
+                    contratanteId={contratanteId}
+                    contratanteNombre={contratanteNombre}
+                    proveedores={proveedores}
+                    suspendidos={suspendidos}
+                    clientes={clientes}
+                    onCancel={() => setAsignando(null)}
+                    onListo={async (r) => {
+                      onChange();
+                      if (r?.aviso) {
+                        // Sin verde: la obra quedó ligada pero el contratante no
+                        // la ve, así que "Contratista asignado" prometería algo
+                        // que no pasó. El formulario tampoco se cierra —queda a
+                        // la vista con el aviso— porque esta pantalla filtra por
+                        // padrón activo y la partida va a seguir diciendo "sin
+                        // contratista": cerrando, el operador vuelve a asignar y
+                        // deja una segunda obra fantasma. Pasó al probarlo.
+                        avisar?.(r.aviso);
+                        return;
+                      }
+                      setAsignando(null);
+                      flash('Contratista asignado');
+                    }}
+                  />
+                </div>
+              )}
+
+              {editando === pa.id && (
+                <div className="px-4 pb-3">
+                  <FormPartidaPanel
+                    inicial={pa}
+                    tipos={tipos}
+                    onCancel={() => setEditando(null)}
+                    onSubmit={async (datos) => {
+                      await api.put(`/admin/clientes/${contratanteId}/partidas/${pa.id}`, datos);
+                      setEditando(null);
+                      onChange();
+                      flash('Partida actualizada');
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Los contratos que están en el proyecto pero en ninguna partida. Es lo
+            capturado antes de que las partidas existieran: se dice, no se
+            esconde, porque es captura pendiente — pero con su estado, como
+            cualquier otro contrato. */}
+        {sinPartida.length > 0 && (
+          <div>
+            {sinPartida.map((o, i) => (
+              <FilaContrato
+                key={o.id}
+                obra={o}
+                partida={i === 0 ? (
+                  <div title="El contratante lo ve suelto. Créale partidas a este proyecto y asígnaselas desde la obra del proveedor.">
+                    <p className="text-xs font-medium text-amber-700">Sin partida</p>
+                    <p className="text-[11px] text-slate-400">no se sabe qué fianzas exige</p>
+                  </div>
+                ) : null}
+                {...filaProps}
+              />
+            ))}
+          </div>
+        )}
+
+        {!partidas.length && !sinPartida.length && !creando && (
+          <p className="px-4 py-3 text-[11px] text-slate-400">
+            Sin partidas ni contratos. Puede armarlas él desde su portal, o créaselas aquí
+            con «Partida» para poder asignarle los contratos.
           </p>
         )}
       </div>
-
-      {/* Los contratos que están en el proyecto pero en ninguna partida. Es lo
-          capturado antes de que las partidas existieran: se dice, no se
-          esconde, porque es captura pendiente. */}
-      {sinPartida.length > 0 && (
-        <div className="mt-2 ml-3 rounded-lg border border-amber-200 bg-amber-50/60 p-2">
-          <p className="text-[11px] font-medium text-amber-800">
-            {sinPartida.length} contrato(s) sin partida:
-          </p>
-          {sinPartida.map((o) => (
-            <p key={o.id} className="text-[11px] text-amber-700 pl-1">
-              {nombreDe(o.client_id)} · {o.nombre}
-            </p>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
 function ProyectosDelContratante({
-  contratanteId, contratanteNombre, proyectos, proveedores, suspendidos = [],
-  clientes = [], obrasInvisibles = [], tipos,
+  contratanteId, contratanteNombre, proyectos, obras = [], proveedores, suspendidos = [],
+  clientes = [], obrasInvisibles = [], tipos, tiposDoc = [], descargar,
   puedeLigarContratante, onChange, flash, avisar,
 }) {
   const [creando, setCreando] = useState(false);
@@ -1739,6 +2089,18 @@ function ProyectosDelContratante({
     || clientes.find((c) => c.id === id)?.razon_social
     || 'Proveedor (fuera del padrón)';
 
+  // Los contratos de dentro de las partidas son los del panorama tal cual, y la
+  // ruta del panel solo le pega el nombre legible del tipo a los documentos de
+  // la lista plana de obras. Se resuelve contra esa lista para que la carpeta
+  // diga "Fianza presentada" y no la clave interna.
+  const porId = new Map(obras.map((o) => [o.id, o]));
+  const resolver = (o) => porId.get(o.id) || o;
+
+  // Las que están ligadas al contratante pero en ningún proyecto suyo. Antes
+  // solo se veían en el padrón; con el padrón sin obras, sin este grupo
+  // desaparecerían de la pantalla.
+  const fueraDeProyecto = obras.filter((o) => o.desarrollo_id == null);
+
   async function borrar(p) {
     setError('');
     if (!confirm(`¿Borrar el proyecto "${p.nombre}" de este contratante? No borra ninguna obra.`)) return;
@@ -1751,12 +2113,14 @@ function ProyectosDelContratante({
     }
   }
 
+  const encabezado = ['Partida', 'Contratista y contrato', 'Estado', 'Afianzado vigente', ''];
+
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div id="ct-contratos" className="scroll-mt-28 bg-white border border-slate-200 rounded-lg overflow-hidden">
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
         <Building2 className="w-4 h-4 text-slate-500" />
         <h3 className="text-sm font-semibold text-slate-700">
-          Proyectos del contratante ({proyectos.length})
+          Proyectos y contratos ({proyectos.length})
         </h3>
         <button onClick={() => { setCreando((c) => !c); setEditando(null); }} className={`${btnSecondary} ml-auto`}>
           <Plus className={`h-3.5 w-3.5 transition-transform ${creando ? 'rotate-45' : ''}`} />
@@ -1794,170 +2158,85 @@ function ProyectosDelContratante({
         />
       )}
 
-      <div className="divide-y divide-slate-100">
-        {proyectos.map((p) => {
-          return (
-            <div key={p.id} className="px-4 py-3">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <div className="min-w-0">
-                  <span className="text-sm font-semibold text-slate-800">{p.nombre}</span>
-                  {p.clave && <span className="text-[11px] font-mono text-slate-500"> {p.clave}</span>}
-                  <p className="text-[11px] text-slate-500">
-                    {etiquetaEstatus(p.estatus)}
-                    {p.ubicacion && ` · ${p.ubicacion}`}
-                    {p.monto_inversion > 0 && ` · inversión ${mxn(p.monto_inversion)}`}
-                  </p>
-                  <p className="text-[11px] text-slate-500 tabular-nums">
-                    {p.total_partidas > 0 && `${p.total_partidas} partida(s) · `}
-                    {p.total_proveedores} proveedor(es) · {p.total_obras} obra(s)
-                    {p.partidas_sin_contratista > 0 && (
-                      <span className="text-slate-500"> · {p.partidas_sin_contratista} sin contratar</span>
-                    )}
-                    {p.pendientes_sin_fianza > 0 && (
-                      <span className="text-rose-600">
-                        {' · '}{p.pendientes_sin_fianza} sin fianza completa
-                      </span>
-                    )}
-                    {p.monto_afianzado > 0 && (
-                      <span className="text-slate-400"> · {mxn(p.monto_afianzado)} afianzado</span>
-                    )}
-                  </p>
+      {(proyectos.length > 0 || fueraDeProyecto.length > 0) && (
+        // Por debajo de md la tabla no cabe; se desliza de lado en vez de
+        // apretar las columnas hasta que el nombre del contratista no se lea.
+        <div className="overflow-x-auto">
+          <div className="min-w-[680px]">
+            <div className={`${COLS_CONTRATOS} px-4 py-2 bg-slate-50 border-b border-slate-200 items-center`}>
+              {encabezado.map((t, i) => (
+                <div
+                  key={i}
+                  className={`text-[10px] font-semibold text-slate-400 uppercase tracking-wide ${i === 3 ? 'text-right' : ''}`}
+                >
+                  {t}
                 </div>
-                <div className="ml-auto flex items-center gap-2">
-                  <CumplimientoBadge
-                    estado={p.cumplimiento}
-                    verificada={p.total_partidas > 0 && p.partidas_sin_requisitos === 0}
-                  />
-                  <button onClick={() => { setEditando(p); setCreando(false); }} className={btnSecondary} title="Editar proyecto">
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => borrar(p)}
-                    className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
-                    title="Borrar proyecto"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
+              ))}
+            </div>
 
-              {/* Las obras van DENTRO de su partida: es la misma pantalla que
-                  ve el desarrollador, y así el operador captura viendo lo que él
-                  va a leer. */}
-              <PartidasDelProyecto
-                contratanteId={contratanteId}
-                contratanteNombre={contratanteNombre}
-                proyecto={p}
-                tipos={tipos}
-                nombreDe={nombreDe}
-                proveedores={proveedores}
-                suspendidos={suspendidos}
-                clientes={clientes}
-                obrasInvisibles={obrasInvisibles}
-                puedeLigarContratante={puedeLigarContratante}
-                onChange={onChange}
-                flash={flash}
-                avisar={avisar}
-              />
+            {/* Un filete más marcado entre proyectos que entre renglones: es
+                donde cambia de qué se está hablando. */}
+            <div className="divide-y divide-slate-200">
+              {proyectos.map((p) => (
+                <ProyectoDelContratante
+                  key={p.id}
+                  p={p}
+                  contratanteId={contratanteId}
+                  contratanteNombre={contratanteNombre}
+                  tipos={tipos}
+                  tiposDoc={tiposDoc}
+                  nombreDe={nombreDe}
+                  resolver={resolver}
+                  descargar={descargar}
+                  proveedores={proveedores}
+                  suspendidos={suspendidos}
+                  clientes={clientes}
+                  obrasInvisibles={obrasInvisibles}
+                  puedeLigarContratante={puedeLigarContratante}
+                  onEditar={() => { setEditando(p); setCreando(false); }}
+                  onBorrar={() => borrar(p)}
+                  onChange={onChange}
+                  flash={flash}
+                  avisar={avisar}
+                />
+              ))}
 
-              {/* Lo que este proyecto le aparta a cada proveedor. Es lo que el
-                  contratante también ve; la línea completa va abajo y solo aquí. */}
-              {p.consumo?.length > 0 && (
-                <div className="mt-2 pl-3 space-y-0.5">
-                  {p.consumo.map((c) => (
-                    <p key={`${c.proveedor_id}:${c.afianzadora_id}`} className="text-[11px] text-slate-500 tabular-nums">
-                      <CreditCard className="h-3 w-3 inline text-slate-300 mr-1" />
-                      {nombreDe(c.proveedor_id)} / {c.afianzadora_nombre}: aparta{' '}
-                      <span className="font-semibold text-slate-700">{mxn(c.comprometido)}</span>
-                      {' '}en {c.polizas} póliza(s)
+              {fueraDeProyecto.length > 0 && (
+                <div>
+                  <div className="px-4 py-2.5">
+                    <p className="text-sm font-semibold text-amber-800">Fuera de proyecto</p>
+                    <p className="text-[11px] text-slate-500">
+                      Ligados a este contratante pero en ninguno de sus proyectos: él los ve
+                      sueltos. Se acomodan desde la obra, en el detalle del proveedor.
                     </p>
-                  ))}
+                  </div>
+                  <div className="divide-y divide-slate-100 border-t border-slate-100">
+                    {fueraDeProyecto.map((o) => (
+                      <FilaContrato
+                        key={o.id}
+                        obra={o}
+                        partida={<p className="text-[11px] text-slate-400">—</p>}
+                        nombreDe={nombreDe}
+                        contratanteId={contratanteId}
+                        tiposDoc={tiposDoc}
+                        descargar={descargar}
+                        onChange={onChange}
+                        flash={flash}
+                      />
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
-          );
-        })}
-
-        {!proyectos.length && !creando && (
-          <div className="px-4 py-8 text-center text-sm text-slate-400">
-            Este contratante no tiene proyectos todavía. Puede registrarlos él desde su
-            portal, o créaselos aquí para poder ligarle las obras de sus proveedores.
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-    </div>
-  );
-}
-
-/* --------------------------------------------------------------------------
-   El crédito afianzable de sus proveedores — SOLO PARA FORTEX
-   --------------------------------------------------------------------------
-   ESTO NO LO VE EL CONTRATANTE: es de la empresa del proveedor y es el dato con
-   el que se le negocia precio. A él se le dice cuánto aparta su proyecto —la
-   suma de las pólizas que ya ve— y nada más.
-
-   Vive junto al padrón y no dentro de los proyectos porque habla de EMPRESAS,
-   no de obras: el comprometido suma las pólizas de todo lo que ese proveedor
-   hace, para cualquiera.
-
-   Y cuando llega vacía se dice POR QUÉ, en vez de desaparecer: al vendedor el
-   servidor le manda [] a propósito (alcanzar a un contratante no puede ser la
-   puerta trasera a las líneas de sus proveedores, que pueden ser clientes de
-   otro vendedor). Desapareciendo, el operador leería "no tienen línea". */
-
-function LineasDeLosProveedores({ lineas = [], puedeOperar }) {
-  return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-        <CreditCard className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-700">Crédito de sus proveedores</h3>
-      </div>
-
-      {!lineas.length ? (
-        <p className="px-4 py-6 text-center text-xs text-slate-400">
-          {puedeOperar
-            ? 'Sus proveedores todavía no tienen líneas de crédito capturadas.'
-            : 'Las líneas de crédito las ve un operador: son de la empresa del proveedor, '
-              + 'que puede ser cliente de otro vendedor.'}
-        </p>
-      ) : (
-        <>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-slate-50/60 text-slate-500 uppercase tracking-wider text-[10px]">
-                <tr>
-                  <th className="text-left px-3 py-2">Proveedor</th>
-                  <th className="text-left px-3 py-2">Afianzadora</th>
-                  <th className="text-right px-3 py-2">Línea</th>
-                  <th className="text-right px-3 py-2">Comprometido</th>
-                  <th className="text-right px-3 py-2">Disponible</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {lineas.map((l) => (
-                  <tr key={`${l.proveedor_id}:${l.afianzadora_id}`} className="hover:bg-slate-50/40">
-                    <td className="px-3 py-1.5 text-slate-700 font-medium">{l.proveedor_nombre}</td>
-                    <td className="px-3 py-1.5 text-slate-600">{l.afianzadora_nombre}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{mxn(l.linea_credito)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxn(l.comprometido_total)}</td>
-                    {/* '<= 0' y no '< 0': en cero no le cabe otra fianza, y
-                        pintarlo verde invita a colocarle una que no pasa. */}
-                    <td className={`px-3 py-1.5 text-right tabular-nums font-semibold ${
-                      l.disponible <= 0 ? 'text-rose-600' : 'text-emerald-700'
-                    }`}>
-                      {mxn(l.disponible)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="px-4 py-2 text-[11px] text-slate-400 border-t border-slate-100">
-            Es de la empresa, no del proyecto: el comprometido suma todas sus obras, para
-            cualquiera. El contratante NO ve esta tabla.
-          </p>
-        </>
+      {!proyectos.length && !fueraDeProyecto.length && !creando && (
+        <div className="px-4 py-8 text-center text-sm text-slate-400">
+          Este contratante no tiene proyectos todavía. Puede registrarlos él desde su
+          portal, o créaselos aquí para poder ligarle las obras de sus proveedores.
+        </div>
       )}
     </div>
   );
@@ -2057,22 +2336,78 @@ function FormProyectoContratante({ inicial, onSubmit, onCancel }) {
 /* --------------------------------------------------------------------------
    Padrón de proveedores de un contratante
    --------------------------------------------------------------------------
-   Fortex ve EXACTAMENTE lo que ve el contratante en su portal: la misma
-   consulta (panoramaDelContratante) alimenta las dos pantallas. Es a propósito,
-   y es lo que hace que esta sección sea segura también para un vendedor: el que
-   lleva la cuenta del desarrollador necesita saber a qué proveedor le falta la
-   fianza —ahí está su venta—, pero sus proveedores pueden ser clientes de otro
-   vendedor, y por aquí no se le escapan primas ni líneas de crédito de nadie. */
+   Habla de EMPRESAS, no de obras: quién es cada proveedor, cómo anda en
+   conjunto, cuánto lleva afianzado y —solo para Fortex— cuánto crédito le
+   queda. Sus contratos ya están arriba, cada uno en su partida y con su estado;
+   repetirlos aquí era tener que juntar dos mitades para entender uno.
+
+   El estado y el afianzado son EXACTAMENTE lo que ve el contratante en su
+   portal: la misma consulta (panoramaDelContratante) alimenta las dos
+   pantallas. Es a propósito, y es lo que hace que esta sección sea segura
+   también para un vendedor: el que lleva la cuenta del desarrollador necesita
+   saber a qué proveedor le falta la fianza —ahí está su venta—, pero sus
+   proveedores pueden ser clientes de otro vendedor, y por aquí no se le escapan
+   primas ni líneas de crédito de nadie.
+
+   La columna de crédito vivía en una tabla aparte, debajo, repitiendo el nombre
+   de cada proveedor una vez por afianzadora. Va en su renglón porque es dato de
+   la misma empresa. ESTO NO LO VE EL CONTRATANTE: es de la empresa del
+   proveedor y es con lo que se le negocia precio. */
+
+// Dos juegos de columnas porque al vendedor no le llega el crédito (ver la nota
+// de abajo): con la columna vacía parecería que nadie tiene línea.
+const COLS_PADRON_CON_CREDITO =
+  'grid grid-cols-[minmax(0,1fr)_7.5rem_7.5rem_minmax(0,14rem)_8.5rem] gap-x-3';
+const COLS_PADRON =
+  'grid grid-cols-[minmax(0,1fr)_7.5rem_7.5rem_8.5rem] gap-x-3';
+
+// El crédito de un proveedor, una afianzadora por línea. El comprometido suma
+// TODAS sus pólizas vivas, para cualquiera: es de la empresa, no de este
+// contratante.
+function CreditoDelProveedor({ lineas }) {
+  if (!lineas.length) return <p className="text-[11px] text-slate-400">Sin líneas capturadas</p>;
+  return (
+    <div className="space-y-0.5">
+      {lineas.map((l) => (
+        <p
+          key={l.afianzadora_id}
+          className="text-[11px] tabular-nums flex items-baseline justify-between gap-2"
+          title={`Línea ${mxn(l.linea_credito)} − comprometido ${mxn(l.comprometido_total)}`}
+        >
+          <span className="text-slate-500 truncate">{l.afianzadora_nombre}</span>
+          {/* Línea en 0 con pólizas encima no es que se haya pasado: es que a
+              Fortex le falta capturarla. Pintar el negativo en rojo mandaba a
+              buscar crédito en vez de a capturar un dato. Y '<= 0' y no '< 0':
+              en cero no le cabe otra fianza, y en verde invita a colocarla. */}
+          {!l.linea_credito
+            ? <span className="text-amber-700 whitespace-nowrap">sin línea capturada</span>
+            : (
+              <span className={`font-semibold whitespace-nowrap ${l.disponible <= 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                {mxn(l.disponible)}
+              </span>
+            )}
+        </p>
+      ))}
+    </div>
+  );
+}
 
 function PadronProveedores({
-  contratanteId, proveedores, suspendidos = [], obras, clientes,
-  tiposDoc = [], descargar, puedeOperar, onChange, flash,
+  contratanteId, proveedores, suspendidos = [], lineas = [], clientes,
+  puedeOperar, onChange, flash,
 }) {
   const [agregando, setAgregando] = useState(false);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState(null);
 
-  const enFalta = proveedores.filter((p) => p.obras_descubiertas > 0).length;
+  // Al vendedor el servidor le manda las líneas vacías a propósito: alcanzar a
+  // un contratante no puede ser la puerta trasera a las líneas de sus
+  // proveedores, que pueden ser clientes de otro vendedor. Por eso la columna no
+  // se pinta y se dice por qué, en vez de dejarla en blanco: en blanco se lee
+  // "no tienen línea".
+  const conCredito = puedeOperar;
+  const cols = conCredito ? COLS_PADRON_CON_CREDITO : COLS_PADRON;
+  const lineasDe = (id) => lineas.filter((l) => l.proveedor_id === id);
 
   async function suspender(proveedorId, activo) {
     setError('');
@@ -2107,18 +2442,15 @@ function PadronProveedores({
     }
   }
 
+  const encabezado = ['Proveedor', 'Estado', 'Afianzado vigente', ...(conCredito ? ['Crédito disponible'] : []), ''];
+
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div id="ct-padron" className="scroll-mt-28 bg-white border border-slate-200 rounded-lg overflow-hidden">
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
         <ShieldCheck className="w-4 h-4 text-slate-500" />
         <h3 className="text-sm font-semibold text-slate-700">
           Padrón de proveedores ({proveedores.length})
         </h3>
-        {enFalta > 0 && (
-          <span className="text-[11px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-medium">
-            {enFalta} en falta
-          </span>
-        )}
         {puedeOperar && (
           <button onClick={() => setAgregando((a) => !a)} className={`${btnSecondary} ml-auto`}>
             <Plus className={`h-3.5 w-3.5 transition-transform ${agregando ? 'rotate-45' : ''}`} />
@@ -2145,82 +2477,84 @@ function PadronProveedores({
         />
       )}
 
-      <div className="divide-y divide-slate-100">
-        {proveedores.map((p) => {
-          const suyas = obras.filter((o) => o.client_id === p.id);
-          return (
-            <div key={p.id} className="px-4 py-2.5">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <div className="min-w-0">
-                  <span className="text-sm font-medium text-slate-700">{p.razon_social}</span>
-                  <p className="text-[11px] text-slate-500">
-                    {p.alias && <span className="text-slate-600">{p.alias} · </span>}
-                    {p.rfc || 'Sin RFC'}
-                    {p.notas && <span className="text-slate-400"> · {p.notas}</span>}
-                  </p>
+      {proveedores.length > 0 && (
+        <div className="overflow-x-auto">
+          <div className="min-w-[680px]">
+            <div className={`${cols} px-4 py-2 bg-slate-50 border-b border-slate-200 items-center`}>
+              {encabezado.map((t, i) => (
+                <div
+                  key={i}
+                  className={`text-[10px] font-semibold text-slate-400 uppercase tracking-wide ${i === 2 ? 'text-right' : ''}`}
+                >
+                  {t}
                 </div>
-                <div className="ml-auto flex items-center gap-2">
-                  {p.monto_afianzado > 0 && (
-                    <span className="text-[11px] text-slate-500 tabular-nums">
-                      {mxn(p.monto_afianzado)} afianzado
-                    </span>
-                  )}
-                  <CumplimientoBadge estado={p.cumplimiento} />
-                  {puedeOperar && (
-                    <>
-                      <button
-                        onClick={() => suspender(p.id, false)}
-                        disabled={busyId === p.id}
-                        className={btnSecondary}
-                        title="Suspender del padrón: deja de ver sus obras al instante, pero queda el historial"
-                      >
-                        Suspender
-                      </button>
-                      <button
-                        onClick={() => quitar(p.id, p.razon_social)}
-                        disabled={busyId === p.id}
-                        className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
-                        title="Quitar la liga (no borra la empresa)"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Las obras ligadas, con su cobertura. Es lo mismo que ve él. */}
-              {suyas.length > 0 && (
-                <div className="mt-1.5 pl-3 border-l-2 border-slate-100 space-y-1">
-                  {suyas.map((o) => (
-                    <ObraDelPadron
-                      key={o.id}
-                      obra={o}
-                      contratanteId={contratanteId}
-                      tiposDoc={tiposDoc}
-                      descargar={descargar}
-                      onChange={onChange}
-                      flash={flash}
-                    />
-                  ))}
-                </div>
-              )}
-              {!suyas.length && (
-                <p className="mt-1 pl-3 text-[11px] text-slate-400">
-                  Sin obras ligadas. Ligar la obra se hace en el detalle del proveedor,
-                  en el campo "Para" del proyecto.
-                </p>
-              )}
+              ))}
             </div>
-          );
-        })}
-        {!proveedores.length && !agregando && (
-          <div className="px-4 py-8 text-center text-sm text-slate-400">
-            Este contratante no tiene proveedores activos todavía. Agrégalos para que
-            pueda ver quién le presentó fianza y quién no.
+
+            <div className="divide-y divide-slate-100">
+              {proveedores.map((p) => (
+                <div key={p.id} className={`${cols} px-4 py-2 items-start hover:bg-slate-50/60 transition-colors`}>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-slate-800 truncate" title={p.razon_social}>
+                      {p.razon_social}
+                    </p>
+                    <p className="text-[11px] text-slate-400 truncate" title={p.notas || undefined}>
+                      {p.alias && <span className="text-slate-500">{p.alias} · </span>}
+                      {p.rfc ? <span className="font-mono">{p.rfc}</span> : 'Sin RFC'}
+                      {p.notas && ` · ${p.notas}`}
+                    </p>
+                  </div>
+                  {/* El de su PEOR contrato vivo: tener uno cubierto no arregla
+                      el que está descubierto. Cuál es, se ve arriba. */}
+                  <div><CumplimientoBadge estado={p.cumplimiento} /></div>
+                  <div className="text-right tabular-nums">
+                    <p className="text-xs text-slate-700">{p.monto_afianzado > 0 ? mxn(p.monto_afianzado) : '—'}</p>
+                    <p className="text-[10px] text-slate-400">{p.obras_vivas} contrato(s) activo(s)</p>
+                  </div>
+                  {conCredito && <CreditoDelProveedor lineas={lineasDe(p.id)} />}
+                  <div className="flex items-center justify-end gap-1.5">
+                    {puedeOperar && (
+                      <>
+                        <button
+                          onClick={() => suspender(p.id, false)}
+                          disabled={busyId === p.id}
+                          className={btnSecondary}
+                          title="Suspender del padrón: deja de ver sus obras al instante, pero queda el historial"
+                        >
+                          Suspender
+                        </button>
+                        <button
+                          onClick={() => quitar(p.id, p.razon_social)}
+                          disabled={busyId === p.id}
+                          className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
+                          title="Quitar la liga (no borra la empresa)"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {proveedores.length > 0 && (
+        <p className="px-4 py-2 text-[11px] text-slate-400 border-t border-slate-100">
+          {conCredito
+            ? 'El crédito es de la empresa, no de este contratante: el comprometido suma todas sus obras, para cualquiera. El contratante NO ve esa columna.'
+            : 'Las líneas de crédito las ve un operador: son de la empresa del proveedor, que puede ser cliente de otro vendedor.'}
+        </p>
+      )}
+
+      {!proveedores.length && !agregando && (
+        <div className="px-4 py-8 text-center text-sm text-slate-400">
+          Este contratante no tiene proveedores activos todavía. Agrégalos para que
+          pueda ver quién le presentó fianza y quién no.
+        </div>
+      )}
 
       {/* Los suspendidos, aparte y atenuados. El contratante NO los ve; están
           aquí para poder reactivarlos, porque sin esta sección suspender era una
@@ -2262,52 +2596,6 @@ function PadronProveedores({
             ))}
           </div>
         </div>
-      )}
-    </div>
-  );
-}
-
-// Un renglón de obra dentro del padrón, con la carpeta del contratante detrás
-// del clip.
-//
-// La carpeta es la MISMA que él ve en su portal, y Fortex sube por la misma
-// puerta: en la práctica el proveedor le entrega la fianza en papel al
-// desarrollador o directo a Fortex, y las dos cosas pasan. Lo único que cambia
-// es el 'subido_por', que queda a la vista para saber quién la consiguió.
-function ObraDelPadron({ obra: o, contratanteId, tiposDoc, descargar, onChange, flash }) {
-  const [abierta, setAbierta] = useState(false);
-  const docs = o.mis_documentos || [];
-
-  return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 text-[11px]">
-        <Briefcase className="w-3 h-3 text-slate-300 shrink-0" />
-        <span className="text-slate-600">{o.nombre}</span>
-        <span className="text-slate-400">{etiquetaEstatus(o.estatus)}</span>
-        <CumplimientoBadge estado={o.estado_cobertura} verificada={o.cobertura_verificada} />
-        <span className="text-slate-400 tabular-nums">
-          {o.fianzas.length} póliza(s){o.total_previos > 0 && ` · ${o.total_previos} previo(s)`}
-        </span>
-        <button
-          onClick={() => setAbierta((a) => !a)}
-          className={`${btnSecondary} ml-auto ${docs.length ? 'text-indigo-700 border-indigo-200' : ''}`}
-          title="Documentos que el contratante recibió de esta obra"
-        >
-          <Paperclip className="h-3 w-3" />
-          {docs.length > 0 && <span className="tabular-nums">{docs.length}</span>}
-        </button>
-      </div>
-
-      {abierta && (
-        <CarpetaDelContratante
-          contratanteId={contratanteId}
-          obraId={o.id}
-          documentos={docs}
-          tipos={tiposDoc}
-          descargar={descargar}
-          onChange={onChange}
-          flash={flash}
-        />
       )}
     </div>
   );
@@ -3100,56 +3388,95 @@ function Pill({ label, valor, tono = 'slate', ayuda }) {
 
 function Req() { return <span className="text-rose-500">*</span>; }
 
+// Una cifra del encabezado del cliente: la etiqueta chica arriba y el número
+// abajo, sin fondo de color. Las seis píldoras de antes eran verde, azul,
+// violeta y gris por pura decoración —el color no decía nada— y competían con
+// los pendientes, que es lo único que sí tiene que llamar la atención. Aquí el
+// color solo aparece si la cifra es un problema.
+function Dato({ label, valor, alerta, ayuda }) {
+  return (
+    <div className="min-w-0" title={ayuda}>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`text-sm font-semibold tabular-nums ${alerta ? 'text-rose-600' : 'text-slate-800'}`}>
+        {valor}
+      </p>
+    </div>
+  );
+}
+
 /* --------------------------------------------------------------------------
    Lo que falta, siempre a la vista
    --------------------------------------------------------------------------
-   Esta barra es la condición para poder tabular. Va FUERA del switch de
+   Esta lista es la condición para poder tabular. Va FUERA del switch de
    pestañas y por eso el operador ve lo que falta aunque esté en otra vista, y
    llega de un clic. Sin ella, organizar sería esconder.
 
-   Los chips salen de pendientesDelFiado / pendientesDelContratante (lib.jsx),
-   las mismas funciones que alimentan los contadores de las pestañas y la regla
-   de "esta obra arranca abierta": tres pantallas que no pueden discrepar
-   porque leen del mismo lugar.
+   Los pendientes salen de pendientesDelFiado / pendientesDelContratante
+   (lib.jsx), las mismas funciones que alimentan los contadores de las pestañas
+   y la regla de "esta obra arranca abierta": tres pantallas que no pueden
+   discrepar porque leen del mismo lugar.
+
+   Se pintan por GRUPO, un renglón por grupo con su etiqueta, y no como chips
+   sueltos: con seis chips de colores no se sabía por dónde empezar. Ahora se
+   lee de arriba abajo, de lo urgente a lo que solo hay que seguir. Debajo van
+   los recordatorios de ESTE cliente, que antes vivían en una franja aparte
+   arriba de toda la pantalla.
 
    Sin pendientes NO se pinta un banner verde. Se escribe en slate y con el
    alcance acotado: el panel no sabe de las fianzas que el cliente colocó con
    otro agente, y "todo al día" prometería de más. */
 
-function ChipPendiente({ texto, tono, onClick }) {
-  const tonos = {
-    rose: 'bg-rose-50 text-rose-700 border-rose-200',
-    amber: 'bg-amber-50 text-amber-800 border-amber-200',
-    slate: 'bg-slate-50 text-slate-600 border-slate-200',
-  };
-  return (
-    <button
-      onClick={onClick}
-      className={`text-xs px-2 py-1 rounded-md border hover:underline ${tonos[tono] || tonos.slate}`}
-    >
-      {texto}
-    </button>
-  );
-}
+function Pendientes({ pendientes, recordatorios = [], onIr, onRecordatorioAtendido }) {
+  const grupos = GRUPOS_PENDIENTE
+    .map((g) => ({ ...g, items: pendientes.filter((p) => p.tono === g.tono) }))
+    .filter((g) => g.items.length);
 
-function BarraPendientes({ pendientes, onIr }) {
-  if (!pendientes.length) {
+  if (!grupos.length && !recordatorios.length) {
     return (
-      <p className="text-[11px] text-slate-500 mb-4">
+      <p className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">
         Sin pendientes en lo que Fortex captura.
       </p>
     );
   }
+
   return (
-    <div className="flex flex-wrap items-center gap-1.5 mb-4">
-      {pendientes.map((p) => (
-        <ChipPendiente
-          key={p.clave}
-          texto={p.texto}
-          tono={p.tono}
-          onClick={() => onIr(p.destino)}
-        />
-      ))}
+    <div className="mt-3 pt-1 border-t border-slate-100">
+      {grupos.length > 0 && (
+        <div className="divide-y divide-slate-50">
+          {grupos.map((g) => (
+            <div key={g.tono} className="flex items-baseline gap-3 py-1.5">
+              <span className={`w-28 shrink-0 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide ${g.texto}`}>
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 translate-y-[-1px] ${g.punto}`} />
+                {g.label}
+              </span>
+              <p className="flex-1 min-w-0 text-xs text-slate-700 leading-relaxed">
+                {g.items.map((p, i) => (
+                  <span key={p.clave}>
+                    {i > 0 && <span className="text-slate-300"> · </span>}
+                    <button onClick={() => onIr(p.destino)} className="hover:underline text-left">
+                      {p.texto}
+                    </button>
+                  </span>
+                ))}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {recordatorios.length > 0 && (
+        <div className={`-mx-4 ${grupos.length ? 'mt-1.5 border-t border-slate-100' : ''}`}>
+          <p className="px-4 pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            Recordatorios ({recordatorios.length})
+            <span className="font-normal normal-case tracking-normal text-slate-400"> · uso interno, el cliente no los ve</span>
+          </p>
+          <div className="divide-y divide-slate-50">
+            {recordatorios.map((r) => (
+              <RenglonRecordatorio key={r.id} r={r} onAtendido={onRecordatorioAtendido} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

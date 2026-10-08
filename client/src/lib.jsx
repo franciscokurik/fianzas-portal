@@ -215,9 +215,15 @@ export const estaDescubierta = (estado) =>
    número escrito, no el color, porque en el panel el color no llega —
    .portal-admin aplana sky y violet a gris.
 
-   Tonos: rose = alguien incumplió o falta algo exigible. amber = hay que
-   mirarlo pronto, o no alcanza para prometer. slate = pendiente de la casa o
-   del propio cliente, no una falta de nadie.
+   El tono ES el grupo en que se pinta (ver GRUPOS_PENDIENTE), y se elige por
+   qué tan pronto hay que moverse, no por qué tan feo suena:
+     rose   -> "Atender ya": alguien incumplió o algo exigible falta HOY.
+     amber  -> "Pronto": se vence o hay que mirarlo en días.
+     slate  -> "Por completar": un dato que le falta capturar a la casa, o un
+               pendiente del propio cliente. No es una falta de nadie.
+     violet -> "En trámite": ya va; solo hay que darle seguimiento.
+   Antes casi todo salía rojo o ámbar, y con seis chips encendidos nadie sabía
+   por dónde empezar.
    -------------------------------------------------------------------------- */
 
 // El estado de un papel del expediente, en un solo lugar.
@@ -266,14 +272,14 @@ export function pendientesDelFiado({
   const sinFianza = proyectos.filter(
     (p) => (p.fianzas || []).every((f) => f.clase === 'previo')
   ).length;
-  if (sinFianza) fuera.push(chip('sin_fianza', `${sinFianza} obra(s) sin fianza`, 'rose', 'obras'));
+  if (sinFianza) fuera.push(chip('sin_fianza', `${sinFianza} obra(s) sin fianza emitida`, 'rose', 'obras'));
 
   const vencidas = emitidas.filter((f) => f.estado === 'vencida').length;
   if (vencidas) fuera.push(chip('vencidas', `${vencidas} póliza(s) vencida(s)`, 'rose', 'obras'));
 
   const porVencer = emitidas.filter((f) => f.estado === 'por_vencer').length;
   if (porVencer) {
-    fuera.push(chip('por_vencer', `${porVencer} póliza(s) por vencer (≤30 d)`, 'amber', 'obras'));
+    fuera.push(chip('por_vencer', `${porVencer} póliza(s) vencen en 30 días o menos`, 'amber', 'obras'));
   }
 
   // Sin este chip esa póliza no aparece en ninguna cuenta: estadoFianza
@@ -281,40 +287,45 @@ export function pendientesDelFiado({
   // propia captura incompleta— pero entonces nadie la nombra.
   const sinFecha = emitidas.filter((f) => !f.fecha_vigencia).length;
   if (sinFecha) {
-    fuera.push(chip('sin_fecha', `${sinFecha} póliza(s) sin fecha de vigencia`, 'amber', 'obras'));
+    fuera.push(chip('sin_fecha', `${sinFecha} póliza(s) sin fecha de vigencia capturada`, 'slate', 'obras'));
   }
 
   const docs = documentos.map(estadoDocCliente);
   const docsMal = docs.filter((e) => e === 'pendiente' || e === 'vencido').length;
-  if (docsMal) fuera.push(chip('expediente', `${docsMal} del expediente`, 'rose', 'papeles'));
+  // "Pronto" y no "Atender ya": un papel que falta no deja a nadie sin
+  // cobertura hoy, y en casi todos los fiados falta alguno. En rojo era la
+  // alarma que siempre estaba prendida y por eso ya nadie la leía.
+  if (docsMal) {
+    fuera.push(chip('expediente', `${docsMal} documento(s) del expediente faltan o vencieron`, 'amber', 'papeles'));
+  }
   const docsPronto = docs.filter((e) => e === 'por_vencer').length;
   if (docsPronto) {
-    fuera.push(chip('expediente_pronto', `${docsPronto} del expediente por vencer`, 'amber', 'papeles'));
+    fuera.push(chip('expediente_pronto', `${docsPronto} documento(s) del expediente por vencer`, 'amber', 'papeles'));
   }
 
   const papelPend = papeleria.filter((p) => p.estado === 'pendiente').length;
   if (papelPend) {
-    fuera.push(chip('papeleria', `${papelPend} papelería pendiente`, 'amber', 'papeles'));
+    fuera.push(chip('papeleria', `${papelPend} solicitud(es) de papelería pendiente(s)`, 'amber', 'papeles'));
   }
 
   const sinAgrupar = proyectos.filter(
     (p) => p.contratante_nombre && !p.desarrollo_nombre
   ).length;
   if (sinAgrupar) {
-    fuera.push(chip('sin_agrupar', `${sinAgrupar} obra(s) sin agrupar`, 'amber', 'obras'));
+    fuera.push(chip('sin_agrupar', `${sinAgrupar} obra(s) ligadas a un contratante, sin proyecto`, 'slate', 'obras'));
   }
 
   // '<= 0' y no '< 0': agotada es agotada, y en cero no le cabe otra fianza.
   const agotadas = lineas.filter((l) => l.disponible <= 0).length;
   if (agotadas) {
-    fuera.push(chip('linea', `Sin disponible en ${agotadas} afianzadora(s)`, 'rose', 'obras'));
+    fuera.push(chip('linea', `Sin crédito disponible con ${agotadas} afianzadora(s)`, 'rose', 'obras'));
   }
 
   const previos = fianzas.filter((f) => f.clase === 'previo').length;
-  if (previos) fuera.push(chip('previos', `${previos} previo(s) en trámite`, 'amber', 'obras'));
+  if (previos) fuera.push(chip('previos', `${previos} previo(s) en trámite`, 'violet', 'obras'));
 
   if (usuarios.length && !usuarios.some((u) => u.activo)) {
-    fuera.push(chip('accesos', 'Sin accesos activos', 'slate', 'accesos'));
+    fuera.push(chip('accesos', 'Nadie tiene acceso activo al portal', 'slate', 'accesos'));
   }
 
   return fuera;
@@ -322,17 +333,22 @@ export function pendientesDelFiado({
 
 // Los pendientes de un CONTRATANTE. Salen de las métricas que el servidor ya
 // calcula, para que el panel no vuelva a derivarlas por su cuenta.
+//
+// La unidad es EL CONTRATO, la misma que los renglones de la tabla de abajo y la
+// lista de clientes: el chip dice "2" y abajo hay dos renglones en rojo. Antes la
+// misma falta se contaba tres veces con tres palabras —"pendientes", "obras sin
+// fianza vigente", "proveedores en falta"— y casi siempre daban el mismo número,
+// así que no había forma de saber si eran el mismo problema o tres distintos.
+// Se usa obras_descubiertas y no pendientes_sin_fianza porque, ya juzgado cada
+// contrato contra su partida, cuenta lo mismo o más: no esconde nada.
 export function pendientesDelContratante({
   metricas = {}, suspendidos = [], lineas_proveedores: lineasProv = [],
 } = {}) {
   const m = metricas;
   const fuera = [];
 
-  if (m.pendientes_sin_fianza) {
-    fuera.push(chip('sin_fianza', `${m.pendientes_sin_fianza} pendiente(s) sin fianza completa`, 'rose', 'proyectos'));
-  }
-  if (m.proveedores_en_falta) {
-    fuera.push(chip('en_falta', `${m.proveedores_en_falta} proveedor(es) en falta`, 'rose', 'padron'));
+  if (m.obras_descubiertas) {
+    fuera.push(chip('sin_fianza', `${m.obras_descubiertas} contrato(s) sin fianza completa`, 'rose', 'proyectos'));
   }
   // En slate: es pendiente del propio desarrollador —le falta contratar—, no un
   // proveedor que incumplió. Pintarlo rojo acusaría a alguien que no existe.
@@ -340,22 +356,37 @@ export function pendientesDelContratante({
     fuera.push(chip('sin_contratar', `${m.partidas_sin_contratista} partida(s) sin contratar`, 'slate', 'proyectos'));
   }
   if (m.obras_sin_proyecto) {
-    fuera.push(chip('sin_proyecto', `${m.obras_sin_proyecto} obra(s) fuera de proyecto`, 'amber', 'proyectos'));
+    fuera.push(chip('sin_proyecto', `${m.obras_sin_proyecto} contrato(s) fuera de proyecto`, 'slate', 'proyectos'));
   }
   const conObras = suspendidos.filter((s) => s.obras_ligadas > 0);
   if (conObras.length) {
     const n = conObras.reduce((s, x) => s + x.obras_ligadas, 0);
-    fuera.push(chip('suspendidos', `${conObras.length} suspendido(s) con ${n} obra(s) ligadas`, 'amber', 'padron'));
+    fuera.push(chip('suspendidos', `${conObras.length} suspendido(s) con ${n} contrato(s) ligados`, 'slate', 'padron'));
   }
+  // La ventana se escribe en el texto porque NO es la del chip de cada renglón:
+  // este mira a 60 días para planear y el renglón dice "Por vencer" a 30. Sin
+  // decirlo, el chip contaba uno que abajo salía "Con fianza".
   if (m.obras_por_vencer) {
-    fuera.push(chip('por_vencer', `${m.obras_por_vencer} obra(s) por vencer`, 'amber', 'proyectos'));
+    fuera.push(chip('por_vencer', `${m.obras_por_vencer} contrato(s) vencen en 60 días o menos`, 'amber', 'proyectos'));
   }
   if (m.previos_en_tramite) {
-    fuera.push(chip('previos', `${m.previos_en_tramite} previo(s) en trámite`, 'amber', 'proyectos'));
+    fuera.push(chip('previos', `${m.previos_en_tramite} previo(s) en trámite`, 'violet', 'proyectos'));
   }
-  const agotadas = lineasProv.filter((l) => l.disponible <= 0).length;
-  if (agotadas) {
-    fuera.push(chip('linea', `Sin disponible en ${agotadas} proveedor(es)`, 'rose', 'padron'));
+  // Por PROVEEDOR, como dice el texto: antes contaba renglones de la tabla de
+  // crédito, y un proveedor con dos afianzadoras agotadas salía como dos.
+  //
+  // Y "sin línea" va aparte de "agotada": una línea en 0 con pólizas encima no
+  // es que se haya pasado, es que Fortex no la ha capturado. Decirle "sin
+  // disponible" mandaba a buscar crédito en vez de a capturar un dato.
+  const proveedoresDonde = (cumple) =>
+    new Set(lineasProv.filter(cumple).map((l) => l.proveedor_id)).size;
+  const sinLinea = proveedoresDonde((l) => !l.linea_credito);
+  if (sinLinea) {
+    fuera.push(chip('sin_linea', `${sinLinea} proveedor(es) sin línea de crédito capturada`, 'slate', 'padron'));
+  }
+  const agotados = proveedoresDonde((l) => l.linea_credito > 0 && l.disponible <= 0);
+  if (agotados) {
+    fuera.push(chip('linea', `${agotados} proveedor(es) sin crédito disponible`, 'rose', 'padron'));
   }
 
   return fuera;
