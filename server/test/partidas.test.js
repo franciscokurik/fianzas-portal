@@ -347,6 +347,12 @@ test('si la partida exige DOS y solo hay una, sale INCOMPLETA y dice cuál falta
   // Y el proyecto entero lo refleja: no puede decir "cubierta" con un pedazo a
   // medias.
   assert.equal(p.cumplimiento, 'incompleta');
+
+  // Y la lista de clientes también. Contaba por su lado "¿tiene alguna fianza
+  // vigente?", y este contrato sí tiene una: la lista decía 0, el detalle 1, y
+  // el punto ámbar se apagaba con un contratista trabajando sin anticipo.
+  const { clientes } = await (await pedir('/api/admin/clientes', operador)).json();
+  assert.equal(clientes.find((c) => c.id === DELTA).obras_descubiertas, 1);
 });
 
 test('editar sin mandar requisitos NO los borra', async () => {

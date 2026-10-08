@@ -14,7 +14,7 @@ import {
   guardarDocumentoCliente, borrarDocumentoCliente, exigirTipoDocumento,
 } from '../services/documentos-cliente.js';
 import {
-  exigirCliente, exigirEntidad, filtroCartera, ALCANCE, JOIN_PADRON,
+  exigirCliente, exigirEntidad, filtroCartera,
   exigirObraDelContratante, esVendedor,
 } from '../lib/permisos.js';
 import {
@@ -98,34 +98,18 @@ router.get('/clientes', async (req, res) => {
     )
     .all(...cartera.params);
 
-  // Las obras de un contratante que hoy NO tienen fianza vigente. Es su única
+  // Los contratos de un contratante que hoy NO están respaldados. Es su única
   // cifra de alarma, y es la que enciende el punto ámbar de la lista.
   //
-  // Lleva el alcance COMPLETO —las dos mitades, JOIN_PADRON y ALCANCE— y no una
-  // copia a mano de la mitad: escrita sin el padrón, esta cifra contaba las
-  // obras de proveedores ya suspendidos, así que la lista prendía el punto
-  // ámbar por un pendiente que el detalle del cliente decía que no existía (y
-  // que el contratante, correctamente, tampoco veía).
-  //
-  // Solo pólizas emitidas: un previo no cubre nada. Y solo obras vivas:
-  // exigirle cobertura a una obra cerrada llenaría la lista de rojos de hace
-  // años (la misma regla que services/proveedores.js).
-  const obrasDescubiertas = (contratanteId) => db.prepare(
-    `SELECT COUNT(*)::int c FROM proyectos p
-     ${JOIN_PADRON}
-     WHERE ${ALCANCE}
-       AND p.estatus IN ('en_proceso', 'terminado', 'entregado')
-       AND NOT EXISTS (
-         SELECT 1 FROM fianzas f
-         WHERE f.proyecto_id = p.id AND f.clase = 'fianza'
-           -- Sin fecha capturada NO es cobertura. Es la misma regla que
-           -- estadoCumplimiento en lib/dates.js, y tiene que ser la misma:
-           -- si aquí contara y allá no, el punto ámbar de la lista diría una
-           -- cosa y el detalle del cliente otra.
-           AND f.fecha_vigencia IS NOT NULL
-           AND f.fecha_vigencia >= ?
-       )`
-  ).get(contratanteId, todayISO());
+  // Sale del MISMO panorama que el detalle, no de una consulta propia. La que
+  // había preguntaba "¿tiene alguna fianza vigente?" y no sabía qué exige la
+  // partida, así que un contratista con la de cumplimiento y sin la de anticipo
+  // contaba en el detalle y no en la lista: con los datos demo, Delta decía "1"
+  // en la lista y "2" al abrirlo, y con solo ese caso el punto ámbar se apagaba.
+  // Cuesta las consultas del panorama por cada contratante, pero son pocos y
+  // corren en paralelo; dos reglas escritas aparte se separan siempre.
+  const obrasDescubiertas = async (contratanteId) =>
+    (await panoramaDelContratante(contratanteId)).metricas.obras_descubiertas;
 
   const enriquecidos = await Promise.all(clientes.map(async (c) => {
     // Un contratante no tiene fianzas, ni expediente, ni papelería. Calcularle
@@ -142,7 +126,7 @@ router.get('/clientes', async (req, res) => {
         recordatorios_pendientes: 0,
         docs_pendientes: 0,
         papeleria_pendiente: 0,
-        obras_descubiertas: (await obrasDescubiertas(c.id)).c,
+        obras_descubiertas: await obrasDescubiertas(c.id),
       };
     }
 
