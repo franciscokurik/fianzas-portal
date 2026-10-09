@@ -198,7 +198,7 @@ export async function tableroComisiones(alcance, filtros = {}) {
   return db.prepare(
     `SELECT f.id AS fianza_id, f.numero_poliza, f.afianzadora_id,
             a.nombre AS afianzadora_nombre, f.client_id, cl.razon_social AS cliente,
-            f.prima_neta, c.id AS comision_id,
+            f.prima_neta, cl.vendedor_id AS titular_id, c.id AS comision_id,
             COALESCE(c.vendedor_id, cl.vendedor_id) AS vendedor_id, u.nombre AS vendedor_nombre,
             c.fecha_pago, c.fecha_conciliacion, c.comision_neta, c.notas, c.origen
      FROM fianzas f

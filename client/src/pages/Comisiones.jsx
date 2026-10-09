@@ -8,6 +8,7 @@
 // El resumen por vendedor va en su pestaña, y la captura y la carga masiva en
 // ventanas que se abren cuando se piden.
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Plus, Download, Upload, Search, X, Pencil, Trash2, AlertTriangle, FileSpreadsheet,
   HandCoins, CalendarClock, Clock, Eye,
@@ -641,7 +642,7 @@ const pendiente = (p) => !p.fecha_conciliacion;
 const porEstado = (p, estado) => estado === 'todas'
   || (estado === 'conciliada' ? !pendiente(p) : pendiente(p));
 
-export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = [], flash }) {
+export default function Comisiones({ esAdmin, usuarioId, vendedores = [], afianzadoras = [], flash }) {
   const [resumen, setResumen] = useState(null);
   const [polizas, setPolizas] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -936,6 +937,10 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
                         p={p}
                         cols={cols}
                         esAdmin={esAdmin}
+                        // El vendedor abre la ficha solo si el cliente sigue
+                        // siendo suyo: una comisión vieja de un cliente que ya
+                        // se reasignó lo llevaría a una ficha que no puede ver.
+                        puedeAbrir={esAdmin || p.titular_id === usuarioId}
                         onAsignar={() => setModal({ asignar: p })}
                         onCorregir={() => setModal({ corregir: p })}
                       />
@@ -987,14 +992,35 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
 
 // Un renglón de la lista. Sin comisión, en lugar del monto va el botón para
 // asignarla (al vendedor, que no escribe, solo la raya).
-function RenglonPoliza({ p, cols, esAdmin, onAsignar, onCorregir }) {
+//
+// La póliza es la liga a la ficha del fiado, con su obra abierta y el renglón
+// de la póliza marcado: ahí está todo lo demás (montos, vigencia, carátula).
+// Liga solo esa celda y no el renglón entero, porque el renglón tiene sus
+// propios botones.
+function RenglonPoliza({ p, cols, esAdmin, puedeAbrir, onAsignar, onCorregir }) {
   const tiene = Boolean(p.comision_id);
+  const poliza = (
+    <>
+      <p className="text-sm font-semibold text-slate-800 truncate font-mono group-hover/poliza:text-indigo-700 group-hover/poliza:underline underline-offset-2 transition-colors">
+        {p.numero_poliza}
+      </p>
+      <p className="text-xs text-slate-400 mt-0.5 truncate" title={p.notas || undefined}>{p.cliente}</p>
+    </>
+  );
   return (
     <div className={`${cols} px-5 py-3 hover:bg-slate-50 transition-colors group`}>
-      <div className="min-w-0">
-        <p className="text-sm font-semibold text-slate-800 truncate font-mono">{p.numero_poliza}</p>
-        <p className="text-xs text-slate-400 mt-0.5 truncate" title={p.notas || undefined}>{p.cliente}</p>
-      </div>
+      {puedeAbrir ? (
+        <Link
+          to={`/admin/clientes/${p.client_id}?fianza=${p.fianza_id}`}
+          state={{ volver: { to: '/admin/comisiones', label: 'Comisiones' } }}
+          className="min-w-0 group/poliza"
+          title="Abrir la ficha del fiado"
+        >
+          {poliza}
+        </Link>
+      ) : (
+        <div className="min-w-0">{poliza}</div>
+      )}
       <div className="text-xs text-slate-600 truncate">{p.afianzadora_nombre}</div>
       {esAdmin && (
         <div className={`text-xs truncate ${p.vendedor_nombre ? 'text-slate-600' : 'text-slate-400'}`}>

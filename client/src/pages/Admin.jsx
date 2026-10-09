@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Routes, Route, Navigate, Link, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Routes, Route, Navigate, Link, useNavigate, useParams, useLocation, useSearchParams,
+} from 'react-router-dom';
 import {
   Building2, Plus, Save, Download,
   Users, FileText, Files, CheckCircle2, UserPlus, AlertTriangle,
@@ -341,6 +343,7 @@ export default function Admin() {
           element={veComisiones ? (
             <Comisiones
               esAdmin={esAdmin}
+              usuarioId={user.id}
               vendedores={vendedores}
               afianzadoras={afianzadoras}
               flash={flash}
@@ -416,10 +419,13 @@ function PaginaCliente({ detalle, abrir, children }) {
   const { id } = useParams();
   const numero = Number(id);
   useEffect(() => { abrir(numero); }, [numero]);
+  // Quien llega desde otra pantalla (Comisiones) regresa a ella, no a la lista
+  // de clientes: "atrás" tiene que llevar a donde se estaba.
+  const volver = useLocation().state?.volver || { to: '/admin/clientes', label: 'Clientes' };
 
   return (
     <div className="space-y-4">
-      <VolverA to="/admin/clientes" label="Clientes" />
+      <VolverA to={volver.to} label={volver.label} />
       {detalle?.cliente.id === numero
         ? children
         : <p className="py-16 text-center text-sm text-slate-400">Cargando…</p>}
@@ -1009,6 +1015,10 @@ function DetalleCliente({
     contratantes = [],
   } = detalle;
   const esContratante = cliente.tipo === 'contratante';
+  // La póliza que se vino a ver (?fianza=ID, desde Comisiones): su obra se abre
+  // sola y el renglón queda marcado.
+  const [params] = useSearchParams();
+  const fianzaEnfocada = Number(params.get('fianza')) || null;
 
   // La pestaña abierta. Arranca en la que es el trabajo del día —obras o
   // contratos—; y al cambiar de cliente vuelve sola al principio, gratis,
@@ -1299,6 +1309,7 @@ function DetalleCliente({
         <Proyectos
           clienteId={cliente.id}
           proyectos={proyectos}
+          fianzaEnfocada={fianzaEnfocada}
           afianzadoras={afianzadoras}
           tipos={tipos}
           tiposDoc={tiposDoc}
@@ -3761,7 +3772,7 @@ function estadoDeObra(p) {
 const COLS_OBRA = 'grid grid-cols-[1rem_minmax(0,1fr)_8.5rem_9rem_auto] gap-x-4 items-center';
 
 function Proyectos({
-  clienteId, proyectos, afianzadoras, tipos, tiposDoc, lineas = [],
+  clienteId, proyectos, afianzadoras, tipos, tiposDoc, lineas = [], fianzaEnfocada,
   contratantes = [], puedeLigarContratante, onChange, flash, avisar,
 }) {
   const [creando, setCreando] = useState(false);
@@ -3812,6 +3823,7 @@ function Proyectos({
             proyecto={p}
             proyectos={proyectos}
             clienteId={clienteId}
+            fianzaEnfocada={fianzaEnfocada}
             afianzadoras={afianzadoras}
             tipos={tipos}
             tiposDoc={tiposDoc}
@@ -3834,7 +3846,7 @@ function Proyectos({
 }
 
 function Proyecto({
-  proyecto: p, proyectos, clienteId, afianzadoras, tipos, tiposDoc, lineas = [],
+  proyecto: p, proyectos, clienteId, afianzadoras, tipos, tiposDoc, lineas = [], fianzaEnfocada,
   contratantes = [], puedeLigarContratante, onChange, flash, avisar,
 }) {
   // Todas arrancan PLEGADAS, salvo que sea la única. Antes se abrían las que
@@ -3842,7 +3854,10 @@ function Proyecto({
   // de diez columnas abiertas al mismo tiempo. Ya no hace falta abrirlas para
   // saber cómo están: la píldora de estado lo dice en el renglón, y los
   // pendientes de arriba de la ficha las cuentan.
-  const [abierto, setAbierto] = useState(proyectos.length === 1);
+  // También arranca abierta la obra de la póliza que se vino a ver.
+  const [abierto, setAbierto] = useState(
+    proyectos.length === 1 || (p.fianzas || []).some((f) => f.id === fianzaEnfocada)
+  );
   const [editando, setEditando] = useState(false);
   const [nuevaFianza, setNuevaFianza] = useState(false);
   const [verDocs, setVerDocs] = useState(false);
@@ -3991,6 +4006,7 @@ function Proyecto({
             <TablaFianzas
               clienteId={clienteId}
               fianzas={registros}
+              fianzaEnfocada={fianzaEnfocada}
               proyectos={proyectos}
               afianzadoras={afianzadoras}
               tipos={tipos}
@@ -4026,9 +4042,15 @@ function Proyecto({
   );
 }
 
-function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tiposDoc, lineas = [], onChange, flash }) {
+function TablaFianzas({ clienteId, fianzas, fianzaEnfocada, proyectos, afianzadoras, tipos, tiposDoc, lineas = [], onChange, flash }) {
   const [editandoId, setEditandoId] = useState(null);
   const [docsAbiertos, setDocsAbiertos] = useState(null);
+  // La póliza que se vino a ver se trae a la vista una vez, al llegar: en un
+  // fiado con varias obras puede quedar muy abajo.
+  const enfocada = useRef(null);
+  useEffect(() => {
+    enfocada.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, []);
 
   if (!fianzas.length) {
     return <div className="px-4 py-5 text-center text-xs text-slate-400">Sin fianzas ni previos en este proyecto.</div>;
@@ -4084,7 +4106,11 @@ function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tipo
                 </td>
               </tr>
             ) : (
-              <tr key={f.id} className="hover:bg-white/70">
+              <tr
+                key={f.id}
+                ref={f.id === fianzaEnfocada ? enfocada : undefined}
+                className={f.id === fianzaEnfocada ? 'bg-indigo-50' : 'hover:bg-white/70'}
+              >
                 <td className="px-3 py-1.5 pl-5 text-slate-700 whitespace-nowrap">
                   <span className="flex items-center gap-1.5">
                     <span className="font-mono">{f.numero_poliza}</span>
