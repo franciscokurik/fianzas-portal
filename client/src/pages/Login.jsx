@@ -7,6 +7,7 @@ import {
   LockKeyhole,
 } from 'lucide-react';
 import { useAuth } from '../auth.jsx';
+import MarcoAcceso from '../components/MarcoAcceso.jsx';
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -33,97 +34,67 @@ export default function Login() {
   }
 
   return (
-    <main className="login-shell">
-      {/* El fondo del panel (#fbfaf8) es el mismo tono que el papel del dibujo,
-          así que la hoja se extiende sin costura hasta los bordes. */}
-      <section className="login-art-panel">
-        <img
-          className="login-art"
-          src="/login-illustration.webp"
-          alt="Torre Fortex en Monterrey, dibujada a lápiz frente al Cerro de la Silla"
-          width="1536"
-          height="1024"
-        />
+    <MarcoAcceso>
+      <div className="login-form-heading">
+        <p className="login-form-kicker">Bienvenido de vuelta</p>
+        <h2>Inicia sesión</h2>
+        <p>Ingresa tus credenciales para continuar a tu portal.</p>
+      </div>
 
-        <header className="login-brand">
-          <div>
-            <p className="login-wordmark">Fortex</p>
-            <p className="login-product-name">Portal de Fianzas</p>
-          </div>
-        </header>
-      </section>
-
-      <section className="login-access-panel">
-        <div className="login-access-status">
-          <span className="login-status-dot" aria-hidden="true" />
-          Sistema disponible
+      <form onSubmit={onSubmit} className="login-form">
+        <div className="login-field">
+          <label htmlFor="identificador">RFC o correo electrónico</label>
+          <input
+            id="identificador"
+            name="identificador"
+            value={identificador}
+            onChange={(e) => setId(e.target.value)}
+            autoFocus
+            autoComplete="username"
+            placeholder="tu@empresa.mx o tu RFC"
+          />
         </div>
 
-        <div className="login-form-wrap">
-          <div className="login-form-heading">
-            <p className="login-form-kicker">Bienvenido de vuelta</p>
-            <h2>Inicia sesión</h2>
-            <p>Ingresa tus credenciales para continuar a tu portal.</p>
-          </div>
-
-          <form onSubmit={onSubmit} className="login-form">
-            <div className="login-field">
-              <label htmlFor="identificador">RFC o correo electrónico</label>
-              <input
-                id="identificador"
-                name="identificador"
-                value={identificador}
-                onChange={(e) => setId(e.target.value)}
-                autoFocus
-                autoComplete="username"
-                placeholder="tu@empresa.mx o tu RFC"
-              />
-            </div>
-
-            <div className="login-field">
-              <label htmlFor="password">Contraseña</label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                placeholder="••••••••"
-              />
-            </div>
-
-            {error && (
-              <div className="login-error" role="alert" aria-live="polite">
-                <AlertTriangle aria-hidden="true" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <button type="submit" disabled={busy} className="login-submit">
-              <span>{busy ? 'Verificando acceso…' : 'Entrar al portal'}</span>
-              {busy
-                ? <Loader2 className="login-spinner" aria-hidden="true" />
-                : <ArrowRight aria-hidden="true" />}
-            </button>
-
-            <p className="login-forgot">
-              <Link to="/recuperar">¿Olvidaste tu contraseña?</Link>
-            </p>
-          </form>
-
-          {/* Aquí vivían las cuentas de demostración con sus contraseñas. No
-              van en la pantalla de acceso ni en local: las que siembra el seed
-              están documentadas en el README, que es donde se buscan. */}
-
-          <p className="login-security-note">
-            <LockKeyhole aria-hidden="true" />
-            Acceso protegido. Tus credenciales se transmiten de forma segura.
-          </p>
+        <div className="login-field">
+          <label htmlFor="password">Contraseña</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            placeholder="••••••••"
+          />
         </div>
 
-        <p className="login-access-footer">Fortex · Portal interno de gestión</p>
-      </section>
-    </main>
+        {error && (
+          <div className="login-error" role="alert" aria-live="polite">
+            <AlertTriangle aria-hidden="true" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <button type="submit" disabled={busy} className="login-submit">
+          <span>{busy ? 'Verificando acceso…' : 'Entrar al portal'}</span>
+          {busy
+            ? <Loader2 className="login-spinner" aria-hidden="true" />
+            : <ArrowRight aria-hidden="true" />}
+        </button>
+
+        <p className="login-forgot">
+          <Link to="/recuperar">¿Olvidaste tu contraseña?</Link>
+        </p>
+      </form>
+
+      {/* Aquí vivían las cuentas de demostración con sus contraseñas. No
+          van en la pantalla de acceso ni en local: las que siembra el seed
+          están documentadas en el README, que es donde se buscan. */}
+
+      <p className="login-security-note">
+        <LockKeyhole aria-hidden="true" />
+        Acceso protegido. Tus credenciales se transmiten de forma segura.
+      </p>
+    </MarcoAcceso>
   );
 }

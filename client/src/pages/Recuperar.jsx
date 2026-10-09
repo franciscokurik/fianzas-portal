@@ -2,37 +2,18 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, CheckCircle2, Loader2 } from 'lucide-react';
 import { api } from '../api.js';
+import MarcoAcceso from '../components/MarcoAcceso.jsx';
 
 // Una sola pantalla para las dos mitades del trámite: sin token en la URL pide
 // el correo, y con token pide la contraseña nueva. Reusa el marco del login
-// para que se sienta el mismo lugar y no un formulario perdido.
+// (MarcoAcceso) para que se sienta el mismo lugar y no un formulario perdido.
 export default function Recuperar() {
   const [params] = useSearchParams();
   const token = params.get('token');
   return (
-    <main className="login-shell">
-      <section className="login-art-panel">
-        <img
-          className="login-art"
-          src="/login-illustration.webp"
-          alt="Torre Fortex en Monterrey, dibujada a lápiz frente al Cerro de la Silla"
-          width="1536"
-          height="1024"
-        />
-        <header className="login-brand">
-          <div>
-            <p className="login-wordmark">Fortex</p>
-            <p className="login-product-name">Portal de Fianzas</p>
-          </div>
-        </header>
-      </section>
-
-      <section className="login-access-panel">
-        <div className="login-form-wrap">
-          {token ? <NuevaContrasena token={token} /> : <PedirEnlace />}
-        </div>
-      </section>
-    </main>
+    <MarcoAcceso>
+      {token ? <NuevaContrasena token={token} /> : <PedirEnlace />}
+    </MarcoAcceso>
   );
 }
 
@@ -64,7 +45,7 @@ function PedirEnlace() {
           <h2>Enlace enviado</h2>
           <p>{enviado}</p>
         </div>
-        <div className="login-error" style={{ borderColor: '#a7f3d0', background: '#ecfdf5', color: '#065f46' }}>
+        <div className="login-error login-aviso-ok">
           <CheckCircle2 aria-hidden="true" />
           <span>El enlace vence en una hora. Si no llega, revisa la carpeta de no deseados.</span>
         </div>

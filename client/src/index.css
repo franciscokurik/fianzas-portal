@@ -858,16 +858,14 @@ body {
 }
 
 /* --------------------------------------------------------------------------
-   Acceso (login y recuperar contraseña)
+   Acceso (login y recuperar contraseña) — ver components/MarcoAcceso.jsx
    --------------------------------------------------------------------------
    Con el sistema de diseño de FortexLink, el mismo del panel interno y de
    hr-system: Inter, el azul acero de la marca en el botón, el logotipo en el
-   azul institucional y esquinas de 6px. Antes era la versión editorial —botón
-   negro, campos a 2px—, y entrar al portal parecía otro producto que el panel
-   de adentro.
+   azul institucional, esquinas de 6px en controles y 14px en la tarjeta.
 
-   Lo que se queda es el dibujo de la Torre: el panel del arte conserva el tono
-   del papel (#fbfaf8) para que la hoja se extienda sin costura. */
+   La tarjeta va al centro, sobre el lienzo vivo de FortexLink: los cuadros
+   de la marca flotando despacio sobre un fondo que cambia de tono. */
 .login-shell {
   --login-ink: #101012;
   --login-ink-2: #3d3d42;
@@ -880,12 +878,15 @@ body {
   --login-brand-text: #3c6c90;
   --login-brand-ring: rgba(68, 123, 164, 0.12);
   --login-logo: #214497;
-  --login-paper: #fbfaf8;
+  --login-bg: #f5f9fc;
+  position: relative;
   min-height: 100vh;
   min-height: 100svh;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(440px, 34%, 540px);
-  background: var(--login-paper);
+  place-items: center;
+  padding: 72px 20px;
+  overflow: hidden;
+  background: var(--login-bg);
   color: var(--login-ink);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 13.5px;
@@ -894,49 +895,50 @@ body {
   font-feature-settings: 'cv05' 1, 'ss03' 1;
 }
 
-.login-art-panel {
-  position: relative;
-  overflow: hidden;
-  min-height: 100vh;
-  min-height: 100svh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(34px, 4vw, 64px);
-  background: var(--login-paper);
-}
-
-.login-art {
+/* ── El fondo: el lienzo vivo de FortexLink (components/LienzoVivo.jsx) ── */
+.acceso-lienzo {
+  position: fixed;
+  inset: 0;
   width: 100%;
   height: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  object-position: center;
-  user-select: none;
-  -webkit-user-drag: none;
+  z-index: 0;
+}
+
+/* Un velo suave en el centro, como en FortexLink: le baja el contraste al
+   fondo justo donde está la tarjeta, sin apagar las orillas. */
+.acceso-velo {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.6;
+  background: radial-gradient(ellipse 58% 44% at 50% 48%, var(--login-bg) 0%, transparent 72%);
+}
+
+/* ── Lo de enfrente ───────────────────────────────────────────────────── */
+.login-centro {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 400px);
+  animation: login-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .login-brand {
-  position: absolute;
-  top: clamp(28px, 3vw, 44px);
-  left: clamp(28px, 3.5vw, 52px);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  margin-bottom: 18px;
+  text-align: center;
 }
 
-/* El logotipo: "Fortex" en el azul institucional, sin monograma aparte. */
 .login-wordmark {
   margin: 0;
   color: var(--login-logo);
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 700;
   line-height: 1;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.03em;
 }
 
 .login-product-name {
-  margin: 6px 0 0;
+  margin: 7px 0 0;
   color: var(--login-faint);
   font-size: 10px;
   font-weight: 600;
@@ -945,26 +947,27 @@ body {
   text-transform: uppercase;
 }
 
-.login-access-panel {
-  position: relative;
-  min-height: 100vh;
-  min-height: 100svh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(44px, 6vh, 76px) clamp(32px, 3.5vw, 56px);
+.login-card {
+  padding: 30px 30px 26px;
   background: #ffffff;
-  border-left: 1px solid var(--login-line);
+  border: 1px solid var(--login-line);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px -8px rgba(16, 16, 18, 0.14), 0 2px 6px rgba(16, 16, 18, 0.05);
 }
 
 .login-access-status {
   position: absolute;
-  top: 28px;
-  right: 32px;
+  top: 24px;
+  right: 28px;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--login-faint);
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--login-line);
+  border-radius: 999px;
+  color: var(--login-muted);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.07em;
@@ -978,13 +981,8 @@ body {
   border-radius: 999px;
 }
 
-.login-form-wrap {
-  width: min(100%, 380px);
-  animation: login-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
 .login-form-heading {
-  margin-bottom: 26px;
+  margin-bottom: 22px;
 }
 
 .login-form-kicker {
@@ -1000,9 +998,9 @@ body {
 .login-form-heading h2 {
   margin: 0;
   color: var(--login-ink);
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 600;
-  line-height: 1.15;
+  line-height: 1.2;
   letter-spacing: -0.03em;
 }
 
@@ -1054,7 +1052,7 @@ body {
 }
 
 /* Aviso en línea: rojo apagado, sin barra de color — es para decir la
-   consecuencia, no para gritar. */
+   consecuencia, no para gritar. Su variante verde es el acuse de "listo". */
 .login-error {
   display: flex;
   align-items: flex-start;
@@ -1074,6 +1072,16 @@ body {
   margin-top: 1px;
   flex: 0 0 auto;
   color: #b91c1c;
+}
+
+.login-aviso-ok {
+  color: #14532d;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.login-aviso-ok svg {
+  color: #15803d;
 }
 
 .login-submit {
@@ -1140,7 +1148,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin: 20px 0 0;
+  margin: 18px 0 0;
   color: var(--login-faint);
   font-size: 11.5px;
   line-height: 1.4;
@@ -1154,8 +1162,9 @@ body {
 
 .login-access-footer {
   position: absolute;
-  bottom: 24px;
+  bottom: 22px;
   left: 50%;
+  z-index: 1;
   margin: 0;
   color: var(--login-faint);
   font-size: 11px;
@@ -1172,50 +1181,21 @@ body {
   to { transform: rotate(360deg); }
 }
 
-@media (max-width: 1023px) {
+/* En el teléfono la tarjeta llena casi todo el ancho, y el estado del
+   sistema se mueve arriba al centro para no taparla. */
+@media (max-width: 640px) {
   .login-shell {
-    display: block;
-  }
-
-  .login-art-panel {
-    min-height: 0;
-    height: clamp(210px, 29vh, 310px);
-    padding: 0;
-    border-bottom: 1px solid var(--login-line);
-  }
-
-  .login-art {
-    object-fit: cover;
-    object-position: center 42%;
-  }
-
-  .login-brand {
-    top: 18px;
-    left: 20px;
-  }
-
-  .login-access-panel {
-    min-height: 0;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
-    padding: 38px 20px 48px;
-    border-left: 0;
+    padding: 64px 16px 56px;
   }
 
   .login-access-status {
-    top: 17px;
-    right: 20px;
+    top: 16px;
+    right: 50%;
+    transform: translateX(50%);
   }
 
-  .login-form-wrap {
-    width: min(100%, 420px);
-  }
-
-  .login-access-footer {
-    position: static;
-    margin-top: 32px;
-    transform: none;
+  .login-card {
+    padding: 24px 20px 22px;
   }
 }
 
@@ -1288,14 +1268,10 @@ body {
     height: 15px;
   }
 
-  .login-form-heading h2 {
-    font-size: 34px;
-  }
-
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .login-form-wrap {
+  .login-centro {
     animation: none;
   }
 
