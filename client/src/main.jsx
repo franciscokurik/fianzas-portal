@@ -47,7 +47,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/recuperar" element={<Recuperar />} />
           <Route path="/restablecer" element={<Recuperar />} />
           <Route path="/" element={<Home />} />
-          <Route path="/admin" element={<Protected internoOnly><Admin /></Protected>} />
+          {/* El panel tiene sus secciones adentro (/admin/clientes/7, /admin/comisiones…):
+              Admin.jsx las resuelve con sus propias rutas. */}
+          <Route path="/admin/*" element={<Protected internoOnly><Admin /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

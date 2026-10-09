@@ -184,7 +184,7 @@ export function CumplimientoBadge({ estado, verificada }) {
 
   return (
     <span
-      className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${e.cls}`}
+      className={`estado-pill text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${e.cls}`}
       title={cubiertaDeVerdad
         ? 'Tiene vigente cada uno de los tipos de fianza que esta partida exige.'
         : e.ayuda}
@@ -318,7 +318,7 @@ export function pendientesDelFiado({
   // '<= 0' y no '< 0': agotada es agotada, y en cero no le cabe otra fianza.
   const agotadas = lineas.filter((l) => l.disponible <= 0).length;
   if (agotadas) {
-    fuera.push(chip('linea', `Sin crédito disponible con ${agotadas} afianzadora(s)`, 'rose', 'obras'));
+    fuera.push(chip('linea', `Sin crédito disponible con ${agotadas} afianzadora(s)`, 'rose', 'credito'));
   }
 
   const previos = fianzas.filter((f) => f.clase === 'previo').length;
@@ -396,7 +396,7 @@ export function TipoClienteBadge({ tipo }) {
   if (tipo !== 'contratante') return null;
   return (
     <span
-      className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-sky-100 text-sky-700 whitespace-nowrap"
+      className="estado-pill text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-sky-100 text-sky-700 whitespace-nowrap"
       title="Contratante: no compra fianzas, las exige a sus proveedores"
     >
       Contratante
@@ -407,7 +407,7 @@ export function TipoClienteBadge({ tipo }) {
 export function EstadoBadge({ estado }) {
   const e = ESTADOS[estado] || { label: estado, cls: 'bg-slate-100 text-slate-600' };
   return (
-    <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${e.cls}`}>
+    <span className={`estado-pill text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${e.cls}`}>
       {e.label}
     </span>
   );
@@ -420,7 +420,7 @@ export function ClaseBadge({ clase }) {
   if (clase !== 'previo') return null;
   return (
     <span
-      className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-violet-100 text-violet-700 whitespace-nowrap"
+      className="estado-pill text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-violet-100 text-violet-700 whitespace-nowrap"
       title="Previo: capturado antes de que la afianzadora emita la póliza"
     >
       Previo

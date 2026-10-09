@@ -2,6 +2,101 @@
 @tailwind components;
 @tailwind utilities;
 
+/* --------------------------------------------------------------------------
+   Escalas de color (ver tailwind.config.js)
+   --------------------------------------------------------------------------
+   Por defecto, las de Tailwind tal cual: es lo que ve el portal de los
+   clientes, y no debe moverse. */
+:root {
+  --indigo-50: 238 242 255;
+  --indigo-100: 224 231 255;
+  --indigo-200: 199 210 254;
+  --indigo-300: 165 180 252;
+  --indigo-400: 129 140 248;
+  --indigo-500: 99 102 241;
+  --indigo-600: 79 70 229;
+  --indigo-700: 67 56 202;
+  --indigo-800: 55 48 163;
+  --indigo-900: 49 46 129;
+  --indigo-950: 30 27 75;
+  --slate-50: 248 250 252;
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+  --slate-700: 51 65 85;
+  --slate-800: 30 41 59;
+  --slate-900: 15 23 42;
+  --slate-950: 2 6 23;
+}
+
+/* --------------------------------------------------------------------------
+   Panel interno de Fortex (.fx-admin)
+   --------------------------------------------------------------------------
+   El sistema de diseño de las herramientas internas: un solo azul de marca,
+   sólido; gris cálido; Geist para todo y Geist Mono solo para identificadores
+   (póliza, RFC). Plano y denso: es una herramienta de trabajo, no una landing.
+
+   indigo-* ES el azul de marca: rebrandear es cambiar estas once líneas. */
+.fx-admin {
+  --indigo-50: 238 241 251;
+  --indigo-100: 213 220 239;
+  --indigo-200: 170 186 222;
+  --indigo-300: 122 149 204;
+  --indigo-400: 79 114 187;
+  --indigo-500: 46 85 168;
+  --indigo-600: 30 58 156;   /* el color principal */
+  --indigo-700: 21 41 110;   /* hover */
+  --indigo-800: 15 30 82;
+  --indigo-900: 10 20 55;
+  --indigo-950: 6 12 34;
+  --slate-50: 249 248 247;
+  --slate-100: 241 240 238;
+  --slate-200: 228 226 222;
+  --slate-300: 204 201 195;
+  --slate-400: 158 154 147;
+  --slate-500: 117 113 106;
+  --slate-600: 90 86 80;
+  --slate-700: 67 63 59;
+  --slate-800: 44 42 39;
+  --slate-900: 26 25 23;
+  --slate-950: 13 12 11;
+
+  --fx-header: 64px;
+  --fx-sidebar: 220px;
+  --fx-sidebar-colapsada: 72px;
+
+  min-height: 100vh;
+  background: rgb(var(--slate-50));
+  color: rgb(var(--slate-800));
+  font-family: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.fx-admin .font-mono,
+.fx-admin code {
+  font-family: 'Geist Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+}
+
+/* Números alineados en cualquier contexto de datos. */
+.fx-admin table,
+.fx-admin [data-tabular] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Las píldoras de estado de lib.jsx las comparten el panel y el portal de los
+   clientes, que las quiere en versalitas. Aquí van redondas y en minúsculas,
+   como pide el sistema interno, sin tocar el componente ni el portal. */
+.fx-admin .estado-pill {
+  border-radius: 9999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 :root {
   font-family: Arial, Helvetica, sans-serif;
   color: #202020;

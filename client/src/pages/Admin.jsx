@@ -1,42 +1,47 @@
 import { useEffect, useState } from 'react';
+import { Routes, Route, Navigate, Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  LogOut, Building2, Plus, Save, Download,
+  Building2, Plus, Save, Download,
   Users, FileText, Files, CheckCircle2, UserPlus, AlertTriangle,
-  CreditCard, Trash2, Briefcase, Pencil, X, Bell, ListChecks, Check,
-  Paperclip, Upload, FileDown, Mail, KeyRound, UserCog, ShieldCheck, Link2,
-  Settings, ChevronRight,
+  CreditCard, Trash2, Briefcase, Pencil, X, ListChecks, Check,
+  Paperclip, Upload, FileDown, Mail, KeyRound, UserCog, ShieldCheck,
+  Settings, ChevronRight, ChevronDown, ChevronUp, ArrowLeft, Search,
 } from 'lucide-react';
 import { api, getToken, subirACloudinary } from '../api.js';
 import { useAuth } from '../auth.jsx';
+import AppShell from '../components/admin/AppShell.jsx';
+import Comisiones from './Comisiones.jsx';
 import {
   mxn, mxnCents, fmtDate, yaVencio, EstadoBadge, ClaseBadge, InputPesos,
   CumplimientoBadge, TipoClienteBadge, ESTATUS_PROYECTO, etiquetaEstatus,
   ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, pesoArchivo, revisarArchivo,
-  pendientesDelFiado, pendientesDelContratante, estadoDocCliente, obraTienePendiente,
+  pendientesDelFiado, pendientesDelContratante, estadoDocCliente,
 } from '../lib.jsx';
 
+// Los controles del sistema interno: foco con anillo azul, esquinas de 8px en
+// campos y botones chicos.
 const inputCls =
-  'w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100';
+  'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-700';
 const btnPrimary =
-  'flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50';
+  'flex items-center gap-1.5 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50';
 const btnSecondary =
-  'flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300';
+  'flex items-center gap-1 border border-slate-200 bg-white text-slate-600 px-2.5 py-1.5 rounded-lg text-xs font-medium hover:bg-slate-50 transition-colors disabled:opacity-50';
 
 // Los grupos en que se pintan los pendientes, en este orden. El tono de cada
 // pendiente (lib.jsx) dice a qué grupo va. Se pinta UNA etiqueta por grupo y el
 // texto de cada pendiente en gris: antes cada chip llevaba su propio color y con
 // seis encendidos la pantalla parecía un semáforo descompuesto.
 const GRUPOS_PENDIENTE = [
-  { tono: 'rose',   label: 'Atender ya',    punto: 'bg-rose-500',   texto: 'text-rose-700' },
-  { tono: 'amber',  label: 'Pronto',        punto: 'bg-amber-500',  texto: 'text-amber-700' },
-  { tono: 'slate',  label: 'Por completar', punto: 'bg-slate-400',  texto: 'text-slate-500' },
-  { tono: 'violet', label: 'En trámite',    punto: 'bg-slate-300',  texto: 'text-slate-500' },
+  { tono: 'rose',   label: 'Atender ya',    corto: 'urgente(s)',     punto: 'bg-red-500',    texto: 'text-red-700' },
+  { tono: 'amber',  label: 'Pronto',        corto: 'para pronto',    punto: 'bg-amber-500',  texto: 'text-amber-700' },
+  { tono: 'slate',  label: 'Por completar', corto: 'por completar',  punto: 'bg-slate-400',  texto: 'text-slate-500' },
+  { tono: 'violet', label: 'En trámite',    corto: 'en trámite',     punto: 'bg-blue-400',   texto: 'text-slate-500' },
 ];
 
 // La marca de cada renglón de la lista de clientes, por tono.
 const TONO_ALERTA = {
-  rose:  'bg-rose-50 text-rose-700 border-rose-200',
-  amber: 'bg-amber-50 text-amber-800 border-amber-200',
+  rose:  'bg-red-100 text-red-700',
+  amber: 'bg-amber-100 text-amber-700',
 };
 
 // Lo que cada renglón de la lista de clientes tiene que decir, de más a menos
@@ -86,15 +91,18 @@ function cuandoRecordatorio(dias) {
 
 export default function Admin() {
   const { user, logout } = useAuth();
-  // Los tres niveles usan la misma pantalla; lo que cambia es qué se muestra.
+  const navigate = useNavigate();
+  // Los tres niveles usan el mismo panel; lo que cambia es qué se muestra.
   // Ocultar es solo para que no estorbe: quien decide de verdad es el servidor
   // en cada ruta.
-  //   vendedor -> solo su cartera, y sin nada de lo que es de la casa.
-  //   operador -> todo salvo las cuentas de acceso y la baja de empresas.
+  //   vendedor -> solo su cartera y sus comisiones, sin nada de la casa.
+  //   operador -> todo salvo las cuentas de acceso, la baja de empresas y las
+  //               comisiones.
   //   admin    -> todo.
   const esAdmin = user?.role === 'admin';
   const esVendedor = user?.role === 'vendedor';
   const puedeOperar = !esVendedor;
+  const veComisiones = esAdmin || esVendedor;
 
   const [clientes, setClientes] = useState([]);
   const [internos, setInternos] = useState([]);
@@ -106,8 +114,6 @@ export default function Admin() {
   const [recordatorios, setRecordatorios] = useState([]);
   const [sel, setSel] = useState(null);
   const [detalle, setDetalle] = useState(null);
-  const [busca, setBusca] = useState('');
-  const [altaCliente, setAltaCliente] = useState(false);
   const [msg, setMsg] = useState('');
   const [avisoOp, setAvisoOp] = useState('');
   const [errorCarga, setErrorCarga] = useState('');
@@ -139,7 +145,7 @@ export default function Admin() {
     //
     // 'internos' se carga para todo puedeOperar aunque la tarjeta de Personal
     // sea solo del admin: el operador la necesita para el selector de vendedor
-    // del alta de cliente.
+    // del alta de cliente, y el admin para el filtro de vendedor de comisiones.
     if (puedeOperar) { cargarDocsRequeridos(); cargarInternos(); }
   }, [puedeOperar]);
 
@@ -164,19 +170,15 @@ export default function Admin() {
   // Cualquier cambio en fianzas puede mover los recordatorios pendientes.
   const refrescarTodo = () => { recargarDetalle(); cargarClientes(); cargarRecordatorios(); };
 
-  // Abrir un cliente cierra el alta: los dos viven en el mismo panel, y dejar el
-  // formulario montado debajo haría que el operador siguiera capturando algo que
-  // ya no está viendo.
-  const abrirCliente = (id) => { setAltaCliente(false); abrirDetalle(id); };
+  // Cada cliente tiene su dirección (/admin/clientes/7): se puede volver con el
+  // botón de atrás del navegador y mandar la liga a alguien.
+  const irACliente = (id) => navigate(`/admin/clientes/${id}`);
 
   // ¿Este cliente tiene algo que atender? La misma regla que pinta la marca del
   // renglón (alertasDelCliente), para que el filtro y la marca no discrepen.
   const tienePendiente = (c) => alertasDelCliente(c).length > 0;
-
-  // La bandeja es el panel sin cliente abierto. Su número es lo que hay que
-  // mover hoy: recordatorios más clientes con alguna marca.
-  const enBandeja = !altaCliente && !detalle;
-  const verBandeja = () => { setAltaCliente(false); setSel(null); setDetalle(null); };
+  // El número de la campana: recordatorios más clientes con alguna marca. Es
+  // lo mismo que enlista "Para atender", no otra cuenta.
   const totalBandeja = recordatorios.length + clientes.filter(tienePendiente).length;
 
   // Atender un recordatorio mueve también la marca del cliente en la lista.
@@ -187,218 +189,170 @@ export default function Admin() {
     flash('Recordatorio marcado como atendido');
   };
 
-  const termino = busca.trim().toLowerCase();
-  const visibles = termino
-    ? clientes.filter((c) => `${c.razon_social} ${c.rfc || ''}`.toLowerCase().includes(termino))
-    : clientes;
-  // Cuántos con pendiente está tapando el buscador. Se dice: un filtro que
-  // esconde un pendiente sin avisar es lo mismo que no tenerlo.
-  const ocultosConPendiente = clientes.filter(
-    (c) => tienePendiente(c) && !visibles.includes(c)
-  ).length;
-
   return (
-    <div className="portal-shell portal-admin min-h-screen">
-      <header className="portal-topbar bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="portal-topbar-inner max-w-[1400px] mx-auto px-6 py-3">
-          <span className="portal-monogram" aria-hidden="true">F</span>
-          <div className="portal-brand">
-            <span className="portal-brand-name text-sm font-semibold text-slate-700">
-              <strong>FORTEX</strong>
-              <small>{esVendedor ? 'CARTERA DE CLIENTES' : 'ADMINISTRACIÓN DE FIANZAS'}</small>
-            </span>
-          </div>
-          {/* Quién está adentro va aquí y no en un titular: la barra ya dice
-              dónde estás, y el titular de 35px se comía el primer pantallazo
-              para repetirlo. */}
-          <div className="portal-topbar-actions flex items-center gap-3">
-            <span className="portal-user-chip text-sm text-slate-500 hidden sm:inline">{user?.nombre}</span>
-            <button onClick={logout} className={`${btnSecondary} portal-logout`}>
-              <LogOut className="h-3.5 w-3.5" /> Salir
-            </button>
-          </div>
+    <AppShell user={user} onSalir={logout} pendientes={totalBandeja}>
+      {avisoOp && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-start gap-2 mb-4">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span className="flex-1">{avisoOp}</span>
+          <button onClick={() => setAvisoOp('')} className="text-amber-500 hover:text-amber-800 shrink-0">
+            <X className="h-4 w-4" />
+          </button>
         </div>
-      </header>
+      )}
 
-      <main className="portal-main max-w-[1400px] mx-auto px-6 py-6">
-        {avisoOp && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-start gap-2 mb-4">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-            <span className="flex-1">{avisoOp}</span>
-            <button onClick={() => setAvisoOp('')} className="text-amber-500 hover:text-amber-800 shrink-0">
-              <X className="h-4 w-4" />
-            </button>
+      {/* Flotando y no arriba del contenido: como banner empujaba toda la
+          pantalla hacia abajo tres segundos y luego la regresaba, justo
+          cuando uno iba a darle clic a algo. */}
+      {msg && (
+        <div className="fixed bottom-5 right-5 z-40 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-sm text-emerald-700 flex items-center gap-2 shadow-sm">
+          <CheckCircle2 className="w-4 h-4 shrink-0" /> {msg}
+        </div>
+      )}
+
+      {errorCarga && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 flex items-start gap-2 mb-4">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium">No se pudo cargar la información.</p>
+            <p className="text-xs mt-0.5 text-rose-700">{errorCarga}</p>
+            <p className="text-xs mt-1 text-rose-700">
+              Las listas pueden verse vacías aunque los datos existan.
+              Si es la primera vez tras un despliegue, falta correr <code>/api/setup</code>.
+            </p>
           </div>
-        )}
+          <button onClick={() => setErrorCarga('')} className="text-rose-400 hover:text-rose-700 shrink-0">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
-        {/* Flotando y no arriba del contenido: como banner empujaba toda la
-            pantalla hacia abajo tres segundos y luego la regresaba, justo
-            cuando uno iba a darle clic a algo. */}
-        {msg && (
-          <div className="fixed bottom-5 right-5 z-40 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-sm text-emerald-700 flex items-center gap-2 shadow-sm">
-            <CheckCircle2 className="w-4 h-4 shrink-0" /> {msg}
-          </div>
-        )}
-
-        {errorCarga && (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 flex items-start gap-2 mb-4">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-            <div className="flex-1">
-              <p className="font-medium">No se pudo cargar la información.</p>
-              <p className="text-xs mt-0.5 text-rose-700">{errorCarga}</p>
-              <p className="text-xs mt-1 text-rose-700">
-                Las listas de abajo pueden verse vacías aunque los datos existan.
-                Si es la primera vez tras un despliegue, falta correr <code>/api/setup</code>.
-              </p>
-            </div>
-            <button onClick={() => setErrorCarga('')} className="text-rose-400 hover:text-rose-700 shrink-0">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-
-        {/* Los recordatorios ya no van en una franja fija encima de todo: viven
-            en "Para atender" (todos) y dentro de cada cliente (los suyos). La
-            franja se veía igual estuviera uno donde estuviera, empujaba la
-            pantalla, y con el cliente abierto competía con sus propios
-            pendientes. */}
-
-        {/* Cuatro columnas y a partir de xl, no tres desde lg: el detalle lleva
-            la tabla de fianzas, que son diez columnas y pide ~805px. Con un
-            tercio del ancho, o con un cuarto por debajo de 1280px, no cabía y
-            aparecía scroll horizontal. Más angosto que eso se apila y el
-            detalle se queda con el ancho completo. */}
-        <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 items-start">
-          {/* Columna izquierda */}
-          <div className="space-y-4">
-            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-                <Users className="w-4 h-4 text-slate-500" />
-                <h3 className="text-sm font-semibold text-slate-700">
-                  {esVendedor ? 'Mi cartera' : 'Clientes'} ({clientes.length})
-                </h3>
-                {/* Dar de alta un cliente pertenece a la lista de clientes, no a
-                    un bloque suelto arriba. */}
-                {puedeOperar && (
-                  <button
-                    onClick={() => setAltaCliente((v) => !v)}
-                    className={`${btnSecondary} ml-auto`}
-                  >
-                    <Plus className={`h-3.5 w-3.5 transition-transform ${altaCliente ? 'rotate-45' : ''}`} />
-                    Agregar
-                  </button>
-                )}
-              </div>
-
-              {/* La bandeja: lo de hoy en toda la cartera. Va como primer
-                  renglón de la lista porque es el lugar al que se regresa
-                  después de atender a un cliente. */}
-              <button
-                onClick={verBandeja}
-                className={`w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm border-b border-slate-100 transition-colors border-l-[3px] ${
-                  enBandeja ? 'bg-slate-50 border-l-slate-800 font-semibold text-slate-800' : 'border-l-transparent text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <Bell className="h-4 w-4 text-slate-500 shrink-0" />
-                <span className="flex-1">Para atender</span>
-                {totalBandeja > 0 && (
-                  <span className="text-[11px] tabular-nums font-semibold text-slate-600">{totalBandeja}</span>
-                )}
-              </button>
-
-              {clientes.length > 3 && (
-                <div className="px-3 py-2 border-b border-slate-100">
-                  <input
-                    value={busca}
-                    onChange={(e) => setBusca(e.target.value)}
-                    placeholder="Buscar por razón social o RFC"
-                    className={inputCls}
-                  />
-                  {/* Se confiesa qué está tapando el buscador. Un filtro que
-                      esconde un cliente con pendiente y no lo dice es la misma
-                      mentira que un contador en cero. */}
-                  {busca.trim() && ocultosConPendiente > 0 && (
-                    <p className="text-[11px] text-amber-700 mt-1">
-                      {ocultosConPendiente} cliente(s) con pendiente fuera del filtro.{' '}
-                      <button onClick={() => setBusca('')} className="underline hover:no-underline">
-                        Ver todos
-                      </button>
-                    </p>
-                  )}
+      <Routes>
+        <Route
+          index
+          element={(
+            <div className="space-y-3">
+              <EncabezadoPagina
+                titulo="Para atender"
+                sub={esVendedor
+                  ? 'Lo que hay que mover hoy en tu cartera'
+                  : 'Lo que hay que mover hoy en toda la cartera'}
+              />
+              {clientes.length ? (
+                <ParaAtender
+                  recordatorios={recordatorios}
+                  clientes={clientes}
+                  onAbrirCliente={irACliente}
+                  onAtendido={recordatorioAtendido}
+                />
+              ) : (
+                <div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-sm text-slate-400">
+                  {esVendedor
+                    ? 'Aún no tienes clientes asignados. Te los asigna un operador.'
+                    : 'Todavía no hay clientes. Da de alta el primero desde Clientes.'}
                 </div>
               )}
-
-              {/* La clase max-h-[65vh] se CONSERVA literal: index.css engancha en
-                  ella para darle a cada renglón su alto y —lo importante— al
-                  cliente abierto su filete de color a la izquierda. Renombrarla
-                  deja el índice sin marca de qué cliente se está viendo, justo
-                  ahora que el índice queda fijo en pantalla. */}
-              <div className="divide-y divide-slate-100 max-h-[65vh] xl:max-h-[calc(100vh-260px)] overflow-y-auto">
-                {visibles.map((c) => {
-                  // Una sola marca por renglón: lo más grave que tiene, en
-                  // palabras, y "+n" si hay más. Antes eran un punto ámbar
-                  // —prendido en TODOS— y pedazos de texto en cuatro colores.
-                  // El detalle completo va en el title y al abrir el cliente.
-                  const alertas = alertasDelCliente(c);
-                  const principal = alertas[0];
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => abrirCliente(c.id)}
-                      className={`w-full text-left px-4 py-2.5 hover:bg-slate-50/60 ${sel === c.id ? 'bg-indigo-50/60' : ''}`}
-                    >
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-sm font-medium text-slate-700 truncate" title={c.razon_social}>
-                          {c.razon_social}
-                        </span>
-                        <TipoClienteBadge tipo={c.tipo} />
-                      </div>
-                      {/* La marca abre la segunda línea y no cierra la primera:
-                          a la derecha del nombre le cortaba la razón social, y
-                          aquí quedan todas alineadas en columna, que es como se
-                          recorre la lista buscando qué atender. Lo que tiene va
-                          después, en gris. */}
-                      <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-                        {principal && (
-                          <span
-                            className={`shrink-0 text-[10px] font-medium px-1.5 py-px rounded border tabular-nums whitespace-nowrap ${TONO_ALERTA[principal.tono]}`}
-                            title={alertas.map((a) => a.texto).join('\n')}
-                          >
-                            {principal.corto}{alertas.length > 1 && ` +${alertas.length - 1}`}
-                          </span>
-                        )}
-                        <span className="text-[11px] text-slate-400 tabular-nums truncate">
-                          {c.tipo === 'contratante'
-                            ? `${c.total_proveedores} proveedor(es)`
-                            : `${c.total_proyectos} obra(s) · ${c.total_fianzas} fianza(s)`}
-                          {' · '}
-                          {c.vendedor_nombre || 'Sin vendedor'}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-                {!visibles.length && (
-                  <div className="px-4 py-6 text-center text-xs text-slate-400">
-                    {busca.trim() ? 'Ningún cliente coincide con la búsqueda.' : 'Sin clientes.'}
-                  </div>
-                )}
-              </div>
             </div>
+          )}
+        />
 
-            {/* Los catálogos y el personal van DEBAJO de la lista, no arriba.
-                Son configuración una-vez-y-ya y le estaban robando el primer
-                pantallazo a lo que se usa a diario.
+        <Route
+          path="clientes"
+          element={(
+            <ListaClientes
+              clientes={clientes}
+              esVendedor={esVendedor}
+              puedeOperar={puedeOperar}
+              vendedores={vendedores}
+              onNuevo={() => navigate('/admin/clientes/nuevo')}
+            />
+          )}
+        />
 
-                No van a una pestaña del shell —que fue la primera idea— porque
-                no ahorrarían nada: esta columna y el detalle son hermanas del
-                mismo grid, así que la altura de la fila es la de la más alta, y
-                el detalle siempre lo es. Sacarlas de aquí no acortaría la página
-                ni un píxel, y en cambio se perdería poder ver "Documentos
-                requeridos" al mismo tiempo que el expediente del fiado, que es
-                el único momento en que ese catálogo importa. */}
-            {puedeOperar && (
+        {/* El alta tiene su propia dirección en vez de abrirse encima de la
+            lista: al guardar se va directo a la ficha del cliente recién
+            creado, y "atrás" regresa a la lista sin dejar nada a medias. */}
+        <Route
+          path="clientes/nuevo"
+          element={puedeOperar ? (
+            <div className="space-y-3">
+              <VolverA to="/admin/clientes" label="Clientes" />
+              <NuevoCliente
+                vendedores={vendedores}
+                onCancel={() => navigate('/admin/clientes')}
+                onDone={(id) => {
+                  cargarClientes();
+                  flash('Cliente creado');
+                  navigate(id ? `/admin/clientes/${id}` : '/admin/clientes');
+                }}
+              />
+            </div>
+          ) : <Navigate to="/admin/clientes" replace />}
+        />
+
+        <Route
+          path="clientes/:id"
+          element={(
+            <PaginaCliente detalle={detalle} abrir={abrirDetalle}>
+              {detalle && (
+                <DetalleCliente
+                  // Remonta el detalle al cambiar de cliente. Sin esto, el
+                  // formulario "Agregar proveedor" del padrón se queda abierto y
+                  // con lo tecleado: se empieza a capturar un proveedor para
+                  // Delta, se cambia a otro contratante, y al guardar el alta
+                  // se va al padrón equivocado.
+                  key={detalle.cliente.id}
+                  detalle={detalle}
+                  esAdmin={esAdmin}
+                  puedeOperar={puedeOperar}
+                  vendedores={vendedores}
+                  clientes={clientes}
+                  tiposDocContratante={tiposDocContratante}
+                  recordatorios={recordatorios.filter((r) => r.client_id === detalle.cliente.id)}
+                  onRecordatorioAtendido={recordatorioAtendido}
+                  avisar={avisar}
+                  onEliminado={() => {
+                    setSel(null);
+                    setDetalle(null);
+                    cargarClientes();
+                    cargarRecordatorios();
+                    cargarInternos(); // cambian los conteos de cartera
+                    navigate('/admin/clientes');
+                  }}
+                  afianzadoras={afianzadoras}
+                  tipos={tipos}
+                  tiposDoc={tiposDoc}
+                  onChange={refrescarTodo}
+                  flash={flash}
+                />
+              )}
+            </PaginaCliente>
+          )}
+        />
+
+        <Route
+          path="comisiones"
+          element={veComisiones ? (
+            <Comisiones
+              esAdmin={esAdmin}
+              vendedores={vendedores}
+              afianzadoras={afianzadoras}
+              flash={flash}
+            />
+          ) : <Navigate to="/admin" replace />}
+        />
+
+        {/* Los catálogos y el personal tienen su propia sección. Antes vivían
+            plegados debajo de la lista de clientes para tenerlos a mano junto
+            al expediente; con el menú lateral están a un clic desde cualquier
+            lado y dejan de empujar la lista. */}
+        <Route
+          path="configuracion"
+          element={puedeOperar ? (
+            <div className="space-y-3">
+              <EncabezadoPagina titulo="Configuración" sub="Catálogos de la casa y cuentas de Fortex" />
               <Configuracion
+                siempreAbierta
                 tipos={tipos}
                 docsRequeridos={docsRequeridos}
                 internos={internos}
@@ -406,84 +360,246 @@ export default function Admin() {
                 onAfianzadora={() => { cargarAfianzadoras(); flash('Afianzadora agregada'); }}
                 onTipos={cargarTipos}
                 // Cambiar el catálogo mueve la lista de pendientes de TODOS los
-                // fiados, así que también se refresca el detalle abierto y la
-                // lista: si no, el expediente de la derecha seguiría pidiendo un
-                // papel que acaba de dejar de existir.
+                // fiados, así que también se refresca la lista de clientes.
                 onDocumentos={() => { cargarDocsRequeridos(); recargarDetalle(); cargarClientes(); }}
                 onInternos={() => { cargarInternos(); cargarClientes(); recargarDetalle(); }}
                 flash={flash}
               />
-            )}
-          </div>
+            </div>
+          ) : <Navigate to="/admin" replace />}
+        />
 
-          {/* Columna derecha: el alta, o el detalle del cliente abierto.
+        <Route path="*" element={<Navigate to="/admin" replace />} />
+      </Routes>
+    </AppShell>
+  );
+}
 
-              El alta se pinta AQUÍ y no en la columna de la izquierda, que mide
-              326px a 1440: ocho campos apilados en ese ancho eran justo el
-              "demasiada info por todas partes" del que se quejó el operador. Y
-              es el lugar correcto además por otra razón: al guardar, en este
-              mismo panel aparece el detalle del cliente recién creado. */}
-          <div className="xl:col-span-3 space-y-4">
-            {altaCliente && puedeOperar ? (
-              <NuevoCliente
-                vendedores={vendedores}
-                onCancel={() => setAltaCliente(false)}
-                onDone={(id) => {
-                  setAltaCliente(false);
-                  cargarClientes();
-                  flash('Cliente creado');
-                  if (id) abrirDetalle(id);
-                }}
-              />
-            ) : !detalle ? (
-              clientes.length ? (
-                <ParaAtender
-                  recordatorios={recordatorios}
-                  clientes={clientes}
-                  onAbrirCliente={abrirCliente}
-                  onAtendido={recordatorioAtendido}
-                />
-              ) : (
-                <div className="bg-white border border-dashed border-slate-300 rounded-lg p-10 text-center text-sm text-slate-400">
-                  {esVendedor
-                    ? 'Aún no tienes clientes asignados. Te los asigna un operador.'
-                    : 'Todavía no hay clientes. Da de alta el primero desde "Agregar".'}
-                </div>
-              )
+/* --------------------------------------------------------------------------
+   Piezas de página
+   -------------------------------------------------------------------------- */
+
+// El encabezado de cada sección: título a la izquierda, acciones a la derecha.
+function EncabezadoPagina({ titulo, sub, children }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <h2 className="text-xl font-semibold text-slate-800 leading-tight">{titulo}</h2>
+        {sub && <p className="text-slate-400 text-xs mt-0.5">{sub}</p>}
+      </div>
+      {children && <div className="flex items-center gap-1.5 shrink-0">{children}</div>}
+    </div>
+  );
+}
+
+function VolverA({ to, label }) {
+  return (
+    <Link
+      to={to}
+      className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 transition-colors"
+    >
+      <ArrowLeft className="h-3.5 w-3.5" /> {label}
+    </Link>
+  );
+}
+
+// La ficha de un cliente, por su dirección. Pide el detalle cada vez que cambia
+// el id y no pinta el de otro mientras llega: con la ficha anterior a la vista
+// unos segundos, un clic podía caer en el cliente equivocado.
+function PaginaCliente({ detalle, abrir, children }) {
+  const { id } = useParams();
+  const numero = Number(id);
+  useEffect(() => { abrir(numero); }, [numero]);
+
+  return (
+    <div className="space-y-4">
+      <VolverA to="/admin/clientes" label="Clientes" />
+      {detalle?.cliente.id === numero
+        ? children
+        : <p className="py-16 text-center text-sm text-slate-400">Cargando…</p>}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Lista de clientes
+   --------------------------------------------------------------------------
+   Un listado de verdad, a lo ancho, en vez de la columna angosta de antes: con
+   el menú lateral la ficha del cliente tiene su propia página, y aquí cabe una
+   columna por dato. Las columnas se escriben una vez y las comparten el
+   encabezado y los renglones, para que nunca se desalineen. */
+
+const FILTROS_CLIENTES = [
+  { key: 'todos', label: 'Todos' },
+  { key: 'pendientes', label: 'Con pendientes' },
+  { key: 'fiado', label: 'Fiados' },
+  { key: 'contratante', label: 'Contratantes' },
+];
+
+const COLS_CLIENTES =
+  'grid grid-cols-[minmax(0,1fr)_minmax(0,10rem)_minmax(0,13rem)_minmax(0,9rem)_1rem] gap-x-4 items-center';
+
+function ListaClientes({ clientes, esVendedor, puedeOperar, vendedores, onNuevo }) {
+  const [filtro, setFiltro] = useState('todos');
+  const [busca, setBusca] = useState('');
+  const [vendedor, setVendedor] = useState('todos');
+
+  const conPendiente = (c) => alertasDelCliente(c).length > 0;
+  const pasaFiltro = (c, f = filtro) =>
+    f === 'todos' || (f === 'pendientes' ? conPendiente(c) : c.tipo === f);
+  const termino = busca.trim().toLowerCase();
+  const pasaBusqueda = (c) =>
+    !termino || `${c.razon_social} ${c.rfc || ''}`.toLowerCase().includes(termino);
+  const pasaVendedor = (c) => vendedor === 'todos'
+    || (vendedor === 'sin' ? !c.vendedor_id : String(c.vendedor_id) === vendedor);
+
+  const visibles = clientes.filter((c) => pasaFiltro(c) && pasaBusqueda(c) && pasaVendedor(c));
+  // Cuántos con pendiente están tapando los filtros. Se dice: un filtro que
+  // esconde un pendiente sin avisar es lo mismo que no tenerlo.
+  const ocultosConPendiente = clientes.filter((c) => conPendiente(c) && !visibles.includes(c)).length;
+  const hayFiltros = filtro !== 'todos' || termino || vendedor !== 'todos';
+  const limpiar = () => { setFiltro('todos'); setBusca(''); setVendedor('todos'); };
+
+  return (
+    <div className="space-y-3">
+      <EncabezadoPagina
+        titulo={esVendedor ? 'Mis clientes' : 'Clientes'}
+        sub={`${clientes.length} cliente(s) · ${clientes.filter(conPendiente).length} con pendientes`}
+      >
+        {puedeOperar && (
+          <button
+            onClick={onNuevo}
+            className="flex items-center gap-1 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" /> Nuevo cliente
+          </button>
+        )}
+      </EncabezadoPagina>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {FILTROS_CLIENTES.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setFiltro(t.key)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              filtro === t.key
+                ? 'bg-indigo-600 text-white'
+                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {t.label}
+            <span className={`text-[10px] rounded-full px-1 py-px font-semibold leading-none tabular-nums ${
+              filtro === t.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+            }`}>
+              {clientes.filter((c) => pasaFiltro(c, t.key)).length}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex gap-2">
+        <div className="relative flex-[2] min-w-0">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar por razón social o RFC…"
+            className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400"
+          />
+        </div>
+        {/* El vendedor solo ve su cartera: filtrar por vendedor no le dice nada. */}
+        {puedeOperar && (
+          <select
+            value={vendedor}
+            onChange={(e) => setVendedor(e.target.value)}
+            className="flex-1 min-w-0 px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-700"
+          >
+            <option value="todos">Todos los vendedores</option>
+            {vendedores.map((v) => <option key={v.id} value={String(v.id)}>{v.nombre}</option>)}
+            <option value="sin">Sin vendedor</option>
+          </select>
+        )}
+        {hayFiltros && (
+          <button
+            onClick={limpiar}
+            className="px-2.5 py-1.5 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
+          >
+            Limpiar filtros
+          </button>
+        )}
+      </div>
+
+      {hayFiltros && ocultosConPendiente > 0 && (
+        <p className="text-xs text-amber-700">
+          {ocultosConPendiente} cliente(s) con pendientes quedan fuera de estos filtros.{' '}
+          <button onClick={limpiar} className="underline hover:no-underline">Ver todos</button>
+        </p>
+      )}
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <div className="min-w-[720px]">
+            <div className={`${COLS_CLIENTES} px-5 py-2.5 bg-slate-50 border-b border-slate-200`}>
+              {['Cliente', 'Cartera', 'Pendiente', 'Vendedor', ''].map((t, i) => (
+                <div key={i} className="text-xs font-semibold text-slate-400 uppercase tracking-wide">{t}</div>
+              ))}
+            </div>
+
+            {!visibles.length ? (
+              <div className="py-16 text-center text-slate-400 text-sm">
+                {clientes.length ? 'No hay clientes con los filtros seleccionados.' : 'Todavía no hay clientes.'}
+              </div>
             ) : (
-              <DetalleCliente
-                // Remonta el detalle al cambiar de cliente. Sin esto, el
-                // formulario "Agregar proveedor" del padrón se queda abierto y
-                // con lo tecleado: se empieza a capturar un proveedor para
-                // Delta, se hace clic en otro contratante, y al guardar el alta
-                // se va al padrón equivocado.
-                key={detalle.cliente.id}
-                detalle={detalle}
-                esAdmin={esAdmin}
-                puedeOperar={puedeOperar}
-                vendedores={vendedores}
-                clientes={clientes}
-                tiposDocContratante={tiposDocContratante}
-                recordatorios={recordatorios.filter((r) => r.client_id === detalle.cliente.id)}
-                onRecordatorioAtendido={recordatorioAtendido}
-                avisar={avisar}
-                onEliminado={() => {
-                  setSel(null);
-                  setDetalle(null);
-                  cargarClientes();
-                  cargarRecordatorios();
-                  cargarInternos(); // cambian los conteos de cartera
-                }}
-                afianzadoras={afianzadoras}
-                tipos={tipos}
-                tiposDoc={tiposDoc}
-                onChange={refrescarTodo}
-                flash={flash}
-              />
+              <div className="divide-y divide-slate-100">
+                {visibles.map((c) => {
+                  const alertas = alertasDelCliente(c);
+                  const principal = alertas[0];
+                  return (
+                    <Link
+                      key={c.id}
+                      to={`/admin/clientes/${c.id}`}
+                      className={`${COLS_CLIENTES} px-5 py-3 hover:bg-slate-50 transition-colors group`}
+                    >
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-sm font-semibold text-slate-800 truncate group-hover:text-indigo-700 transition-colors">
+                            {c.razon_social}
+                          </span>
+                          <TipoClienteBadge tipo={c.tipo} />
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5 truncate">
+                          {c.rfc ? <span className="font-mono">{c.rfc}</span> : 'Sin RFC'}
+                        </p>
+                      </div>
+                      <div className="text-xs text-slate-600 tabular-nums">
+                        {c.tipo === 'contratante'
+                          ? `${c.total_proveedores} proveedor(es)`
+                          : `${c.total_proyectos} obra(s) · ${c.total_fianzas} fianza(s)`}
+                      </div>
+                      <div className="min-w-0">
+                        {/* Lo más grave, en palabras; el resto en el title. */}
+                        {principal ? (
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${TONO_ALERTA[principal.tono]}`}
+                            title={alertas.map((a) => a.texto).join('\n')}
+                          >
+                            {principal.corto}{alertas.length > 1 && ` +${alertas.length - 1}`}
+                          </span>
+                        ) : <span className="text-xs text-slate-300">—</span>}
+                      </div>
+                      <div className={`text-xs truncate ${c.vendedor_nombre ? 'text-slate-600' : 'text-slate-400'}`}>
+                        {c.vendedor_nombre || 'Sin vendedor'}
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-indigo-500 transition-colors" />
+                    </Link>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
@@ -574,12 +690,7 @@ function ParaAtender({ recordatorios, clientes, onAbrirCliente, onAtendido }) {
   );
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-        <Bell className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-700">Para atender</h3>
-      </div>
-
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       {!recordatorios.length && !conAlertas.length ? (
         <p className="px-4 py-10 text-center text-sm text-slate-400">
           Nada pendiente en la cartera por ahora. Abre un cliente de la lista para ver su información.
@@ -662,7 +773,7 @@ function CatalogoTipos({ tipos, onChange, flash, embebido }) {
   }
 
   return (
-    <div className={embebido ? '' : 'bg-white border border-slate-200 rounded-lg overflow-hidden'}>
+    <div className={embebido ? '' : 'bg-white border border-slate-200 rounded-xl overflow-hidden'}>
       {!embebido && (
         <button
           onClick={() => setOpen((o) => !o)}
@@ -743,7 +854,7 @@ function CatalogoDocumentos({ tipos, onChange, flash, embebido }) {
   })();
 
   return (
-    <div className={embebido ? '' : 'bg-white border border-slate-200 rounded-lg overflow-hidden'}>
+    <div className={embebido ? '' : 'bg-white border border-slate-200 rounded-xl overflow-hidden'}>
       {!embebido && (
         <button
           onClick={() => setOpen((o) => !o)}
@@ -893,10 +1004,10 @@ function DetalleCliente({
   } = detalle;
   const esContratante = cliente.tipo === 'contratante';
 
-  // La pestaña abierta. Arranca en "Obras y crédito" porque es el trabajo del
-  // día; y al cambiar de cliente vuelve sola al principio, gratis, porque el
-  // shell remonta este componente con key={detalle.cliente.id}.
-  const [vista, setVista] = useState('obras');
+  // La pestaña abierta. Arranca en la que es el trabajo del día —obras o
+  // contratos—; y al cambiar de cliente vuelve sola al principio, gratis,
+  // porque el panel remonta este componente con key={detalle.cliente.id}.
+  const [vista, setVista] = useState(esContratante ? 'contratos' : 'obras');
 
   // Los pendientes, de una sola fuente. Los mismos números alimentan la barra
   // de chips y los contadores de las pestañas.
@@ -912,15 +1023,13 @@ function DetalleCliente({
     + papeleria.filter((p) => p.estado === 'pendiente').length;
   const usuariosActivos = usuarios.filter((u) => u.activo).length;
 
-  // Un chip lleva a su vista. El contratante no tiene pestañas —todo está en una
-  // sola columna—, así que ahí el chip baja hasta la sección de la que habla.
+  // Un pendiente lleva a la pestaña de la que habla. Los del contratante dicen
+  // "proyectos" y "padrón" (lib.jsx): aquí se traducen a sus pestañas.
   const irA = (destino) => {
-    if (esContratante) {
-      document.getElementById(destino === 'padron' ? 'ct-padron' : 'ct-contratos')
-        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      return;
+    const pestana = { proyectos: 'contratos', padron: 'proveedores' }[destino] || destino;
+    if (['obras', 'credito', 'papeles', 'accesos', 'contratos', 'proveedores'].includes(pestana)) {
+      setVista(pestana);
     }
-    if (['obras', 'papeles', 'accesos'].includes(destino)) setVista(destino);
   };
   // Los contratantes que se le pueden ligar a una obra. Sale de la lista que ya
   // está cargada: no hace falta otra ruta.
@@ -1015,23 +1124,45 @@ function DetalleCliente({
     }
   }
 
+  // Las pestañas, con un número que se pinta en ámbar si adentro hay algo que
+  // falta: tabular no puede esconder un pendiente.
+  const descubiertas = proyectos.filter((p) => ['sin_fianza', 'vencida', 'sin_fecha'].includes(estadoDeObra(p))).length;
+  const agotadas = lineas.filter((l) => l.linea_credito > 0 && l.disponible <= 0).length;
+  const pestanas = esContratante
+    ? [
+        { key: 'contratos', label: 'Contratos', icono: Briefcase,
+          cuenta: metricas?.obras_vivas ?? null, alerta: (metricas?.obras_descubiertas ?? 0) > 0 },
+        { key: 'proveedores', label: 'Proveedores', icono: ShieldCheck,
+          cuenta: proveedores.length,
+          alerta: pendientes.some((p) => p.destino === 'padron' && p.tono !== 'violet') },
+        { key: 'accesos', label: 'Accesos', icono: Users, cuenta: usuariosActivos },
+      ]
+    : [
+        { key: 'obras', label: 'Obras', icono: Briefcase, cuenta: proyectos.length, alerta: descubiertas > 0 },
+        { key: 'credito', label: 'Crédito', icono: CreditCard, cuenta: lineas.length, alerta: agotadas > 0 },
+        { key: 'papeles', label: 'Papeles', icono: FileText, cuenta: papelesPendientes || null, alerta: papelesPendientes > 0 },
+        { key: 'accesos', label: 'Accesos', icono: Users, cuenta: usuariosActivos },
+      ];
+
   return (
     <>
-      {/* Encabezado del cliente */}
-      <div className="bg-white border border-slate-200 rounded-lg p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
-              {cliente.razon_social}
+      {/* La ficha se lee en capas: quién es, cuatro cifras y lo urgente.
+          Todo lo demás —obras, crédito, papeles, accesos— va en pestañas, y
+          los pendientes que no urgen se cuentan en una línea que se abre. */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-xl font-semibold text-slate-800 leading-tight">{cliente.razon_social}</h2>
               <TipoClienteBadge tipo={cliente.tipo} />
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {cliente.rfc || 'Sin RFC'}
+            </div>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {cliente.rfc ? <span className="font-mono">{cliente.rfc}</span> : 'Sin RFC'}
               {cliente.telefono && ` · ${cliente.telefono}`}
-              {esContratante && ' · no compra fianzas: se las exige a sus proveedores'}
+              {esContratante && ' · exige fianza a sus proveedores'}
             </p>
           </div>
-          <div className="flex items-end gap-2">
+          <div className="flex items-center gap-2">
             {/* Cambiar de vendedor no es del vendedor: nadie se queda ni se
                 quita clientes a sí mismo. */}
             {puedeOperar ? (
@@ -1042,32 +1173,32 @@ function DetalleCliente({
                 onChange={() => { onChange(); flash('Vendedor actualizado'); }}
               />
             ) : (
-              <span className="text-[11px] text-slate-400">En tu cartera</span>
+              <span className="text-xs text-slate-400">En tu cartera</span>
             )}
-            {/* Dar de baja la empresa se lleva su historial y no tiene deshacer:
-                eso sí queda solo para el administrador. */}
+            {/* Dar de baja se lleva el historial y no tiene deshacer: queda solo
+                para el administrador, y como icono discreto, no como botón
+                al lado de lo que se usa a diario. */}
             {esAdmin && (
               <button
                 onClick={eliminar}
-                className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`}
-                title="Eliminar cliente con todo su historial"
+                className="p-2 rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+                title="Dar de baja al cliente con todo su historial"
               >
-                <Trash2 className="h-3.5 w-3.5" /> Eliminar
+                <Trash2 className="h-4 w-4" />
               </button>
             )}
           </div>
         </div>
 
         {errorBaja && (
-          <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
+          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 flex items-start gap-2">
             <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {errorBaja}
           </div>
         )}
-        {/* Aquí van los hechos y abajo las faltas. La de "Sin fianza vigente"
-            se fue a propósito: era la misma falta que el primer pendiente,
-            contada con otra palabra. Y "Previos" también: ya sale en "En
-            trámite", con el número. */}
-        <div className="mt-3 flex flex-wrap gap-x-8 gap-y-2">
+
+        {/* Los hechos. Cuatro y no seis: la prima neta va en la ayuda de la
+            total, y los previos en "En trámite" de los pendientes. */}
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3">
           {esContratante ? (
             <>
               <Dato label="Proveedores" valor={String(metricas?.proveedores ?? 0)}
@@ -1087,50 +1218,35 @@ function DetalleCliente({
               <Dato label="Afianzado vigente" valor={mxn(afianzadoTotal)}
                     ayuda="Suma de lo que cubren las fianzas vigentes. No incluye previos: todavía no se emiten." />
               <Dato label="Prima total" valor={mxn(sumaPrimaTotal)}
-                    ayuda="Lo que el fiado paga: prima neta + derecho de póliza + IVA. Sin previos." />
-              <Dato label="Prima neta" valor={mxn(sumaPrimaNeta)}
-                    ayuda="La tarifa de la afianzadora, sin derecho de póliza ni IVA" />
+                    ayuda={`Lo que el fiado paga: prima neta (${mxn(sumaPrimaNeta)}) + derecho de póliza + IVA. Sin previos.`} />
             </>
           )}
         </div>
 
         {/* A qué desarrolladores le surte este fiado, y por lo tanto quién le
-            está viendo las fianzas de qué obras. Conviene tenerlo a la vista
-            ANTES de ligarle otra obra. */}
+            está viendo las fianzas de qué obras. Conviene saberlo ANTES de
+            ligarle otra obra; va en una línea gris, no en chips de color. */}
         {!esContratante && contratantes.length > 0 && (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-slate-500">Le surte a:</span>
-            {contratantes.map((ct) => {
-              // Un padrón suspendido con obras todavía ligadas es un estado
-              // real y hay que verlo, pero NO se puede pintar como si el
-              // contratante estuviera viendo esas fianzas: no las ve.
-              const activo = ct.activo === 1;
-              return (
-                <span
-                  key={ct.id}
-                  className={`text-[11px] px-1.5 py-0.5 rounded border ${
-                    activo
-                      ? 'bg-sky-50 text-sky-700 border-sky-100'
-                      : 'bg-slate-50 text-slate-500 border-slate-200'
-                  }`}
-                  title={activo
-                    ? `Ve las fianzas de ${ct.obras_ligadas} obra(s) de este fiado`
-                    : `Suspendió a este fiado de su padrón: hoy NO ve nada, aunque `
-                      + `${ct.obras_ligadas} obra(s) sigan ligadas`}
-                >
-                  {ct.razon_social}
-                  <span className={activo ? 'text-sky-400 tabular-nums' : 'text-slate-400 tabular-nums'}>
-                    {' '}· {ct.obras_ligadas} obra(s){activo ? '' : ' · suspendido'}
-                  </span>
-                </span>
-              );
-            })}
-          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            Le surte a{' '}
+            {contratantes.map((ct, i) => (
+              <span
+                key={ct.id}
+                title={ct.activo === 1
+                  ? `Ve las fianzas de ${ct.obras_ligadas} obra(s) de este fiado`
+                  : `Suspendió a este fiado de su padrón: hoy NO ve nada, aunque `
+                    + `${ct.obras_ligadas} obra(s) sigan ligadas`}
+              >
+                {i > 0 && ', '}
+                <span className="text-slate-700">{ct.razon_social}</span>
+                {' '}({ct.obras_ligadas} obra{ct.obras_ligadas === 1 ? '' : 's'}
+                {ct.activo === 1 ? '' : ', lo suspendió'})
+              </span>
+            ))}
+          </p>
         )}
 
-        {/* FUERA del switch a propósito: es lo que hace honesto tabular. Y
-            dentro de la tarjeta del cliente, no suelto debajo: quién es, cómo
-            anda y qué le falta se leen como una sola cosa. */}
+        {/* FUERA de las pestañas a propósito: es lo que hace honesto tabular. */}
         <Pendientes
           pendientes={pendientes}
           recordatorios={recordatorios}
@@ -1139,129 +1255,100 @@ function DetalleCliente({
         />
       </div>
 
-      {/* El contratante NO se tabula, y tampoco se parte en dos columnas.
-          Antes eran dos árboles de los MISMOS contratos —por proyecto a la
-          izquierda, por proveedor a la derecha— y el estado solo se veía de un
-          lado: se asignaba a la izquierda y había que ir a buscar a la derecha
-          si había quedado cubierto. Ahora cada contrato sale una sola vez, en su
-          partida y con su estado al lado, y el padrón de abajo habla de las
-          EMPRESAS (quiénes son, cómo andan, cuánto crédito les queda), no de
-          sus obras otra vez. Todo a lo ancho, de arriba abajo: qué pasa, con
-          quién, y quién entra al portal. */}
-      {esContratante && (
-        <div className="space-y-4">
-          <ProyectosDelContratante
-            contratanteId={cliente.id}
-            contratanteNombre={cliente.razon_social}
-            proyectos={proyectos}
-            obras={obras}
-            proveedores={proveedores}
-            suspendidos={suspendidos}
-            clientes={clientes}
-            obrasInvisibles={obrasInvisibles}
-            tipos={tipos}
-            tiposDoc={tiposDocContratante}
-            descargar={descargarPorId}
-            puedeLigarContratante={puedeOperar}
-            onChange={onChange}
-            flash={flash}
-            avisar={avisar}
-          />
+      <TiraPestanas pestanas={pestanas} activa={vista} onCambiar={setVista} />
 
-          <PadronProveedores
-            contratanteId={cliente.id}
-            proveedores={proveedores}
-            suspendidos={suspendidos}
-            lineas={lineasProveedores}
-            clientes={clientes}
-            puedeOperar={puedeOperar}
-            onChange={onChange}
-            flash={flash}
-          />
-
-          <UsuariosCliente
-            clienteId={cliente.id}
-            usuarios={usuarios}
-            esAdmin={esAdmin}
-            onChange={onChange}
-            flash={flash}
-          />
-        </div>
+      {/* EL CONTRATANTE. Cada contrato sale una sola vez, en su partida y con
+          su estado al lado; los proveedores hablan de las EMPRESAS (quiénes
+          son, cómo andan, cuánto crédito les queda), no de sus obras otra
+          vez. Van en pestañas como el fiado: juntas eran tres tablas largas
+          una debajo de otra. */}
+      {esContratante && vista === 'contratos' && (
+        <ProyectosDelContratante
+          contratanteId={cliente.id}
+          contratanteNombre={cliente.razon_social}
+          proyectos={proyectos}
+          obras={obras}
+          proveedores={proveedores}
+          suspendidos={suspendidos}
+          clientes={clientes}
+          obrasInvisibles={obrasInvisibles}
+          tipos={tipos}
+          tiposDoc={tiposDocContratante}
+          descargar={descargarPorId}
+          puedeLigarContratante={puedeOperar}
+          onChange={onChange}
+          flash={flash}
+          avisar={avisar}
+        />
+      )}
+      {esContratante && vista === 'proveedores' && (
+        <PadronProveedores
+          contratanteId={cliente.id}
+          proveedores={proveedores}
+          suspendidos={suspendidos}
+          lineas={lineasProveedores}
+          clientes={clientes}
+          puedeOperar={puedeOperar}
+          onChange={onChange}
+          flash={flash}
+        />
       )}
 
-      {!esContratante && (
+      {/* EL FIADO. El crédito tiene su pestaña: antes iba encima de las obras
+          porque el formulario de fianza no decía cuánto quedaba con cada
+          afianzadora, y ahora cada opción del selector lo dice. */}
+      {!esContratante && vista === 'obras' && (
+        <Proyectos
+          clienteId={cliente.id}
+          proyectos={proyectos}
+          afianzadoras={afianzadoras}
+          tipos={tipos}
+          tiposDoc={tiposDoc}
+          lineas={lineas}
+          contratantes={contratantesDisponibles}
+          puedeLigarContratante={puedeOperar}
+          onChange={onChange}
+          flash={flash}
+          avisar={avisar}
+        />
+      )}
+      {!esContratante && vista === 'credito' && (
+        <LineasCredito
+          clienteId={cliente.id}
+          lineas={lineas}
+          afianzadoras={afianzadoras}
+          puedeEditar={puedeOperar}
+          onChange={() => { onChange(); flash('Línea de crédito actualizada'); }}
+        />
+      )}
+      {!esContratante && vista === 'papeles' && (
         <>
-          <TiraPestanas
-            pestanas={[
-              { key: 'obras', label: 'Obras y crédito', icono: Briefcase, cuenta: proyectos.length },
-              { key: 'papeles', label: 'Papeles', icono: FileText, cuenta: papelesPendientes || null },
-              { key: 'accesos', label: 'Accesos', icono: Users, cuenta: usuariosActivos },
-            ]}
-            activa={vista}
-            onCambiar={setVista}
+          <ExpedienteCliente
+            clienteId={cliente.id}
+            documentos={documentos}
+            descargar={descargar}
+            onChange={onChange}
+            flash={flash}
           />
-
-          {/* Crédito y obras van JUNTAS y en este orden, sin excepción. El
-              selector de afianzadora del formulario de fianza solo imprime el
-              nombre —ni línea, ni comprometido, ni disponible—, así que esta
-              tabla es el único lugar del panel donde se ve cuánto le queda al
-              fiado con cada una. Separarlas convierte "¿con quién le cabe? →
-              capturo ahí" en memorizar cifras entre dos vistas, y es la captura
-              más frecuente que hay. */}
-          {vista === 'obras' && (
-            <>
-              <LineasCredito
-                clienteId={cliente.id}
-                lineas={lineas}
-                afianzadoras={afianzadoras}
-                puedeEditar={puedeOperar}
-                onChange={() => { onChange(); flash('Línea de crédito actualizada'); }}
-              />
-              <Proyectos
-                clienteId={cliente.id}
-                proyectos={proyectos}
-                afianzadoras={afianzadoras}
-                tipos={tipos}
-                tiposDoc={tiposDoc}
-                contratantes={contratantesDisponibles}
-                puedeLigarContratante={puedeOperar}
-                onChange={onChange}
-                flash={flash}
-                avisar={avisar}
-              />
-            </>
-          )}
-
-          {vista === 'papeles' && (
-            <>
-              <ExpedienteCliente
-                clienteId={cliente.id}
-                documentos={documentos}
-                descargar={descargar}
-                onChange={onChange}
-                flash={flash}
-              />
-              <PapeleriaCliente
-                clienteId={cliente.id}
-                papeleria={papeleria}
-                afianzadoras={afianzadoras}
-                descargar={descargar}
-                onChange={onChange}
-                flash={flash}
-              />
-            </>
-          )}
-
-          {vista === 'accesos' && (
-            <UsuariosCliente
-              clienteId={cliente.id}
-              usuarios={usuarios}
-              esAdmin={esAdmin}
-              onChange={onChange}
-              flash={flash}
-            />
-          )}
+          <PapeleriaCliente
+            clienteId={cliente.id}
+            papeleria={papeleria}
+            afianzadoras={afianzadoras}
+            descargar={descargar}
+            onChange={onChange}
+            flash={flash}
+          />
         </>
+      )}
+
+      {vista === 'accesos' && (
+        <UsuariosCliente
+          clienteId={cliente.id}
+          usuarios={usuarios}
+          esAdmin={esAdmin}
+          onChange={onChange}
+          flash={flash}
+        />
       )}
     </>
   );
@@ -1274,10 +1361,10 @@ function DetalleCliente({
 
 function PapeleriaCliente({ clienteId, papeleria = [], afianzadoras, descargar, onChange, flash }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
         <Files className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-700">Papelería específica</h3>
+        <h3 className="text-sm font-semibold text-slate-800">Papelería específica</h3>
       </div>
       <div className="divide-y divide-slate-100">
         {papeleria.map((p) => (
@@ -2116,10 +2203,10 @@ function ProyectosDelContratante({
   const encabezado = ['Partida', 'Contratista y contrato', 'Estado', 'Afianzado vigente', ''];
 
   return (
-    <div id="ct-contratos" className="scroll-mt-28 bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+    <div id="ct-contratos" className="scroll-mt-28 bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
         <Building2 className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-700">
+        <h3 className="text-sm font-semibold text-slate-800">
           Proyectos y contratos ({proyectos.length})
         </h3>
         <button onClick={() => { setCreando((c) => !c); setEditando(null); }} className={`${btnSecondary} ml-auto`}>
@@ -2445,10 +2532,10 @@ function PadronProveedores({
   const encabezado = ['Proveedor', 'Estado', 'Afianzado vigente', ...(conCredito ? ['Crédito disponible'] : []), ''];
 
   return (
-    <div id="ct-padron" className="scroll-mt-28 bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+    <div id="ct-padron" className="scroll-mt-28 bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
         <ShieldCheck className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-700">
+        <h3 className="text-sm font-semibold text-slate-800">
           Padrón de proveedores ({proveedores.length})
         </h3>
         {puedeOperar && (
@@ -2899,10 +2986,10 @@ function ExpedienteCliente({ clienteId, documentos = [], descargar, onChange, fl
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
         <FileText className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-700">Expediente del fiado</h3>
+        <h3 className="text-sm font-semibold text-slate-800">Expediente del fiado</h3>
         <span className="text-[11px] text-slate-500 ml-auto">
           {pendientes > 0 ? `${pendientes} pendiente(s)` : 'completo'}
         </span>
@@ -3008,16 +3095,18 @@ function AsignarVendedor({ clienteId, vendedorId, vendedores = [], onChange }) {
 
   return (
     <div className="text-right">
-      <label className="text-[10px] uppercase tracking-wider text-slate-400 block mb-1">Vendedor</label>
-      <select
-        value={vendedorId || ''}
-        onChange={(e) => asignar(e.target.value)}
-        className={`${inputCls} w-auto min-w-44`}
-      >
-        <option value="">Sin asignar</option>
-        {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
-      </select>
-      {error && <p className="text-[11px] text-rose-600 mt-1">{error}</p>}
+      <label className="inline-flex items-center gap-2 text-xs text-slate-500">
+        Vendedor
+        <select
+          value={vendedorId || ''}
+          onChange={(e) => asignar(e.target.value)}
+          className="px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-700 min-w-40"
+        >
+          <option value="">Sin asignar</option>
+          {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+        </select>
+      </label>
+      {error && <p className="text-[11px] text-red-600 mt-1">{error}</p>}
     </div>
   );
 }
@@ -3092,10 +3181,10 @@ function UsuariosCliente({ clienteId, usuarios = [], esAdmin, onChange, flash })
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
         <Users className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-700">Accesos del cliente ({activos})</h3>
+        <h3 className="text-sm font-semibold text-slate-800">Accesos del cliente ({activos})</h3>
         {esAdmin && (
           <button onClick={() => setAbierto((a) => !a)} className={`${btnSecondary} ml-auto`}>
             <UserPlus className={`h-3.5 w-3.5 transition-transform ${abierto ? 'rotate-45' : ''}`} /> Agregar persona
@@ -3260,7 +3349,7 @@ function PersonalFortex({ internos = [], onChange, flash, embebido }) {
   }
 
   return (
-    <div className={embebido ? '' : 'bg-white border border-slate-200 rounded-lg overflow-hidden'}>
+    <div className={embebido ? '' : 'bg-white border border-slate-200 rounded-xl overflow-hidden'}>
       {!embebido && (
         <button
           onClick={() => setOpen((o) => !o)}
@@ -3370,22 +3459,6 @@ function PersonalFortex({ internos = [], onChange, flash, embebido }) {
   );
 }
 
-function Pill({ label, valor, tono = 'slate', ayuda }) {
-  const tonos = {
-    slate: 'bg-slate-50 text-slate-600',
-    emerald: 'bg-emerald-50 text-emerald-700',
-    sky: 'bg-sky-50 text-sky-700',
-    violet: 'bg-violet-50 text-violet-700',
-    amber: 'bg-amber-50 text-amber-700',
-    rose: 'bg-rose-50 text-rose-700',
-  };
-  return (
-    <div className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md ${tonos[tono]}`} title={ayuda}>
-      {label}: <span className="font-semibold tabular-nums">{valor}</span>
-    </div>
-  );
-}
-
 function Req() { return <span className="text-rose-500">*</span>; }
 
 // Una cifra del encabezado del cliente: la etiqueta chica arriba y el número
@@ -3427,85 +3500,123 @@ function Dato({ label, valor, alerta, ayuda }) {
    otro agente, y "todo al día" prometería de más. */
 
 function Pendientes({ pendientes, recordatorios = [], onIr, onRecordatorioAtendido }) {
+  // Cerrado se enseña SOLO el grupo más urgente, completo; lo demás se cuenta
+  // en una línea. Abierto, todo. Antes se veía todo siempre y con seis
+  // pendientes y dos recordatorios la ficha empezaba con un muro de avisos.
+  //
+  // No se esconde nada: lo que no se ve se CUENTA, con su número, en la línea
+  // de "y además". Y no se recuerda que alguien lo abrió: cada ficha arranca
+  // igual de tranquila.
+  const [abierto, setAbierto] = useState(false);
   const grupos = GRUPOS_PENDIENTE
     .map((g) => ({ ...g, items: pendientes.filter((p) => p.tono === g.tono) }))
     .filter((g) => g.items.length);
 
   if (!grupos.length && !recordatorios.length) {
     return (
-      <p className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">
+      <p className="mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400">
         Sin pendientes en lo que Fortex captura.
       </p>
     );
   }
 
+  const atrasados = recordatorios.filter((r) => r.dias_restantes < 0).length;
+  const visibles = abierto ? grupos : grupos.slice(0, 1);
+  const resto = [
+    ...grupos.slice(1).map((g) => `${g.items.length} ${g.corto}`),
+    recordatorios.length
+      ? `${recordatorios.length} recordatorio(s)${atrasados ? ` (${atrasados} atrasado${atrasados > 1 ? 's' : ''})` : ''}`
+      : null,
+  ].filter(Boolean);
+
+  const renglon = (g) => (
+    <div key={g.tono} className="flex items-baseline gap-3 py-1">
+      <span className={`w-28 shrink-0 flex items-center gap-1.5 text-[11px] font-semibold ${g.texto}`}>
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 -translate-y-px ${g.punto}`} />
+        {g.label}
+      </span>
+      <p className="flex-1 min-w-0 text-sm text-slate-700">
+        {g.items.map((p, i) => (
+          <span key={p.clave}>
+            {i > 0 && <span className="text-slate-300"> · </span>}
+            <button onClick={() => onIr(p.destino)} className="hover:underline text-left">{p.texto}</button>
+          </span>
+        ))}
+      </p>
+    </div>
+  );
+
   return (
-    <div className="mt-3 pt-1 border-t border-slate-100">
-      {grupos.length > 0 && (
-        <div className="divide-y divide-slate-50">
-          {grupos.map((g) => (
-            <div key={g.tono} className="flex items-baseline gap-3 py-1.5">
-              <span className={`w-28 shrink-0 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide ${g.texto}`}>
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 translate-y-[-1px] ${g.punto}`} />
-                {g.label}
-              </span>
-              <p className="flex-1 min-w-0 text-xs text-slate-700 leading-relaxed">
-                {g.items.map((p, i) => (
-                  <span key={p.clave}>
-                    {i > 0 && <span className="text-slate-300"> · </span>}
-                    <button onClick={() => onIr(p.destino)} className="hover:underline text-left">
-                      {p.texto}
-                    </button>
-                  </span>
-                ))}
-              </p>
-            </div>
-          ))}
-        </div>
+    <div className="mt-4 pt-3 border-t border-slate-100">
+      {visibles.map(renglon)}
+
+      {!abierto && resto.length > 0 && (
+        <button
+          onClick={() => setAbierto(true)}
+          className="mt-1 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 transition-colors"
+        >
+          {grupos.length ? 'Además: ' : ''}{resto.join(' · ')}
+          <ChevronDown className="h-3.5 w-3.5" />
+        </button>
       )}
 
-      {recordatorios.length > 0 && (
-        <div className={`-mx-4 ${grupos.length ? 'mt-1.5 border-t border-slate-100' : ''}`}>
-          <p className="px-4 pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+      {abierto && recordatorios.length > 0 && (
+        <div className="-mx-5 mt-2 border-t border-slate-100">
+          <p className="px-5 pt-2.5 text-[11px] font-semibold text-slate-500">
             Recordatorios ({recordatorios.length})
-            <span className="font-normal normal-case tracking-normal text-slate-400"> · uso interno, el cliente no los ve</span>
+            <span className="font-normal text-slate-400"> · uso interno, el cliente no los ve</span>
           </p>
-          <div className="divide-y divide-slate-50">
+          <div className="divide-y divide-slate-50 [&>div]:px-5">
             {recordatorios.map((r) => (
               <RenglonRecordatorio key={r.id} r={r} onAtendido={onRecordatorioAtendido} />
             ))}
           </div>
         </div>
       )}
+
+      {abierto && (
+        <button
+          onClick={() => setAbierto(false)}
+          className="mt-1 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 transition-colors"
+        >
+          Ver menos <ChevronUp className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
   );
 }
 
-// La tira de pestañas, con las clases del portal del contratante tal cual: el
-// subrayado lo engancha .portal-tab en index.css a partir de
-// 'border-indigo-600 text-indigo-700', y con cualquier otra clase la pestaña
-// activa se ve muerta.
+// La tira de pestañas del sistema interno: un riel gris con la activa en
+// blanco. Sin las clases .portal-tab del portal de los clientes, que pintaban
+// la pestaña con su subrayado negro.
 //
 // El contador solo se pinta si viene un número. Nunca '?? 0': un cero se lee
-// "no hay nada" cuando puede ser "no se pudo consultar".
+// "no hay nada" cuando puede ser "no se pudo consultar". Y si la pestaña
+// esconde algo que falta, el contador va en ámbar: tabular no puede esconder.
 function TiraPestanas({ pestanas, activa, onCambiar }) {
   return (
-    <div className="portal-tabs flex gap-1 border-b border-slate-200 mb-4 overflow-x-auto">
-      {pestanas.map(({ key, label, icono: Icono, cuenta }) => (
-        <button
-          key={key}
-          onClick={() => onCambiar(key)}
-          className={`portal-tab px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 whitespace-nowrap ${
-            activa === key
-              ? 'border-indigo-600 text-indigo-700'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <Icono className="h-3.5 w-3.5" />
-          {label}
-          {cuenta != null && <span className="tabular-nums text-slate-400">({cuenta})</span>}
-        </button>
-      ))}
+    <div className="overflow-x-auto">
+      <div className="inline-flex items-center rounded-lg bg-slate-100 p-1 text-slate-500">
+        {pestanas.map(({ key, label, icono: Icono, cuenta, alerta }) => (
+          <button
+            key={key}
+            onClick={() => onCambiar(key)}
+            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors ${
+              activa === key ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-700'
+            }`}
+          >
+            <Icono className="h-3.5 w-3.5" />
+            {label}
+            {cuenta != null && (
+              <span className={`text-[10px] rounded-full px-1.5 py-px font-semibold leading-none tabular-nums ${
+                alerta ? 'bg-amber-100 text-amber-700' : 'bg-slate-200/70 text-slate-500'
+              }`}>
+                {cuenta}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -3542,10 +3653,10 @@ function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange 
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
         <CreditCard className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-700">Líneas de crédito por afianzadora</h3>
+        <h3 className="text-sm font-semibold text-slate-800">Líneas de crédito por afianzadora</h3>
         {/* La línea es el riesgo que asume la casa. El vendedor la consulta para
             saber cuánto le queda disponible al cliente, pero no la mueve. */}
         {!puedeEditar && (
@@ -3627,19 +3738,42 @@ function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange 
    Proyectos y sus fianzas
    -------------------------------------------------------------------------- */
 
+// El estado de una obra en una sola píldora, para leerla sin abrirla. Es el de
+// su PEOR póliza: tener una vigente no arregla la vencida.
+const ESTADO_OBRA = {
+  sin_fianza: { label: 'Sin fianza',        cls: 'bg-red-100 text-red-700' },
+  vencida:    { label: 'Vencida',           cls: 'bg-red-100 text-red-700' },
+  sin_fecha:  { label: 'Sin fecha',         cls: 'bg-amber-100 text-amber-700' },
+  por_vencer: { label: 'Por vencer',        cls: 'bg-amber-100 text-amber-700' },
+  previo:     { label: 'Previo en trámite', cls: 'bg-blue-100 text-blue-700' },
+  vigente:    { label: 'Vigente',           cls: 'bg-green-100 text-green-700' },
+};
+
+function estadoDeObra(p) {
+  const registros = p.fianzas || [];
+  const emitidas = registros.filter((f) => f.clase !== 'previo');
+  if (!emitidas.length) return registros.length ? 'previo' : 'sin_fianza';
+  if (emitidas.some((f) => f.estado === 'vencida')) return 'vencida';
+  if (emitidas.some((f) => !f.fecha_vigencia)) return 'sin_fecha';
+  if (emitidas.some((f) => f.estado === 'por_vencer')) return 'por_vencer';
+  return 'vigente';
+}
+
+// Las columnas del renglón de obra, una vez.
+const COLS_OBRA = 'grid grid-cols-[1rem_minmax(0,1fr)_8.5rem_9rem_auto] gap-x-4 items-center';
+
 function Proyectos({
-  clienteId, proyectos, afianzadoras, tipos, tiposDoc,
+  clienteId, proyectos, afianzadoras, tipos, tiposDoc, lineas = [],
   contratantes = [], puedeLigarContratante, onChange, flash, avisar,
 }) {
   const [creando, setCreando] = useState(false);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
-        <Briefcase className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-semibold text-slate-700">Proyectos ({proyectos.length})</h3>
-        <button onClick={() => setCreando((c) => !c)} className={`${btnSecondary} ml-auto`}>
-          <Plus className={`h-3.5 w-3.5 transition-transform ${creando ? 'rotate-45' : ''}`} /> Nuevo proyecto
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+        <h3 className="font-semibold text-slate-800 text-sm">Obras ({proyectos.length})</h3>
+        <button onClick={() => setCreando((c) => !c)} className={btnSecondary}>
+          <Plus className={`h-3.5 w-3.5 transition-transform ${creando ? 'rotate-45' : ''}`} /> Nueva obra
         </button>
       </div>
 
@@ -3652,16 +3786,25 @@ function Proyectos({
             const r = await api.post('/admin/proyectos', { client_id: clienteId, ...datos });
             setCreando(false);
             onChange();
+            flash('Obra creada');
             // El servidor avisa si la obra quedó ligada a un contratante que
             // tiene suspendido a este proveedor: se ligó, pero todavía no la ve.
-            flash('Proyecto creado');
             // El '?.' no es por costumbre: este aviso solo aparece cuando el
             // proveedor está suspendido, así que una prop mal cableada NO
-            // revienta en las pruebas ni en el uso normal — revienta el día que
-            // de verdad hay algo que avisar. Ya pasó una vez.
+            // revienta en el uso normal — revienta el día que de verdad hay
+            // algo que avisar. Ya pasó una vez.
             if (r.aviso) avisar?.(r.aviso);
           }}
         />
+      )}
+
+      {proyectos.length > 0 && (
+        <div className={`${COLS_OBRA} px-5 py-2 bg-slate-50 border-b border-slate-100`}>
+          <div />
+          {['Obra', 'Estado', 'Afianzado', ''].map((t, i) => (
+            <div key={i} className={`text-xs font-semibold text-slate-400 uppercase tracking-wide ${i === 2 ? 'text-right' : ''}`}>{t}</div>
+          ))}
+        </div>
       )}
 
       <div className="divide-y divide-slate-100">
@@ -3674,6 +3817,7 @@ function Proyectos({
             afianzadoras={afianzadoras}
             tipos={tipos}
             tiposDoc={tiposDoc}
+            lineas={lineas}
             contratantes={contratantes}
             puedeLigarContratante={puedeLigarContratante}
             onChange={onChange}
@@ -3682,8 +3826,8 @@ function Proyectos({
           />
         ))}
         {!proyectos.length && !creando && (
-          <div className="px-4 py-8 text-center text-sm text-slate-400">
-            Este cliente no tiene proyectos. Crea uno para poder registrar sus fianzas.
+          <div className="py-16 text-center text-slate-400 text-sm">
+            Este cliente no tiene obras. Crea una para poder registrar sus fianzas.
           </div>
         )}
       </div>
@@ -3692,23 +3836,15 @@ function Proyectos({
 }
 
 function Proyecto({
-  proyecto: p, proyectos, clienteId, afianzadoras, tipos, tiposDoc,
+  proyecto: p, proyectos, clienteId, afianzadoras, tipos, tiposDoc, lineas = [],
   contratantes = [], puedeLigarContratante, onChange, flash, avisar,
 }) {
-  // El dato decide, no un valor fijo: se abre lo que tiene algo que decir.
-  //
-  // obraTienePendiente vive en lib.jsx y es la MISMA función de la que sale el
-  // chip "n obra(s) sin fianza", así que si el chip la cuenta, la obra está
-  // abierta. Dos reglas separadas se habrían separado más.
-  //
-  // Y si el fiado tiene una sola obra se abre igual: plegar la única cosa de la
-  // pantalla no ahorra nada y cuesta un clic.
-  //
-  // NO se recuerda que el operador la cerró. Guardar eso sería guardar la
-  // decisión de esconder un pendiente; que vuelva a abrirse es a propósito.
-  const [abierto, setAbierto] = useState(
-    () => obraTienePendiente(p) || proyectos.length === 1
-  );
+  // Todas arrancan PLEGADAS, salvo que sea la única. Antes se abrían las que
+  // tenían algún pendiente, y en un cliente con tres obras eso era tres tablas
+  // de diez columnas abiertas al mismo tiempo. Ya no hace falta abrirlas para
+  // saber cómo están: la píldora de estado lo dice en el renglón, y los
+  // pendientes de arriba de la ficha las cuentan.
+  const [abierto, setAbierto] = useState(proyectos.length === 1);
   const [editando, setEditando] = useState(false);
   const [nuevaFianza, setNuevaFianza] = useState(false);
   const [verDocs, setVerDocs] = useState(false);
@@ -3718,22 +3854,7 @@ function Proyecto({
   const registros = p.fianzas || [];
   const emitidas = registros.filter((f) => f.clase !== 'previo');
   const previos = registros.length - emitidas.length;
-
-  // El resumen de la obra plegada. Tiene que decir lo suficiente para no tener
-  // que abrirla: cuántas pólizas y en qué estado está la peor de ellas.
-  const resumen = () => {
-    if (!emitidas.length) {
-      return previos
-        ? `sin fianza emitida · ${previos} previo(s) en trámite`
-        : 'sin fianza';
-    }
-    const peor = emitidas.some((f) => f.estado === 'vencida') ? 'con alguna vencida'
-      : emitidas.some((f) => !f.fecha_vigencia) ? 'alguna sin fecha de vigencia'
-      : emitidas.some((f) => f.estado === 'por_vencer') ? 'alguna por vencer'
-      : 'vigentes';
-    return `${emitidas.length} póliza(s) ${peor}`
-      + (previos ? ` · ${previos} previo(s)` : '');
-  };
+  const estado = ESTADO_OBRA[estadoDeObra(p)];
 
   // Abrir el formulario de fianza abre la obra. Sin esto, con la obra plegada el
   // formulario se montaría dentro del bloque escondido y desaparecería con todo
@@ -3748,10 +3869,11 @@ function Proyecto({
 
   async function borrar() {
     setError('');
+    if (!confirm(`¿Borrar la obra "${p.nombre}"?`)) return;
     try {
       await api.del(`/admin/proyectos/${p.id}`);
       onChange();
-      flash('Proyecto eliminado');
+      flash('Obra eliminada');
     } catch (e) {
       setError(e.message);
     }
@@ -3759,89 +3881,83 @@ function Proyecto({
 
   return (
     <div>
-      {/* Encabezado del proyecto */}
-      <div className="px-4 py-3 hover:bg-slate-50/40">
-        <div className="flex flex-wrap items-start gap-3">
-          <button onClick={() => setAbierto((a) => !a)} className="flex-1 text-left min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-slate-800">{p.nombre}</span>
-              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-600">
-                {etiquetaEstatus(p.estatus)}
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              {p.numero_contrato && <span className="font-mono">{p.numero_contrato}</span>}
-              {p.beneficiario && <span> · {p.beneficiario}</span>}
-              {p.fecha_termino && <span> · termina {fmtDate(p.fecha_termino)}</span>}
-            </p>
-            {/* Plegada tiene que decir lo suficiente para no abrirla. */}
-            {!abierto && (
-              <p className={`text-[11px] mt-0.5 ${
-                emitidas.length ? 'text-slate-500' : 'text-rose-600 font-medium'
-              }`}>
-                {resumen()}
-              </p>
-            )}
+      <div
+        className={`${COLS_OBRA} px-5 py-3 cursor-pointer hover:bg-slate-50 transition-colors group`}
+        onClick={() => setAbierto((a) => !a)}
+      >
+        <ChevronRight className={`h-4 w-4 text-slate-400 transition-transform ${abierto ? 'rotate-90' : ''}`} />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-800 truncate group-hover:text-indigo-700 transition-colors">
+            {p.nombre}
+            <span className="ml-2 text-xs font-normal text-slate-400">{etiquetaEstatus(p.estatus)}</span>
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5 truncate">
+            {p.numero_contrato && <span className="font-mono">{p.numero_contrato}</span>}
+            {p.beneficiario && <span>{p.numero_contrato ? ' · ' : ''}{p.beneficiario}</span>}
+            {p.fecha_termino && <span> · termina {fmtDate(p.fecha_termino)}</span>}
             {/* Que se vea sin abrir nada: las pólizas de esta obra las está
                 viendo otra empresa. */}
-            {p.contratante_nombre && (
-              <p className="text-[11px] mt-0.5 inline-flex items-center gap-1 text-sky-700">
-                <Link2 className="h-3 w-3" />
-                Las ve <span className="font-medium">{p.contratante_nombre}</span>
-                {p.desarrollo_nombre
-                  ? <span className="text-sky-500"> · en «{p.desarrollo_nombre}»</span>
-                  : <span className="text-amber-600" title="El contratante la ve, pero le sale suelta: no está dentro de ninguno de sus proyectos."> · sin agrupar</span>}
-              </p>
-            )}
-          </button>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {p.monto_contrato > 0 && (
-              <Pill label="Contrato" valor={mxn(p.monto_contrato)} />
-            )}
-            <Pill label="Afianzado" valor={mxn(p.monto_afianzado)} tono="sky" />
-            {p.pct_contrato_afianzado != null && (
-              <span className="text-[11px] text-slate-500 tabular-nums">
-                {p.pct_contrato_afianzado}% del contrato
-              </span>
-            )}
-            {/* Sube al encabezado a propósito: vivía dentro del bloque
-                plegable, y con la obra sana cerrada agregar la segunda y la
-                tercera póliza de un contrato —anticipo, cumplimiento, buena
-                calidad: el caso normal en obra— habría costado un clic más para
-                siempre. */}
-            <button onClick={abrirNuevaFianza} className={btnSecondary} title="Agregar fianza o previo">
-              <Plus className={`h-3.5 w-3.5 transition-transform ${nuevaFianza ? 'rotate-45' : ''}`} />
-              Fianza o previo
-            </button>
-            <button
-              onClick={() => setVerDocs((v) => !v)}
-              className={`${btnSecondary} ${docs.length ? 'text-indigo-700 border-indigo-200' : ''}`}
-              title="Contrato y documentos del proyecto"
-            >
-              <Paperclip className="h-3.5 w-3.5" />
-              {docs.length > 0 && <span className="tabular-nums">{docs.length}</span>}
-            </button>
-            <button onClick={() => setEditando((e) => !e)} className={btnSecondary} title="Editar proyecto">
-              <Pencil className="h-3.5 w-3.5" />
-            </button>
-            <button onClick={borrar} className={`${btnSecondary} hover:border-rose-300 hover:text-rose-600`} title="Eliminar proyecto">
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
+            {p.contratante_nombre && <span> · las ve {p.contratante_nombre}</span>}
+          </p>
         </div>
-
-        {error && (
-          <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700 flex items-start gap-2">
-            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
-          </div>
-        )}
+        <div>
+          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${estado.cls}`}>
+            {estado.label}
+          </span>
+          <p className="text-[11px] text-slate-400 mt-0.5 tabular-nums">
+            {emitidas.length} póliza(s){previos > 0 && ` · ${previos} previo(s)`}
+          </p>
+        </div>
+        <div className="text-right tabular-nums">
+          <p className="text-sm text-slate-800">{mxn(p.monto_afianzado)}</p>
+          {p.monto_contrato > 0 && (
+            <p className="text-[11px] text-slate-400">
+              {p.pct_contrato_afianzado != null && `${p.pct_contrato_afianzado}% de `}{mxn(p.monto_contrato)}
+            </p>
+          )}
+        </div>
+        {/* Las acciones no abren ni cierran la obra. */}
+        <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
+          <button onClick={abrirNuevaFianza} className={btnSecondary} title="Agregar fianza o previo">
+            <Plus className={`h-3.5 w-3.5 transition-transform ${nuevaFianza ? 'rotate-45' : ''}`} /> Fianza
+          </button>
+          <button
+            onClick={() => setVerDocs((v) => !v)}
+            className={`p-1.5 rounded-lg transition-colors flex items-center gap-0.5 ${
+              docs.length ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-300 hover:text-slate-600 hover:bg-slate-100'
+            }`}
+            title="Contrato y documentos de la obra"
+          >
+            <Paperclip className="h-3.5 w-3.5" />
+            {docs.length > 0 && <span className="text-[10px] tabular-nums">{docs.length}</span>}
+          </button>
+          <button
+            onClick={() => setEditando((e) => !e)}
+            className="p-1.5 rounded-lg text-slate-300 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            title="Editar obra"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={borrar}
+            className="p-1.5 rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+            title="Eliminar obra"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
+      {error && (
+        <div className="mx-5 mb-3 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+
       {verDocs && (
-        <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3">
+        <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-3">
           <p className="text-xs font-medium text-slate-600 mb-2">
-            Documentos del proyecto <span className="text-slate-400">· contrato, convenios, acta de entrega</span>
+            Documentos de la obra <span className="text-slate-400">· contrato, convenios, acta de entrega</span>
           </p>
           <DocsEntidad
             clienteId={clienteId}
@@ -3865,30 +3981,38 @@ function Proyecto({
             const r = await api.put(`/admin/proyectos/${p.id}`, datos);
             setEditando(false);
             onChange();
-            flash('Proyecto actualizado');
+            flash('Obra actualizada');
             if (r.aviso) avisar?.(r.aviso);
           }}
         />
       )}
 
       {abierto && (
-        <div className="bg-slate-50/40 border-t border-slate-100">
-          <TablaFianzas
-            clienteId={clienteId}
-            fianzas={p.fianzas || []}
-            proyectos={proyectos}
-            afianzadoras={afianzadoras}
-            tipos={tipos}
-            tiposDoc={tiposDoc}
-            onChange={onChange}
-            flash={flash}
-          />
+        <div className="bg-slate-50/50 border-t border-slate-100">
+          {registros.length ? (
+            <TablaFianzas
+              clienteId={clienteId}
+              fianzas={registros}
+              proyectos={proyectos}
+              afianzadoras={afianzadoras}
+              tipos={tipos}
+              tiposDoc={tiposDoc}
+              lineas={lineas}
+              onChange={onChange}
+              flash={flash}
+            />
+          ) : !nuevaFianza && (
+            <p className="px-5 py-4 text-xs text-slate-400">
+              Sin pólizas en esta obra. Agrégala con «Fianza».
+            </p>
+          )}
           {nuevaFianza && (
             <FormFianza
               proyectos={proyectos}
               proyectoId={p.id}
               afianzadoras={afianzadoras}
               tipos={tipos}
+              lineas={lineas}
               onCancel={() => setNuevaFianza(false)}
               onSubmit={async (datos) => {
                 await api.post('/admin/fianzas', { client_id: clienteId, ...datos });
@@ -3904,7 +4028,7 @@ function Proyecto({
   );
 }
 
-function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tiposDoc, onChange, flash }) {
+function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tiposDoc, lineas = [], onChange, flash }) {
   const [editandoId, setEditandoId] = useState(null);
   const [docsAbiertos, setDocsAbiertos] = useState(null);
 
@@ -3921,18 +4045,19 @@ function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tipo
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
-        <thead className="bg-white/60 text-slate-500 uppercase tracking-wider text-[10px]">
+        <thead className="text-slate-400 uppercase tracking-wide text-[10px] font-semibold whitespace-nowrap">
           <tr>
-            <th className="text-left px-3 py-2">Póliza</th>
+            <th className="text-left px-3 py-2 pl-5">Póliza</th>
             <th className="text-left px-3 py-2">Afianzadora</th>
             <th className="text-left px-3 py-2">Tipo</th>
-            <th className="text-right px-3 py-2">Monto afianzado</th>
+            <th className="text-right px-3 py-2">Monto</th>
             {/* Una sola columna con las dos primas: la total arriba (lo que se
                 paga) y la neta debajo. Separarlas en dos columnas volvía a
                 sacar scroll horizontal en la tabla. */}
             <th className="text-right px-3 py-2">Prima total</th>
+            {/* El recordatorio va debajo de la vigencia y no en su columna: era
+                una columna casi siempre vacía que empujaba la tabla a lo ancho. */}
             <th className="text-left px-3 py-2">Vigencia</th>
-            <th className="text-left px-3 py-2">Recordatorio</th>
             <th className="text-left px-3 py-2">Estado</th>
             <th className="text-center px-3 py-2">Docs</th>
             <th className="px-3 py-2"></th>
@@ -3942,13 +4067,14 @@ function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tipo
           {fianzas.map((f) => (
             editandoId === f.id ? (
               <tr key={f.id}>
-                <td colSpan={10} className="p-0">
+                <td colSpan={9} className="p-0">
                   <FormFianza
                     inicial={f}
                     proyectos={proyectos}
                     proyectoId={f.proyecto_id}
                     afianzadoras={afianzadoras}
                     tipos={tipos}
+                    lineas={lineas}
                     onCancel={() => setEditandoId(null)}
                     onSubmit={async (datos) => {
                       await api.put(`/admin/fianzas/${f.id}`, datos);
@@ -3961,7 +4087,7 @@ function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tipo
               </tr>
             ) : (
               <tr key={f.id} className="hover:bg-white/70">
-                <td className="px-3 py-1.5 text-slate-700">
+                <td className="px-3 py-1.5 pl-5 text-slate-700 whitespace-nowrap">
                   <span className="flex items-center gap-1.5">
                     <span className="font-mono">{f.numero_poliza}</span>
                     <ClaseBadge clase={f.clase} />
@@ -3974,20 +4100,20 @@ function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tipo
                   {mxnCents(f.prima_total)}
                   <span className="block text-[10px] text-slate-400">neta {mxnCents(f.prima_neta)}</span>
                 </td>
-                <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{fmtDate(f.fecha_vigencia)}</td>
-                <td className="px-3 py-1.5">
-                  {f.fecha_recordatorio ? (
+                <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">
+                  {fmtDate(f.fecha_vigencia)}
+                  {f.fecha_recordatorio && (
                     <span
-                      className={`tabular-nums ${
+                      className={`block text-[10px] tabular-nums ${
                         f.recordatorio_atendido_el ? 'text-slate-400 line-through'
                         : f.dias_para_recordatorio <= 7 ? 'text-amber-700 font-medium'
-                        : 'text-slate-600'
+                        : 'text-slate-400'
                       }`}
                       title={f.nota_recordatorio || ''}
                     >
-                      {fmtDate(f.fecha_recordatorio)}
+                      recordar {fmtDate(f.fecha_recordatorio)}
                     </span>
-                  ) : <span className="text-slate-300">—</span>}
+                  )}
                 </td>
                 <td className="px-3 py-1.5"><EstadoBadge estado={f.estado} /></td>
                 <td className="px-3 py-1.5 text-center">
@@ -4021,7 +4147,7 @@ function TablaFianzas({ clienteId, fianzas, proyectos, afianzadoras, tipos, tipo
             if (docsAbiertos !== f.id || editandoId === f.id) return [fila];
             return [fila, (
               <tr key={`docs-${f.id}`} className="bg-indigo-50/20">
-                <td colSpan={10} className="px-4 py-3">
+                <td colSpan={9} className="px-4 py-3">
                   <p className="text-xs font-medium text-slate-600 mb-2">
                     {f.clase === 'previo' ? 'Documentos del previo' : 'Documentos de la fianza'}{' '}
                     <span className="font-mono text-slate-400">{f.numero_poliza}</span>
@@ -4459,7 +4585,7 @@ function SelectorClase({ valor, onChange }) {
   );
 }
 
-function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSubmit, onCancel }) {
+function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, lineas = [], onSubmit, onCancel }) {
   const [f, setF] = useState({
     // Lo que se captura casi siempre es una póliza; el previo se marca a mano.
     clase: inicial?.clase || 'fianza',
@@ -4539,10 +4665,34 @@ function FormFianza({ inicial, proyectos, proyectoId, afianzadoras, tipos, onSub
           </div>
           <div>
             <label className="text-[11px] text-slate-500 mb-1 block">Afianzadora<Req /></label>
+            {/* Cada opción dice cuánto le queda al fiado con esa afianzadora.
+                Es lo que se pregunta al capturar —¿con quién le cabe?— y antes
+                obligaba a tener la tabla de crédito a la vista en la misma
+                pantalla que las obras. */}
             <select value={f.afianzadora_id} onChange={set('afianzadora_id')} className={inputCls}>
               <option value="">Selecciona…</option>
-              {afianzadoras.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+              {afianzadoras.map((a) => {
+                const l = lineas.find((x) => x.afianzadora_id === a.id);
+                return (
+                  <option key={a.id} value={a.id}>
+                    {a.nombre}{l ? ` — disponible ${mxn(l.disponible)}` : ' — sin línea'}
+                  </option>
+                );
+              })}
             </select>
+            {(() => {
+              const l = lineas.find((x) => x.afianzadora_id === Number(f.afianzadora_id));
+              // Solo avisa: la afianzadora puede autorizar por encima de la
+              // línea, y un previo no consume nada.
+              if (!l || esPrevio || !f.monto_afianzado) return null;
+              const propia = inicial && inicial.clase !== 'previo' && inicial.afianzadora_id === l.afianzadora_id
+                ? inicial.monto_afianzado : 0;
+              return f.monto_afianzado > l.disponible + propia ? (
+                <p className="text-[11px] text-amber-700 mt-1">
+                  Rebasa lo disponible con esta afianzadora ({mxn(l.disponible + propia)}).
+                </p>
+              ) : null;
+            })()}
           </div>
           <div>
             <label className="text-[11px] text-slate-500 mb-1 block">
@@ -4682,10 +4832,10 @@ function NuevoCliente({ vendedores = [], onDone, onCancel }) {
   const esContratante = f.tipo === 'contratante';
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       <div className="px-5 py-3 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
         <UserPlus className="w-4 h-4 text-indigo-600" />
-        <h3 className="text-sm font-semibold text-slate-700">Nuevo cliente</h3>
+        <h3 className="text-sm font-semibold text-slate-800">Nuevo cliente</h3>
         <button onClick={onCancel} className={`${btnSecondary} ml-auto`}>
           <X className="h-3.5 w-3.5" /> Cancelar
         </button>
@@ -4841,10 +4991,13 @@ function NuevoCliente({ vendedores = [], onDone, onCancel }) {
    momento en que se necesita el catálogo. Aquí conviven a ≥1280px. */
 
 function Configuracion({
-  tipos, docsRequeridos, internos, esAdmin,
+  tipos, docsRequeridos, internos, esAdmin, siempreAbierta,
   onTipos, onDocumentos, onAfianzadora, onInternos, flash,
 }) {
-  const [abierta, setAbierta] = useState(false);
+  // Como página propia va abierta y sin el botón de plegar: plegar algo que es
+  // lo único en la pantalla no tiene sentido.
+  const [abiertaAMano, setAbierta] = useState(false);
+  const abierta = siempreAbierta || abiertaAMano;
   const [vista, setVista] = useState('afianzadoras');
 
   const secciones = [
@@ -4856,21 +5009,23 @@ function Configuracion({
   ];
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      <button
-        onClick={() => setAbierta((a) => !a)}
-        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
-      >
-        <Settings className="w-4 h-4 text-indigo-600" /> Configuración
-        <span className="text-[11px] font-normal text-slate-400">
-          catálogos de la casa
-        </span>
-        <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${abierta ? 'rotate-45' : ''}`} />
-      </button>
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      {!siempreAbierta && (
+        <button
+          onClick={() => setAbierta((a) => !a)}
+          className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 text-sm font-semibold text-slate-700"
+        >
+          <Settings className="w-4 h-4 text-indigo-600" /> Configuración
+          <span className="text-[11px] font-normal text-slate-400">
+            catálogos de la casa
+          </span>
+          <Plus className={`w-4 h-4 ml-auto text-slate-400 transition-transform ${abierta ? 'rotate-45' : ''}`} />
+        </button>
+      )}
 
       {abierta && (
         <>
-          <div className="flex gap-1 border-b border-slate-200 px-2 overflow-x-auto">
+          <div className="flex gap-1 border-b border-slate-200 px-3 overflow-x-auto">
             {secciones.map((s) => (
               <button
                 key={s.key}
@@ -4931,7 +5086,7 @@ function NuevaAfianzadora({ onDone, embebido }) {
   if (embebido) return campo;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg p-4">
+    <div className="bg-white border border-slate-200 rounded-xl p-4">
       <h3 className="text-sm font-semibold text-slate-700 mb-2">Agregar afianzadora</h3>
       {campo}
     </div>
