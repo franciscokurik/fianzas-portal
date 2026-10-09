@@ -1,8 +1,8 @@
 /** @type {import('tailwindcss').Config} */
-// Las escalas indigo-* y slate-* leen variables CSS en vez de traer el color
-// escrito. Por defecto valen exactamente lo de Tailwind (index.css, :root), y
-// DENTRO del panel interno (.fx-admin) valen el azul de Fortex y un gris cálido
-// que no se ve azulado. Así:
+// Algunas escalas leen variables CSS en vez de traer el color escrito. Por
+// defecto valen exactamente lo de Tailwind (index.css, :root), y DENTRO del
+// panel interno (.fx-admin) valen el sistema de diseño de FortexLink, el de
+// hr-system: azul acero, grises neutros y cuatro colores de estado. Así:
 //   - el código sigue escribiendo bg-indigo-600 y text-slate-500, y rebrandear
 //     es cambiar los valores en un solo lugar sin tocar un componente;
 //   - el portal de los clientes no cambia ni un pixel, porque fuera de
@@ -15,10 +15,13 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
-      colors: {
-        indigo: deVariables('indigo'),
-        slate: deVariables('slate'),
-      },
+      // Las que el panel interno cambia: marca (indigo), gris (slate), y las
+      // que su sistema funde en uno de sus cuatro estados —violeta, púrpura y
+      // cielo en el azul; rosa en el rojo; esmeralda en el verde—.
+      colors: Object.fromEntries(
+        ['indigo', 'slate', 'violet', 'purple', 'sky', 'rose', 'emerald']
+          .map((nombre) => [nombre, deVariables(nombre)])
+      ),
     },
   },
   plugins: [],

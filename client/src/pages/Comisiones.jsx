@@ -29,19 +29,24 @@ const PERIODOS = [
   { key: 'todo', label: 'Todo' },
 ];
 
-const STAT_COLORS = {
-  blue: 'bg-blue-50 border-blue-100 text-blue-600',
-  green: 'bg-green-50 border-green-100 text-green-600',
-  amber: 'bg-amber-50 border-amber-100 text-amber-600',
-  slate: 'bg-slate-50 border-slate-200 text-slate-500',
+// El cuadro de color del KPI: el ÚNICO lugar de la tarjeta con color. La
+// tarjeta entera nunca se tiñe: cuatro tarjetas de colores se leen como un
+// semáforo (hr-system, docs/FORTEX-DESIGN.md §8).
+const TONO_KPI = {
+  brand: 'bg-indigo-50 text-indigo-600',
+  ok: 'bg-green-50 text-green-700',
+  warn: 'bg-amber-50 text-amber-700',
+  neutral: 'bg-slate-100 text-slate-500',
 };
 
 // Columnas del listado, una vez para encabezado y renglones.
 const COLS = 'grid grid-cols-[minmax(0,1.3fr)_minmax(0,8rem)_minmax(0,8rem)_6.5rem_7.5rem_8rem_2rem] gap-x-4 items-center';
 const COLS_SIN_ACCIONES = 'grid grid-cols-[minmax(0,1.3fr)_minmax(0,8rem)_6.5rem_7.5rem_8rem] gap-x-4 items-center';
 
-const inputCls = 'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-700';
-const filtroCls = 'px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-700';
+// Los controles del sistema de FortexLink: 32px de alto, 6px de radio, y el
+// foco como borde más oscuro con un halo casi invisible.
+const inputCls = 'w-full h-8 px-2.5 text-[13px] border border-slate-200 rounded-md bg-white text-slate-800 focus:outline-none focus:border-[#b9b9c2] focus:shadow-[0_0_0_4px_var(--ring)] transition-colors';
+const filtroCls = 'h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-md bg-white text-slate-700 focus:outline-none focus:border-[#b9b9c2] focus:shadow-[0_0_0_4px_var(--ring)] transition-colors';
 
 // La fecha de HOY en la zona del navegador. Con toISOString() en México, de las
 // seis de la tarde en adelante ya sería mañana y "este mes" brincaría antes.
@@ -195,20 +200,22 @@ async function leerArchivo(archivo) {
    Piezas
    -------------------------------------------------------------------------- */
 
-function StatCard({ icon, label, value, sub, color, activa, onClick }) {
+function StatCard({ icon, label, value, sub, tono, activa, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`text-left bg-white rounded-xl border p-4 hover:border-indigo-200 hover:shadow-sm transition-all group ${
-        activa ? 'border-indigo-300' : 'border-slate-200'
+      className={`flex items-start gap-3 text-left bg-white rounded-xl border p-4 transition-colors ${
+        activa ? 'border-indigo-300' : 'border-slate-200 hover:border-slate-300'
       }`}
     >
-      <div className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border ${STAT_COLORS[color]} mb-3`}>
+      <span className={`flex items-center justify-center w-10 h-10 rounded-md shrink-0 ${TONO_KPI[tono]}`}>
         {icon}
-      </div>
-      <p className="text-xl font-semibold text-slate-800 tabular-nums group-hover:text-indigo-700 transition-colors">{value}</p>
-      <p className="text-xs font-semibold text-slate-700 mt-0.5">{label}</p>
-      <p className="text-xs text-slate-400 mt-0.5">{sub}</p>
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[18px] font-semibold tracking-[-0.03em] text-slate-800 tabular-nums leading-tight">{value}</span>
+        <span className="block text-[12px] text-slate-500 mt-0.5">{label}</span>
+        <span className="block text-[11.5px] text-slate-400 truncate">{sub}</span>
+      </span>
     </button>
   );
 }
@@ -216,7 +223,7 @@ function StatCard({ icon, label, value, sub, color, activa, onClick }) {
 function Modal({ icono, tono = 'indigo', titulo, sub, onClose, children, pie, ancho = 'max-w-lg' }) {
   const tonos = { indigo: 'bg-indigo-100 text-indigo-600', red: 'bg-red-100 text-red-600', amber: 'bg-amber-100 text-amber-600' };
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'var(--overlay)' }}>
       <div className={`bg-white rounded-2xl shadow-2xl w-full ${ancho} flex flex-col max-h-[90vh]`}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
           <div className="flex items-center gap-3">
@@ -716,28 +723,28 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
       {resumen && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard
-            icon={<CalendarClock className="h-5 w-5" />} color="blue"
+            icon={<CalendarClock className="h-5 w-5" />} tono="brand"
             label={`Comisión de ${nombreDelMes(resumen.mes.periodo)}`}
             value={mxn(resumen.mes.total)} sub={`${resumen.mes.cuantas} pago(s) este mes`}
             activa={periodo === 'mes' && estado === 'todas'}
             onClick={() => { setPeriodo('mes'); setEstado('todas'); setVista('detalle'); }}
           />
           <StatCard
-            icon={<HandCoins className="h-5 w-5" />} color="green"
+            icon={<HandCoins className="h-5 w-5" />} tono="ok"
             label={`Comisión ${resumen.anio.periodo}`}
             value={mxn(resumen.anio.total)} sub={`${resumen.anio.cuantas} en el año`}
             activa={periodo === 'anio' && estado === 'todas'}
             onClick={() => { setPeriodo('anio'); setEstado('todas'); setVista('detalle'); }}
           />
           <StatCard
-            icon={<Clock className="h-5 w-5" />} color="amber"
+            icon={<Clock className="h-5 w-5" />} tono="warn"
             label="Por conciliar" value={mxn(resumen.por_conciliar.total)}
             sub={`${resumen.por_conciliar.cuantas} sin conciliar con la afianzadora`}
             activa={periodo === 'todo' && estado === 'por_conciliar'}
             onClick={() => { setPeriodo('todo'); setEstado('por_conciliar'); setVista('detalle'); }}
           />
           <StatCard
-            icon={<FileWarning className="h-5 w-5" />} color="slate"
+            icon={<FileWarning className="h-5 w-5" />} tono="neutral"
             label="Pólizas sin comisión" value={resumen.polizas_sin_comision}
             sub={esAdmin ? 'Emitidas y sin ninguna registrada' : 'De tus clientes, sin ninguna registrada'}
             onClick={esAdmin ? bajarBase : undefined}
@@ -748,13 +755,13 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
       {/* El resumen por vendedor es del admin, y va en su pestaña: abajo del
           listado era una tabla más compitiendo por la vista. */}
       {esAdmin && (
-        <div className="inline-flex items-center rounded-lg bg-slate-100 p-1 text-slate-500">
+        <div className="flex gap-1 border-b border-slate-200">
           {[['detalle', 'Detalle'], ['vendedores', 'Por vendedor']].map(([k, l]) => (
             <button
               key={k}
               onClick={() => setVista(k)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                vista === k ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-700'
+              className={`px-3 py-2.5 -mb-px border-b-2 text-[13px] transition-colors ${
+                vista === k ? 'border-indigo-600 text-slate-800 font-semibold' : 'border-transparent text-slate-500 font-medium hover:text-slate-800'
               }`}
             >
               {l}
@@ -812,7 +819,7 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="grid grid-cols-[minmax(0,1fr)_6rem_9rem_9rem] gap-x-4 px-5 py-2.5 bg-slate-50 border-b border-slate-200">
             {['Vendedor', 'Pagos', 'Por conciliar', 'Comisión neta'].map((t, i) => (
-              <div key={t} className={`text-xs font-semibold text-slate-400 uppercase tracking-wide ${i ? 'text-right' : ''}`}>{t}</div>
+              <div key={t} className={`text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.06em] ${i ? 'text-right' : ''}`}>{t}</div>
             ))}
           </div>
           {!porVendedor.length ? (
@@ -838,7 +845,7 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
             <div className="min-w-[760px]">
               <div className={`${cols} px-5 py-2.5 bg-slate-50 border-b border-slate-200`}>
                 {encabezado.map((t, i) => (
-                  <div key={i} className={`text-xs font-semibold text-slate-400 uppercase tracking-wide ${i === derecha ? 'text-right' : ''}`}>
+                  <div key={i} className={`text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.06em] ${i === derecha ? 'text-right' : ''}`}>
                     {t}
                   </div>
                 ))}
@@ -870,7 +877,7 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
                           {c.fecha_conciliacion
                             ? <span className="text-xs text-slate-600">{fmtDate(c.fecha_conciliacion)}</span>
                             : (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                              <span className="estado-pill bg-amber-100 text-amber-800">
                                 Por conciliar
                               </span>
                             )}

@@ -18,14 +18,15 @@ import {
   pendientesDelFiado, pendientesDelContratante, estadoDocCliente,
 } from '../lib.jsx';
 
-// Los controles del sistema interno: foco con anillo azul, esquinas de 8px en
-// campos y botones chicos.
+// Los controles del sistema de FortexLink: campo de 32px y botón de 31px, a
+// 6px de radio; el foco es un borde más oscuro con un halo casi invisible, no
+// un anillo de color.
 const inputCls =
-  'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 text-slate-700';
+  'w-full h-8 px-2.5 text-[13px] border border-slate-200 rounded-md bg-white text-slate-800 focus:outline-none focus:border-[#b9b9c2] focus:shadow-[0_0_0_4px_var(--ring)] transition-colors';
 const btnPrimary =
-  'flex items-center gap-1.5 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50';
+  'inline-flex items-center gap-1.5 h-[31px] px-3 bg-indigo-600 text-white rounded-md text-[12.5px] font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50';
 const btnSecondary =
-  'flex items-center gap-1 border border-slate-200 bg-white text-slate-600 px-2.5 py-1.5 rounded-lg text-xs font-medium hover:bg-slate-50 transition-colors disabled:opacity-50';
+  'inline-flex items-center gap-1.5 h-[28px] px-2.5 border border-slate-200 bg-white text-slate-600 rounded-md text-[12.5px] font-medium hover:bg-[#f7f7f8] hover:border-slate-300 transition-colors disabled:opacity-50';
 
 // Los grupos en que se pintan los pendientes, en este orden. El tono de cada
 // pendiente (lib.jsx) dice a qué grupo va. Se pinta UNA etiqueta por grupo y el
@@ -40,8 +41,8 @@ const GRUPOS_PENDIENTE = [
 
 // La marca de cada renglón de la lista de clientes, por tono.
 const TONO_ALERTA = {
-  rose:  'bg-red-100 text-red-700',
-  amber: 'bg-amber-100 text-amber-700',
+  rose:  'bg-red-100 text-red-800',
+  amber: 'bg-amber-100 text-amber-800',
 };
 
 // Lo que cada renglón de la lista de clientes tiene que decir, de más a menos
@@ -190,7 +191,7 @@ export default function Admin() {
   };
 
   return (
-    <AppShell user={user} onSalir={logout} pendientes={totalBandeja}>
+    <AppShell user={user} onSalir={logout} pendientes={totalBandeja} clientes={clientes}>
       {avisoOp && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-start gap-2 mb-4">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -204,9 +205,14 @@ export default function Admin() {
       {/* Flotando y no arriba del contenido: como banner empujaba toda la
           pantalla hacia abajo tres segundos y luego la regresaba, justo
           cuando uno iba a darle clic a algo. */}
+      {/* Píldora oscura, centrada abajo: el aviso de "se guardó" de todo
+          FortexLink. Un mensaje corto en pasado. */}
       {msg && (
-        <div className="fixed bottom-5 right-5 z-40 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-sm text-emerald-700 flex items-center gap-2 shadow-sm">
-          <CheckCircle2 className="w-4 h-4 shrink-0" /> {msg}
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-full bg-[#101012] text-white px-4 py-2 text-[12.5px] font-medium flex items-center gap-2"
+          style={{ boxShadow: 'var(--shadow-md)' }}
+        >
+          <CheckCircle2 className="w-4 h-4 shrink-0 text-green-400" /> {msg}
         </div>
       )}
 
@@ -542,7 +548,7 @@ function ListaClientes({ clientes, esVendedor, puedeOperar, vendedores, onNuevo 
           <div className="min-w-[720px]">
             <div className={`${COLS_CLIENTES} px-5 py-2.5 bg-slate-50 border-b border-slate-200`}>
               {['Cliente', 'Cartera', 'Pendiente', 'Vendedor', ''].map((t, i) => (
-                <div key={i} className="text-xs font-semibold text-slate-400 uppercase tracking-wide">{t}</div>
+                <div key={i} className="text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.06em]">{t}</div>
               ))}
             </div>
 
@@ -581,7 +587,7 @@ function ListaClientes({ clientes, esVendedor, puedeOperar, vendedores, onNuevo 
                         {/* Lo más grave, en palabras; el resto en el title. */}
                         {principal ? (
                           <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${TONO_ALERTA[principal.tono]}`}
+                            className={`estado-pill ${TONO_ALERTA[principal.tono]}`}
                             title={alertas.map((a) => a.texto).join('\n')}
                           >
                             {principal.corto}{alertas.length > 1 && ` +${alertas.length - 1}`}
@@ -2254,7 +2260,7 @@ function ProyectosDelContratante({
               {encabezado.map((t, i) => (
                 <div
                   key={i}
-                  className={`text-[10px] font-semibold text-slate-400 uppercase tracking-wide ${i === 3 ? 'text-right' : ''}`}
+                  className={`text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.06em] ${i === 3 ? 'text-right' : ''}`}
                 >
                   {t}
                 </div>
@@ -2571,7 +2577,7 @@ function PadronProveedores({
               {encabezado.map((t, i) => (
                 <div
                   key={i}
-                  className={`text-[10px] font-semibold text-slate-400 uppercase tracking-wide ${i === 2 ? 'text-right' : ''}`}
+                  className={`text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.06em] ${i === 2 ? 'text-right' : ''}`}
                 >
                   {t}
                 </div>
@@ -3586,37 +3592,37 @@ function Pendientes({ pendientes, recordatorios = [], onIr, onRecordatorioAtendi
   );
 }
 
-// La tira de pestañas del sistema interno: un riel gris con la activa en
-// blanco. Sin las clases .portal-tab del portal de los clientes, que pintaban
-// la pestaña con su subrayado negro.
+// Las pestañas de FortexLink: subrayado de 2px en el azul de marca para la
+// activa, y el contador en píldora (azul con texto blanco cuando está activa).
 //
 // El contador solo se pinta si viene un número. Nunca '?? 0': un cero se lee
 // "no hay nada" cuando puede ser "no se pudo consultar". Y si la pestaña
 // esconde algo que falta, el contador va en ámbar: tabular no puede esconder.
 function TiraPestanas({ pestanas, activa, onCambiar }) {
   return (
-    <div className="overflow-x-auto">
-      <div className="inline-flex items-center rounded-lg bg-slate-100 p-1 text-slate-500">
-        {pestanas.map(({ key, label, icono: Icono, cuenta, alerta }) => (
+    <div className="flex gap-1 border-b border-slate-200 overflow-x-auto [scrollbar-width:none]">
+      {pestanas.map(({ key, label, icono: Icono, cuenta, alerta }) => {
+        const es = activa === key;
+        return (
           <button
             key={key}
             onClick={() => onCambiar(key)}
-            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors ${
-              activa === key ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-700'
+            className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-2.5 -mb-px border-b-2 text-[13px] transition-colors ${
+              es ? 'border-indigo-600 text-slate-800 font-semibold' : 'border-transparent text-slate-500 font-medium hover:text-slate-800'
             }`}
           >
-            <Icono className="h-3.5 w-3.5" />
+            <Icono className={`h-3.5 w-3.5 ${es ? 'text-indigo-600' : 'text-slate-400'}`} />
             {label}
             {cuenta != null && (
-              <span className={`text-[10px] rounded-full px-1.5 py-px font-semibold leading-none tabular-nums ${
-                alerta ? 'bg-amber-100 text-amber-700' : 'bg-slate-200/70 text-slate-500'
+              <span className={`text-[10.5px] rounded-full px-1.5 leading-[17px] font-semibold tabular-nums ${
+                alerta ? 'bg-amber-100 text-amber-800' : es ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'
               }`}>
                 {cuenta}
               </span>
             )}
           </button>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
@@ -3741,12 +3747,12 @@ function LineasCredito({ clienteId, lineas, afianzadoras, puedeEditar, onChange 
 // El estado de una obra en una sola píldora, para leerla sin abrirla. Es el de
 // su PEOR póliza: tener una vigente no arregla la vencida.
 const ESTADO_OBRA = {
-  sin_fianza: { label: 'Sin fianza',        cls: 'bg-red-100 text-red-700' },
-  vencida:    { label: 'Vencida',           cls: 'bg-red-100 text-red-700' },
-  sin_fecha:  { label: 'Sin fecha',         cls: 'bg-amber-100 text-amber-700' },
-  por_vencer: { label: 'Por vencer',        cls: 'bg-amber-100 text-amber-700' },
-  previo:     { label: 'Previo en trámite', cls: 'bg-blue-100 text-blue-700' },
-  vigente:    { label: 'Vigente',           cls: 'bg-green-100 text-green-700' },
+  sin_fianza: { label: 'Sin fianza',        cls: 'bg-red-100 text-red-800' },
+  vencida:    { label: 'Vencida',           cls: 'bg-red-100 text-red-800' },
+  sin_fecha:  { label: 'Sin fecha',         cls: 'bg-amber-100 text-amber-800' },
+  por_vencer: { label: 'Por vencer',        cls: 'bg-amber-100 text-amber-800' },
+  previo:     { label: 'Previo en trámite', cls: 'bg-blue-100 text-blue-800' },
+  vigente:    { label: 'Vigente',           cls: 'bg-green-100 text-green-800' },
 };
 
 function estadoDeObra(p) {
@@ -3802,7 +3808,7 @@ function Proyectos({
         <div className={`${COLS_OBRA} px-5 py-2 bg-slate-50 border-b border-slate-100`}>
           <div />
           {['Obra', 'Estado', 'Afianzado', ''].map((t, i) => (
-            <div key={i} className={`text-xs font-semibold text-slate-400 uppercase tracking-wide ${i === 2 ? 'text-right' : ''}`}>{t}</div>
+            <div key={i} className={`text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.06em] ${i === 2 ? 'text-right' : ''}`}>{t}</div>
           ))}
         </div>
       )}
@@ -3901,7 +3907,7 @@ function Proyecto({
           </p>
         </div>
         <div>
-          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${estado.cls}`}>
+          <span className={`estado-pill ${estado.cls}`}>
             {estado.label}
           </span>
           <p className="text-[11px] text-slate-400 mt-0.5 tabular-nums">

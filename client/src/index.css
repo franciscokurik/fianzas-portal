@@ -5,8 +5,9 @@
 /* --------------------------------------------------------------------------
    Escalas de color (ver tailwind.config.js)
    --------------------------------------------------------------------------
-   Por defecto, las de Tailwind tal cual: es lo que ve el portal de los
-   clientes, y no debe moverse. */
+   Cada escala que el panel interno cambia lee una variable. Aquí, en :root,
+   valen lo de Tailwind tal cual: es lo que ve el portal de los clientes, y no
+   debe moverse. */
 :root {
   --indigo-50: 238 242 255;
   --indigo-100: 224 231 255;
@@ -30,71 +31,290 @@
   --slate-800: 30 41 59;
   --slate-900: 15 23 42;
   --slate-950: 2 6 23;
+  --violet-50: 245 243 255;
+  --violet-100: 237 233 254;
+  --violet-200: 221 214 254;
+  --violet-300: 196 181 253;
+  --violet-400: 167 139 250;
+  --violet-500: 139 92 246;
+  --violet-600: 124 58 237;
+  --violet-700: 109 40 217;
+  --violet-800: 91 33 182;
+  --violet-900: 76 29 149;
+  --violet-950: 46 16 101;
+  --purple-50: 250 245 255;
+  --purple-100: 243 232 255;
+  --purple-200: 233 213 255;
+  --purple-300: 216 180 254;
+  --purple-400: 192 132 252;
+  --purple-500: 168 85 247;
+  --purple-600: 147 51 234;
+  --purple-700: 126 34 206;
+  --purple-800: 107 33 168;
+  --purple-900: 88 28 135;
+  --purple-950: 59 7 100;
+  --sky-50: 240 249 255;
+  --sky-100: 224 242 254;
+  --sky-200: 186 230 253;
+  --sky-300: 125 211 252;
+  --sky-400: 56 189 248;
+  --sky-500: 14 165 233;
+  --sky-600: 2 132 199;
+  --sky-700: 3 105 161;
+  --sky-800: 7 89 133;
+  --sky-900: 12 74 110;
+  --sky-950: 8 47 73;
+  --rose-50: 255 241 242;
+  --rose-100: 255 228 230;
+  --rose-200: 254 205 211;
+  --rose-300: 253 164 175;
+  --rose-400: 251 113 133;
+  --rose-500: 244 63 94;
+  --rose-600: 225 29 72;
+  --rose-700: 190 18 60;
+  --rose-800: 159 18 57;
+  --rose-900: 136 19 55;
+  --rose-950: 76 5 25;
+  --emerald-50: 236 253 245;
+  --emerald-100: 209 250 229;
+  --emerald-200: 167 243 208;
+  --emerald-300: 110 231 183;
+  --emerald-400: 52 211 153;
+  --emerald-500: 16 185 129;
+  --emerald-600: 5 150 105;
+  --emerald-700: 4 120 87;
+  --emerald-800: 6 95 70;
+  --emerald-900: 6 78 59;
+  --emerald-950: 2 44 34;
 }
 
 /* --------------------------------------------------------------------------
    Panel interno de Fortex (.fx-admin)
    --------------------------------------------------------------------------
-   El sistema de diseño de las herramientas internas: un solo azul de marca,
-   sólido; gris cálido; Geist para todo y Geist Mono solo para identificadores
-   (póliza, RFC). Plano y denso: es una herramienta de trabajo, no una landing.
+   El sistema de diseño de FortexLink, el mismo de hr-system (ver allá
+   docs/FORTEX-DESIGN.md, que lo escribe como especificación para llevarlo a
+   este portal). Los valores se copian, no se aproximan:
 
-   indigo-* ES el azul de marca: rebrandear es cambiar estas once líneas. */
+   - Casi monocromático: grises con un solo azul acero (#447ba4). El color es
+     información, no decoración.
+   - Cuatro colores de estado y nada más: verde, ámbar, rojo y azul. Por eso
+     violeta, púrpura y cielo caen en el azul informativo, rosa en el rojo y
+     esmeralda en el verde: aquí NO hay morado.
+   - Inter a 13.5px, sin monoespaciada de verdad: los identificadores van en
+     Inter con cifras tabulares.
+   - Tarjetas a 14px, controles a 6px, y ya.
+
+   indigo-* ES el azul de marca: rebrandear es cambiar esa escala. */
 .fx-admin {
-  --indigo-50: 238 241 251;
-  --indigo-100: 213 220 239;
-  --indigo-200: 170 186 222;
-  --indigo-300: 122 149 204;
-  --indigo-400: 79 114 187;
-  --indigo-500: 46 85 168;
-  --indigo-600: 30 58 156;   /* el color principal */
-  --indigo-700: 21 41 110;   /* hover */
-  --indigo-800: 15 30 82;
-  --indigo-900: 10 20 55;
-  --indigo-950: 6 12 34;
-  --slate-50: 249 248 247;
-  --slate-100: 241 240 238;
-  --slate-200: 228 226 222;
-  --slate-300: 204 201 195;
-  --slate-400: 158 154 147;
-  --slate-500: 117 113 106;
-  --slate-600: 90 86 80;
-  --slate-700: 67 63 59;
-  --slate-800: 44 42 39;
-  --slate-900: 26 25 23;
-  --slate-950: 13 12 11;
+  --slate-50: 245 249 252;
+  --slate-100: 240 240 242;
+  --slate-200: 232 232 234;
+  --slate-300: 220 220 224;
+  --slate-400: 154 154 162;
+  --slate-500: 107 107 115;
+  --slate-600: 61 61 66;
+  --slate-700: 42 42 47;
+  --slate-800: 16 16 18;
+  --slate-900: 10 10 12;
+  --slate-950: 5 5 6;
+  --indigo-50: 234 242 248;
+  --indigo-100: 214 229 240;
+  --indigo-200: 180 206 226;
+  --indigo-300: 139 178 208;
+  --indigo-400: 99 149 187;
+  --indigo-500: 78 133 172;
+  --indigo-600: 68 123 164;
+  --indigo-700: 60 108 144;
+  --indigo-800: 52 93 124;
+  --indigo-900: 44 77 103;
+  --indigo-950: 29 51 68;
+  --violet-50: 238 242 255;
+  --violet-100: 219 234 254;
+  --violet-200: 191 219 254;
+  --violet-300: 147 197 253;
+  --violet-400: 96 165 250;
+  --violet-500: 59 130 246;
+  --violet-600: 37 99 235;
+  --violet-700: 29 78 216;
+  --violet-800: 30 64 175;
+  --violet-900: 30 58 138;
+  --violet-950: 23 37 84;
+  --purple-50: 238 242 255;
+  --purple-100: 219 234 254;
+  --purple-200: 191 219 254;
+  --purple-300: 147 197 253;
+  --purple-400: 96 165 250;
+  --purple-500: 59 130 246;
+  --purple-600: 37 99 235;
+  --purple-700: 29 78 216;
+  --purple-800: 30 64 175;
+  --purple-900: 30 58 138;
+  --purple-950: 23 37 84;
+  --sky-50: 238 242 255;
+  --sky-100: 219 234 254;
+  --sky-200: 191 219 254;
+  --sky-300: 147 197 253;
+  --sky-400: 96 165 250;
+  --sky-500: 59 130 246;
+  --sky-600: 37 99 235;
+  --sky-700: 29 78 216;
+  --sky-800: 30 64 175;
+  --sky-900: 30 58 138;
+  --sky-950: 23 37 84;
+  --rose-50: 254 242 242;
+  --rose-100: 254 226 226;
+  --rose-200: 254 202 202;
+  --rose-300: 252 165 165;
+  --rose-400: 248 113 113;
+  --rose-500: 239 68 68;
+  --rose-600: 220 38 38;
+  --rose-700: 185 28 28;
+  --rose-800: 153 27 27;
+  --rose-900: 127 29 29;
+  --rose-950: 69 10 10;
+  --emerald-50: 240 253 244;
+  --emerald-100: 220 252 231;
+  --emerald-200: 187 247 208;
+  --emerald-300: 134 239 172;
+  --emerald-400: 74 222 128;
+  --emerald-500: 34 197 94;
+  --emerald-600: 22 163 74;
+  --emerald-700: 21 128 61;
+  --emerald-800: 22 101 52;
+  --emerald-900: 20 83 45;
+  --emerald-950: 5 46 22;
 
-  --fx-header: 64px;
-  --fx-sidebar: 220px;
-  --fx-sidebar-colapsada: 72px;
+  /* Texto: cuatro niveles y nada más */
+  --ink:   #101012;
+  --ink-2: #3d3d42;
+  --muted: #6b6b73;
+  --faint: #9a9aa2;
+
+  /* Líneas y superficies */
+  --line:        #e8e8ea;
+  --line-2:      #f0f0f2;
+  --line-strong: #dcdce0;
+  --line-focus:  #b9b9c2;
+  --bg:          #f5f9fc;  /* azulado, no gris neutro: así las tarjetas se separan sin sombra */
+  --surface:     #ffffff;
+  --surface-2:   #fcfcfd;
+  --hover:       #f7f7f8;
+
+  /* La marca */
+  --brand:       #447ba4;
+  --brand-hover: #3c6c90;
+  --brand-soft:  #f5f9fc;
+  --brand-ring:  rgba(68, 123, 164, 0.12);
+  --brand-text:  #3c6c90;
+  --logo:        #214497;
+
+  /* Forma y armazón */
+  --r-sm: 6px;
+  --r:    9px;
+  --r-lg: 14px;
+  --sidebar-w:           236px;
+  --sidebar-w-collapsed: 64px;
+  --topbar-h:            56px;
+
+  /* Utilería y sombras, casi invisibles a propósito */
+  --ring:    rgba(16, 16, 18, 0.05);
+  --overlay: rgba(16, 16, 18, 0.28);
+  --glass:   rgba(255, 255, 255, 0.9);
+  --shadow-sm: 0 1px 2px rgba(16, 16, 18, 0.04);
+  --shadow-md: 0 8px 24px -8px rgba(16, 16, 18, 0.14), 0 2px 6px rgba(16, 16, 18, 0.05);
 
   min-height: 100vh;
-  background: rgb(var(--slate-50));
-  color: rgb(var(--slate-800));
-  font-family: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13.5px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* cv05 y ss03 hacen a Inter menos genérica sin cambiar de fuente. tnum
+     apagado: se prende donde hay cifras que comparar. */
+  font-feature-settings: 'cv05' 1, 'ss03' 1, 'tnum' 0;
 }
 
+.fx-admin h1, .fx-admin h2, .fx-admin h3, .fx-admin h4 {
+  font-weight: 600;
+  letter-spacing: -0.014em;
+}
+
+/* La escala de texto del sistema. Va aquí y no en tailwind.config.js porque
+   allá cambiaría también el portal de los clientes. */
+.fx-admin .text-xs   { font-size: 12px;   line-height: 1.4; }
+.fx-admin .text-sm   { font-size: 13px;   line-height: 1.45; }
+.fx-admin .text-base { font-size: 13.5px; line-height: 1.5; }
+.fx-admin .text-lg   { font-size: 15px;   line-height: 1.4; }
+.fx-admin .text-xl   { font-size: 21px;   line-height: 1.25; letter-spacing: -0.02em; }
+
+/* Forma: tarjeta y modal a 14px, controles a 6px. */
+.fx-admin .rounded-md,
+.fx-admin .rounded-lg  { border-radius: var(--r-sm); }
+.fx-admin .rounded-xl,
+.fx-admin .rounded-2xl { border-radius: var(--r-lg); }
+
+/* El azul como TEXTO es un tono más oscuro que el de relleno: sobre blanco,
+   #447ba4 en letra chica se lee pálido. */
+.fx-admin .text-indigo-600,
+.fx-admin .text-indigo-700,
+.fx-admin .group:hover .group-hover\:text-indigo-700 { color: var(--brand-text); }
+
+/* Identificadores (póliza, RFC, contrato): Inter con cifras tabulares. */
 .fx-admin .font-mono,
 .fx-admin code {
-  font-family: 'Geist Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
-}
-
-/* Números alineados en cualquier contexto de datos. */
-.fx-admin table,
-.fx-admin [data-tabular] {
+  font-family: inherit;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'cv05' 1;
+  letter-spacing: -0.005em;
 }
 
-/* Las píldoras de estado de lib.jsx las comparten el panel y el portal de los
-   clientes, que las quiere en versalitas. Aquí van redondas y en minúsculas,
-   como pide el sistema interno, sin tocar el componente ni el portal. */
+.fx-admin table,
+.fx-admin [data-tabular],
+.fx-admin .tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+.fx-admin .shadow-sm  { box-shadow: var(--shadow-sm); }
+.fx-admin .shadow-2xl { box-shadow: var(--shadow-md); }
+
+/* Las píldoras de estado: 21px, redondas, con un punto de 5px del color del
+   texto. Las de lib.jsx las comparte el portal de los clientes, que las quiere
+   en versalitas y sin punto; aquí se pintan como en el resto de FortexLink sin
+   tocar el componente. */
 .fx-admin .estado-pill {
-  border-radius: 9999px;
-  padding: 2px 8px;
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 21px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
+  white-space: nowrap;
+}
+.fx-admin .estado-pill::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* Scrollbars discretos: detalle chico que cambia la percepción de acabado. */
+.fx-admin * { scrollbar-width: thin; scrollbar-color: #d9d9de transparent; }
+.fx-admin ::-webkit-scrollbar { width: 9px; height: 9px; }
+.fx-admin ::-webkit-scrollbar-track { background: transparent; }
+.fx-admin ::-webkit-scrollbar-thumb {
+  background: #d9d9de;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
 }
 
 :root {

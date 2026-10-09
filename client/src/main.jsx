@@ -7,6 +7,13 @@ import Recuperar from './pages/Recuperar.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Proveedores from './pages/Proveedores.jsx';
 import Admin from './pages/Admin.jsx';
+// Inter, servida desde el propio portal y no desde Google Fonts: el panel
+// tiene que verse igual sin salir a internet y sin destello de fuente. Es la
+// tipografía de las herramientas internas de Fortex (ver index.css, .fx-admin).
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
 import './index.css';
 
 // Al panel entran los tres niveles internos y comparten pantalla; lo que cambia
