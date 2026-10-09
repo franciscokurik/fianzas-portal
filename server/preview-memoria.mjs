@@ -27,6 +27,19 @@ Object.assign(db, baseEnMemoria());
 await initSchema();
 await seedIfEmpty();
 
+// Para entrar a la sesión local con una contraseña propia en vez de la de la
+// semilla. Cambiarla desde el panel no sirve de mucho: la base nace de la
+// semilla en cada arranque y el cambio se pierde al reiniciar. Con esto queda
+// puesta siempre. Solo toca la base EN MEMORIA de este proceso, nunca Neon, y
+// solo las cuentas admin (las demás conservan la de demostración, para poder
+// probar cada rol).
+if (process.env.PREVIEW_ADMIN_PASSWORD) {
+  const { default: bcrypt } = await import('bcryptjs');
+  await db.prepare(`UPDATE users SET password_hash = ? WHERE role = 'admin'`)
+    .run(bcrypt.hashSync(process.env.PREVIEW_ADMIN_PASSWORD, 10));
+  console.log('Cuenta admin con la contraseña de PREVIEW_ADMIN_PASSWORD');
+}
+
 app.listen(4000, '127.0.0.1', () => {
   console.log('API en memoria lista en http://127.0.0.1:4000');
 });
