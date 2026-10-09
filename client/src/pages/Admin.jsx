@@ -15,7 +15,7 @@ import {
   mxn, mxnCents, fmtDate, yaVencio, EstadoBadge, ClaseBadge, InputPesos,
   CumplimientoBadge, TipoClienteBadge, ESTATUS_PROYECTO, etiquetaEstatus,
   ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, pesoArchivo, revisarArchivo,
-  pendientesDelFiado, pendientesDelContratante, estadoDocCliente,
+  pendientesDelFiado, pendientesDelContratante, estadoDocCliente, guardarArchivo,
 } from '../lib.jsx';
 
 // Los controles del sistema de FortexLink: campo de 32px y botón de 31px, a
@@ -1063,10 +1063,7 @@ function DetalleCliente({
       flash('No se pudo descargar el archivo.');
       return;
     }
-    const url = URL.createObjectURL(await res.blob());
-    const a = document.createElement('a');
-    a.href = url; a.download = rel.split('/').pop(); a.click();
-    URL.revokeObjectURL(url);
+    guardarArchivo(await res.blob(), rel.split('/').pop());
   }
 
   // Hermana de descargar(), pero por ID. La carpeta del contratante se arma con
@@ -1086,12 +1083,7 @@ function DetalleCliente({
         avisar('No se pudo descargar el archivo. Puede que ya no esté disponible.');
         return;
       }
-      const url = URL.createObjectURL(await res.blob());
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = doc.nombre_archivo || `documento-${doc.id}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      guardarArchivo(await res.blob(), doc.nombre_archivo || `documento-${doc.id}`);
     } catch {
       avisar('No se pudo descargar el archivo. Revisa tu conexión e inténtalo de nuevo.');
     }

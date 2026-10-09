@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Upload, Loader2, AlertTriangle, FileText, Files, FileDown } from 'lucide-react';
 import { api, getToken, subirACloudinary } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { fmtDate, EstadoBadge, ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, revisarArchivo } from '../lib.jsx';
+import { fmtDate, EstadoBadge, ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, revisarArchivo, guardarArchivo } from '../lib.jsx';
 
 const btnCls =
   'flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300 disabled:opacity-50';
@@ -33,12 +33,7 @@ async function descargar(typeId, nombre) {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
   if (!res.ok) return false;
-  const url = URL.createObjectURL(await res.blob());
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = nombre || 'documento';
-  a.click();
-  URL.revokeObjectURL(url);
+  guardarArchivo(await res.blob(), nombre || 'documento');
   return true;
 }
 

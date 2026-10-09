@@ -13,7 +13,7 @@ import {
   HandCoins, CalendarClock, Clock, FileWarning, CheckCircle2, Eye,
 } from 'lucide-react';
 import { api } from '../api.js';
-import { mxn, mxnCents, fmtDate, InputPesos } from '../lib.jsx';
+import { mxn, mxnCents, fmtDate, InputPesos, guardarArchivo } from '../lib.jsx';
 
 // Arriba del archivo, como todos los mapas de etiquetas y colores.
 // "Por conciliar" va primero y es con la que abre la pantalla: es el trabajo
@@ -143,14 +143,10 @@ async function descargarBase() {
   encabezado.height = 20;
 
   const buffer = await libro.xlsx.writeBuffer();
-  const url = URL.createObjectURL(new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `comisiones-base-${hoyLocal()}.xlsx`;
-  a.click();
-  URL.revokeObjectURL(url);
+  guardarArchivo(
+    new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    `comisiones-base-${hoyLocal()}.xlsx`,
+  );
   return filas.length;
 }
 

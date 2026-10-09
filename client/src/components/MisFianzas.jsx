@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Briefcase, Paperclip, FileDown } from 'lucide-react';
 import { api, getToken } from '../api.js';
-import { mxn, mxnCents, fmtDate, EstadoBadge, ClaseBadge } from '../lib.jsx';
+import { mxn, mxnCents, fmtDate, EstadoBadge, ClaseBadge, guardarArchivo } from '../lib.jsx';
 
 // La descarga pasa por la API (que comprueba que el archivo sea de este
 // cliente), así que hay que mandar el token: un <a href> no lo llevaría.
@@ -10,12 +10,7 @@ async function descargarDocumento(doc) {
     headers: { Authorization: `Bearer ${getToken()}` },
   });
   if (!res.ok) return;
-  const url = URL.createObjectURL(await res.blob());
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = doc.nombre_archivo;
-  a.click();
-  URL.revokeObjectURL(url);
+  guardarArchivo(await res.blob(), doc.nombre_archivo);
 }
 
 function Documentos({ documentos = [], vacio = '—' }) {

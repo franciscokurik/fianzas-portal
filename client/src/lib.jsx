@@ -92,6 +92,24 @@ export function revisarArchivo(file) {
   return null;
 }
 
+// Hace que el navegador guarde un archivo armado o bajado aquí mismo.
+//
+// El enlace se pega al documento antes del clic y la URL se libera DESPUÉS,
+// no en el acto. Liberándola justo tras el clic, el navegador a veces cancela
+// la descarga antes de empezarla y no dice nada: el botón parecía no hacer
+// nada. Pasó en producción con la base de comisiones.
+export function guardarArchivo(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 // Peso del archivo en texto corto ("340 KB", "1.2 MB").
 export const pesoArchivo = (bytes) =>
   !bytes ? '' : bytes < 1024 * 1024

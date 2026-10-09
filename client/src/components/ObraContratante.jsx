@@ -11,7 +11,7 @@ import {
 import { api, getToken, subirACloudinary } from '../api.js';
 import {
   mxn, mxnCents, fmtDate, EstadoBadge, ClaseBadge, CumplimientoBadge,
-  etiquetaEstatus, ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, pesoArchivo, revisarArchivo,
+  etiquetaEstatus, ACCEPT_ARCHIVOS, AYUDA_ARCHIVOS, pesoArchivo, revisarArchivo, guardarArchivo,
 } from '../lib.jsx';
 
 export const btnChico =
@@ -33,12 +33,7 @@ export async function descargar(doc, avisar) {
       avisar('No se pudo descargar el archivo. Puede que ya no esté disponible; recarga la página.');
       return;
     }
-    const url = URL.createObjectURL(await res.blob());
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = doc.nombre_archivo;
-    a.click();
-    URL.revokeObjectURL(url);
+    guardarArchivo(await res.blob(), doc.nombre_archivo);
   } catch {
     avisar('No se pudo descargar el archivo. Revisa tu conexión e inténtalo de nuevo.');
   }
