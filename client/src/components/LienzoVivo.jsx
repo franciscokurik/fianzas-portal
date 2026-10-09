@@ -71,8 +71,29 @@ export default function LienzoVivo() {
       tono: Math.random(),
     });
 
+    // Grano finísimo encima de todo. Un degradado tan suave como este, en una
+    // pantalla de laptop común (de 6 u 8 bits por color), no alcanza a pasar de
+    // un tono al siguiente sin escalones: se ve en franjas, como pixeleado. Un
+    // poco de ruido —cuatro por ciento, invisible a la vista— revuelve los
+    // bordes de esas franjas y el ojo vuelve a ver un degradado liso. Es lo que
+    // hacen los programas de diseño al exportar un degradado.
+    const grano = document.createElement('canvas');
+    grano.width = 160;
+    grano.height = 160;
+    const g = grano.getContext('2d');
+    const ruido = g.createImageData(grano.width, grano.height);
+    for (let i = 0; i < ruido.data.length; i += 4) {
+      const v = Math.random() * 255;
+      ruido.data[i] = v; ruido.data[i + 1] = v; ruido.data[i + 2] = v;
+      ruido.data[i + 3] = 10;
+    }
+    g.putImageData(ruido, 0, 0);
+    const patronGrano = ctx.createPattern(grano, 'repeat');
+
     const medir = () => {
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      // Hasta 3 y no 2: en un teléfono o un monitor 4K al 300% con tope en 2 el
+      // dibujo se escalaba y se veía suave de más.
+      const dpr = Math.min(3, window.devicePixelRatio || 1);
       ancho = canvas.clientWidth;
       alto = canvas.clientHeight;
       canvas.width = Math.round(ancho * dpr);
@@ -108,6 +129,23 @@ export default function LienzoVivo() {
         ctx.fill();
         ctx.restore();
       }
+
+      // El velo del centro va AQUÍ y no en CSS encima del canvas: como otra
+      // capa con su propio degradado, sumaba un segundo juego de franjas. Le
+      // baja el contraste al fondo justo detrás de la tarjeta, para que un
+      // cuadro grande no le gane al formulario.
+      ctx.save();
+      ctx.translate(ancho / 2, alto * 0.48);
+      ctx.scale(ancho * 0.58, alto * 0.44);
+      const velo = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      velo.addColorStop(0, 'rgba(245, 249, 252, 0.6)');
+      velo.addColorStop(0.72, 'rgba(245, 249, 252, 0)');
+      ctx.fillStyle = velo;
+      ctx.fillRect(-1.5, -1.5, 3, 3);
+      ctx.restore();
+
+      ctx.fillStyle = patronGrano;
+      ctx.fillRect(0, 0, ancho, alto);
     };
 
     let cuadro = 0;

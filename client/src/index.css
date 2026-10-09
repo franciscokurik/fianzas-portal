@@ -904,17 +904,6 @@ body {
   z-index: 0;
 }
 
-/* Un velo suave en el centro, como en FortexLink: le baja el contraste al
-   fondo justo donde está la tarjeta, sin apagar las orillas. */
-.acceso-velo {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0.6;
-  background: radial-gradient(ellipse 58% 44% at 50% 48%, var(--login-bg) 0%, transparent 72%);
-}
-
 /* ── Lo de enfrente ───────────────────────────────────────────────────── */
 .login-centro {
   position: relative;

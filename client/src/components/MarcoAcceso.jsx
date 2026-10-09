@@ -7,11 +7,9 @@ import LienzoVivo from './LienzoVivo.jsx';
 export default function MarcoAcceso({ children }) {
   return (
     <main className="login-shell">
+      {/* El velo del centro, que no deja que un cuadro grande le gane a la
+          tarjeta, se dibuja dentro del mismo lienzo (ver LienzoVivo.jsx). */}
       <LienzoVivo />
-      {/* Un velo suave en el centro: si a un cuadro le toca quedarse grande
-          detrás de la tarjeta, el formulario no pierde. Le baja el contraste
-          al fondo justo donde hay que leer, sin apagar la orilla. */}
-      <div className="acceso-velo" aria-hidden="true" />
 
       <div className="login-access-status">
         <span className="login-status-dot" aria-hidden="true" />
