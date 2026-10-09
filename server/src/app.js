@@ -13,6 +13,7 @@ import proveedoresRoutes from './routes/proveedores.js';
 import documentosRoutes from './routes/documentos.js';
 import subidasRoutes from './routes/subidas.js';
 import adminRoutes from './routes/admin.js';
+import comisionesRoutes from './routes/comisiones.js';
 import { correrAlertas } from './services/alerts.js';
 import { probarCorreo } from './services/email.js';
 import { seed, seedIfEmpty, reiniciarVacio } from './seed.js';
@@ -37,6 +38,11 @@ function capturarAsync(router) {
 
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || true }));
+// La carga masiva de comisiones manda miles de renglones en un JSON, y el tope
+// por defecto (100 KB) la cortaba alrededor de los 600. Se abre SOLO ahí y
+// antes del parser general: este marca el cuerpo como leído y el general ya no
+// lo vuelve a tocar. Más de ~4 MB tampoco pasaría, porque Vercel corta antes.
+app.use('/api/comisiones/importar', express.json({ limit: '4mb' }));
 app.use(express.json());
 
 app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
@@ -116,6 +122,9 @@ app.use('/api/proveedores', capturarAsync(proveedoresRoutes));
 app.use('/api/documentos', capturarAsync(documentosRoutes));
 app.use('/api/subidas', capturarAsync(subidasRoutes));
 app.use('/api/admin', capturarAsync(adminRoutes));
+// Las comisiones van aparte del panel y no colgadas de /api/admin: allá entra
+// el operador, y aquí no.
+app.use('/api/comisiones', capturarAsync(comisionesRoutes));
 
 // Dispara alertas manualmente (útil en MVP/demo)
 app.post('/api/alertas/correr', async (req, res) => {

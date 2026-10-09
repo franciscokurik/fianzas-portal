@@ -35,6 +35,12 @@ export async function eliminarCliente(clientId) {
   const borrado = {
     proyectos: await contar('proyectos'),
     fianzas: await contar('fianzas'),
+    // Se van con sus pólizas (CASCADE). Se cuentan para que el resumen lo diga:
+    // es lo único de la lista que no es del cliente sino lo que cobró Fortex.
+    comisiones: (await db.prepare(
+      `SELECT COUNT(*)::int AS c FROM comisiones
+       WHERE fianza_id IN (SELECT id FROM fianzas WHERE client_id = ?)`
+    ).get(id)).c,
     usuarios: await contar('users'),
     archivos: archivos.length,
     // Cuántos padrones lo dejan de tener como proveedor, y cuántas obras de

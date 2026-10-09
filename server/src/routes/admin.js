@@ -1185,6 +1185,21 @@ router.delete('/fianzas/:id', async (req, res) => {
   const id = Number(req.params.id);
   await exigirEntidad(req.user, 'fianza', id);
 
+  // Las comisiones se van con la póliza (CASCADE), y son lo que Fortex cobró:
+  // borrar una póliza con comisiones solo lo hace el administrador, que es
+  // quien las ve. Al operador o al vendedor se le dice que existen —sin montos—
+  // para que entienda por qué no puede, en vez de un "sin permiso" a secas.
+  if (req.user.role !== 'admin') {
+    const { c } = await db.prepare(
+      'SELECT COUNT(*)::int AS c FROM comisiones WHERE fianza_id = ?'
+    ).get(id);
+    if (c > 0) {
+      return res.status(409).json({
+        error: 'Esta póliza ya tiene comisiones registradas. Solo un administrador puede borrarla.',
+      });
+    }
+  }
+
   await borrarDocumentosDe('fianza', id);
   await db.prepare('DELETE FROM fianzas WHERE id = ?').run(id);
   res.json({ ok: true });

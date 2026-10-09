@@ -434,6 +434,40 @@ CREATE TABLE IF NOT EXISTS notifications (
   UNIQUE(client_id, tipo, ref_key)
 );
 
+-- Las comisiones que genera cada póliza. Son de FORTEX y de nadie más: ni el
+-- fiado, ni el contratante, ni el operador las ven (ver routes/comisiones.js).
+-- Una póliza puede generar varias —emisión, renovación, endoso—, así que es una
+-- tabla aparte y no una columna de fianzas.
+--
+--   fecha_pago         -> cuando el CLIENTE pagó la fianza. Es la que manda en
+--                         "comisión del mes".
+--   fecha_conciliacion -> cuando se concilió contra el estado de cuenta de la
+--                         afianzadora. Vacía = por conciliar.
+--   vendedor_id        -> el vendedor titular del cliente AL CAPTURARLA. Se
+--                         guarda y no se deriva: si mañana cambia el titular,
+--                         lo ya ganado no se le pasa al nuevo.
+--
+-- ON DELETE CASCADE con la póliza: la comisión no tiene sentido sin ella. Lo
+-- que impide perder comisiones por un borrado descuidado es la ruta, que solo
+-- deja borrar una póliza con comisiones al administrador.
+CREATE TABLE IF NOT EXISTS comisiones (
+  id                 SERIAL PRIMARY KEY,
+  fianza_id          INTEGER NOT NULL REFERENCES fianzas(id) ON DELETE CASCADE,
+  vendedor_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  fecha_pago         TEXT    NOT NULL,
+  fecha_conciliacion TEXT,
+  comision_neta      BIGINT  NOT NULL,
+  notas              TEXT,
+  -- 'manual' o 'masiva': para saber, si algo no cuadra, si vino de un Excel.
+  origen             TEXT    NOT NULL DEFAULT 'manual' CHECK (origen IN ('manual', 'masiva')),
+  capturada_por      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at         TEXT    NOT NULL DEFAULT ${TS_DEFAULT},
+  updated_at         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_comisiones_fianza ON comisiones(fianza_id);
+CREATE INDEX IF NOT EXISTS idx_comisiones_vendedor ON comisiones(vendedor_id);
+CREATE INDEX IF NOT EXISTS idx_comisiones_pago ON comisiones(fecha_pago);
+
 -- ---------------------------------------------------------------------------
 -- Datos base. Re-ejecutable sin efectos; el backfill de lo que ya existía
 -- vive en migrations.js porque solo puede correr una vez.
