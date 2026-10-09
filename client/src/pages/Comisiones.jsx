@@ -16,10 +16,12 @@ import { api } from '../api.js';
 import { mxn, mxnCents, fmtDate, InputPesos } from '../lib.jsx';
 
 // Arriba del archivo, como todos los mapas de etiquetas y colores.
+// "Por conciliar" va primero y es con la que abre la pantalla: es el trabajo
+// pendiente. Las conciliadas ya quedaron; se consultan, no se persiguen.
 const FILTROS_ESTADO = [
-  { key: 'todas', label: 'Todas' },
   { key: 'por_conciliar', label: 'Por conciliar' },
   { key: 'conciliada', label: 'Conciliadas' },
+  { key: 'todas', label: 'Todas' },
 ];
 
 const PERIODOS = [
@@ -595,8 +597,11 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
   const [comisiones, setComisiones] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
-  const [periodo, setPeriodo] = useState('mes');
-  const [estado, setEstado] = useState('todas');
+  // Abre en lo que falta conciliar, de CUALQUIER fecha. Con "este mes" de
+  // arranque, una comisión de agosto sin conciliar —justo la que hay que
+  // perseguir— quedaba fuera de la vista hasta que alguien cambiara el periodo.
+  const [periodo, setPeriodo] = useState('todo');
+  const [estado, setEstado] = useState('por_conciliar');
   const [afianzadora, setAfianzadora] = useState('');
   const [vendedor, setVendedor] = useState('');
   const [busca, setBusca] = useState('');
@@ -855,7 +860,11 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
                 <div className="py-16 text-center text-slate-400 text-sm">Cargando…</div>
               ) : !visibles.length ? (
                 <div className="py-16 text-center text-slate-400 text-sm">
-                  {comisiones.length ? 'No hay comisiones con los filtros seleccionados.' : 'No hay comisiones en este periodo.'}
+                  {estado === 'por_conciliar' && comisiones.length
+                    ? 'Nada por conciliar con estos filtros: todo lo pagado ya cuadró con la afianzadora.'
+                    : comisiones.length
+                      ? 'No hay comisiones con los filtros seleccionados.'
+                      : 'No hay comisiones en este periodo.'}
                 </div>
               ) : (
                 <>
