@@ -20,9 +20,8 @@ export default function Recuperar() {
           height="1024"
         />
         <header className="login-brand">
-          <span className="login-logo-mark" aria-hidden="true">F</span>
           <div>
-            <p className="login-wordmark">FORTEX</p>
+            <p className="login-wordmark">Fortex</p>
             <p className="login-product-name">Portal de Fianzas</p>
           </div>
         </header>
