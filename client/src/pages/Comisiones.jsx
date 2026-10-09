@@ -54,9 +54,10 @@ const TONO_KPI = {
 // Columnas del listado, una vez para encabezado y renglones. La póliza tiene
 // piso: con siete columnas fijas, en una laptop se quedaba en 30px. La fecha de
 // pago del cliente no tiene columna propia (es opcional): va debajo de la de
-// conciliación cuando existe.
-const COLS = 'grid grid-cols-[minmax(10rem,1.5fr)_minmax(0,7rem)_minmax(0,7.5rem)_7.5rem_7.5rem_2rem] gap-x-4 items-center';
-const COLS_SIN_ACCIONES = 'grid grid-cols-[minmax(10rem,1.5fr)_minmax(0,8rem)_7.5rem_7.5rem] gap-x-4 items-center';
+// conciliación cuando existe. La prima va pegada a la comisión para que las
+// dos cifras se lean juntas.
+const COLS = 'grid grid-cols-[minmax(10rem,1.5fr)_minmax(0,6.5rem)_minmax(0,7rem)_7rem_7.5rem_7.5rem_2rem] gap-x-3 items-center';
+const COLS_SIN_ACCIONES = 'grid grid-cols-[minmax(10rem,1.5fr)_minmax(0,8rem)_7.5rem_7.5rem_7.5rem] gap-x-4 items-center';
 const COLS_VENDEDOR = 'grid grid-cols-[minmax(0,1fr)_6rem_6rem_9rem_9rem] gap-x-4';
 
 // Los controles del sistema de FortexLink: 32px de alto, 6px de radio, y el
@@ -689,6 +690,10 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
   const conComision = visibles.filter((p) => p.comision_id);
   const sinComision = visibles.length - conComision.length;
   const total = conComision.reduce((s, p) => s + p.comision_neta, 0);
+  // La prima es de la póliza: una con dos comisiones sale en dos renglones,
+  // pero su prima se suma una vez.
+  const totalPrima = [...new Map(visibles.map((p) => [p.fianza_id, p.prima_neta || 0])).values()]
+    .reduce((s, v) => s + v, 0);
 
   const porVendedor = useMemo(() => {
     const m = new Map();
@@ -718,9 +723,10 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
 
   const cols = esAdmin ? COLS : COLS_SIN_ACCIONES;
   const encabezado = esAdmin
-    ? ['Póliza', 'Afianzadora', 'Vendedor', 'Conciliación', 'Comisión neta', '']
-    : ['Póliza', 'Afianzadora', 'Conciliación', 'Comisión neta'];
-  const derecha = esAdmin ? 4 : 3;
+    ? ['Póliza', 'Afianzadora', 'Vendedor', 'Conciliación', 'Prima neta', 'Comisión neta', '']
+    : ['Póliza', 'Afianzadora', 'Conciliación', 'Prima neta', 'Comisión neta'];
+  // Las dos cifras van a la derecha: prima y comisión.
+  const prima = esAdmin ? 4 : 3;
 
   const vacio = !polizas.length
     ? 'Todavía no hay pólizas emitidas.'
@@ -908,10 +914,10 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="overflow-x-auto">
-            <div className="min-w-[760px]">
+            <div className={esAdmin ? 'min-w-[880px]' : 'min-w-[760px]'}>
               <div className={`${cols} px-5 py-2.5 bg-slate-50 border-b border-slate-200`}>
                 {encabezado.map((t, i) => (
-                  <div key={i} className={`text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.06em] ${i === derecha ? 'text-right' : ''}`}>
+                  <div key={i} className={`text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.06em] ${i === prima || i === prima + 1 ? 'text-right' : ''}`}>
                     {t}
                   </div>
                 ))}
@@ -940,7 +946,8 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
                       Total · {conComision.length} comisión(es)
                       {sinComision > 0 && <span className="normal-case font-normal text-slate-400"> · {sinComision} sin asignar</span>}
                     </div>
-                    {Array.from({ length: derecha - 1 }, (_, i) => <div key={i} />)}
+                    {Array.from({ length: prima - 1 }, (_, i) => <div key={i} />)}
+                    <div className="text-sm font-semibold text-slate-600 text-right">{mxnCents(totalPrima)}</div>
                     <div className="text-sm font-bold text-slate-900 text-right">{mxnCents(total)}</div>
                     {esAdmin && <div />}
                   </div>
@@ -1005,6 +1012,9 @@ function RenglonPoliza({ p, cols, esAdmin, onAsignar, onCorregir }) {
         {p.fecha_pago && (
           <p className="text-[11px] text-slate-400 mt-0.5 truncate">Pagó {fmtDate(p.fecha_pago)}</p>
         )}
+      </div>
+      <div className="text-sm text-slate-600 text-right">
+        {p.prima_neta ? mxnCents(p.prima_neta) : <span className="text-slate-300">—</span>}
       </div>
       {tiene ? (
         <div className={`text-sm font-semibold text-right ${p.comision_neta < 0 ? 'text-red-600' : 'text-slate-800'}`}>
