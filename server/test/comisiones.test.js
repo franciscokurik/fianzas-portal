@@ -7,7 +7,8 @@
 //   3. "las suyas" son las que se le guardaron al capturar, no las del titular
 //      de hoy: reasignar una cuenta no le pasa lo ya ganado al nuevo;
 //   4. la carga masiva valida todo en el servidor, enseña antes de guardar,
-//      guarda todo o nada, y subir dos veces el mismo archivo no duplica.
+//      guarda todo o nada, y subir dos veces el mismo archivo no duplica;
+//   5. la lista es por PÓLIZA: las que no tienen comisión salen para asignarla.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -125,7 +126,7 @@ const capturar = (fianzaId, extra = {}) => mandar('POST', '/api/comisiones', adm
 // ---------------------------------------------------------------------------
 
 test('el operador no ve comisiones: ni la lista, ni el resumen, ni la base', async () => {
-  for (const ruta of ['/api/comisiones', '/api/comisiones/resumen', '/api/comisiones/base']) {
+  for (const ruta of ['/api/comisiones', '/api/comisiones/resumen', '/api/comisiones/tablero', '/api/comisiones/base']) {
     assert.equal((await pedir(ruta, operador)).status, 403, ruta);
   }
   assert.equal((await mandar('POST', '/api/comisiones', operador, {
@@ -136,6 +137,7 @@ test('el operador no ve comisiones: ni la lista, ni el resumen, ni la base', asy
 test('un usuario del portal del cliente no entra', async () => {
   assert.equal((await pedir('/api/comisiones', cliente)).status, 403);
   assert.equal((await pedir('/api/comisiones/resumen', cliente)).status, 403);
+  assert.equal((await pedir('/api/comisiones/tablero', cliente)).status, 403);
 });
 
 test('el admin captura y se le guarda el vendedor titular de ese momento', async () => {
@@ -198,11 +200,63 @@ test('un previo no genera comisión', async () => {
   assert.match((await r.json()).error, /previo/);
 });
 
-test('sin fecha de pago, con fecha imposible o en cero no pasa', async () => {
-  assert.equal((await capturar(ASE_001, { fecha_pago: '' })).status, 400);
+test('con fecha imposible o en cero no pasa', async () => {
   assert.equal((await capturar(ASE_001, { fecha_pago: '2026-02-31' })).status, 400);
   assert.equal((await capturar(ASE_001, { comision_neta: 0 })).status, 400);
   assert.equal((await capturar(ASE_001, { fecha_conciliacion: 'ayer' })).status, 400);
+});
+
+// Al conciliar no siempre se sabe cuándo pagó el cliente: pedirla obligaba a
+// inventar una fecha.
+test('la fecha de pago del cliente es opcional', async () => {
+  const r = await capturar(TKM_555, { fecha_pago: '', fecha_conciliacion: '2026-03-20' });
+  assert.equal(r.status, 201);
+  const { id } = await r.json();
+  const [guardada] = await memoria.query('SELECT fecha_pago FROM comisiones WHERE id = ?', [id]);
+  assert.equal(guardada.fecha_pago, null);
+  // Se borra para no mover las cuentas de las pruebas de abajo.
+  assert.equal((await mandar('DELETE', `/api/comisiones/${id}`, admin)).status, 200);
+});
+
+// ---------------------------------------------------------------------------
+// La lista por póliza
+// ---------------------------------------------------------------------------
+
+const tablero = async (token, query = '') =>
+  (await (await pedir(`/api/comisiones/tablero${query}`, token)).json()).polizas;
+
+test('la lista trae también las pólizas sin comisión, para asignarla', async () => {
+  const todas = await tablero(admin);
+  const de = (n) => todas.filter((p) => p.numero_poliza === n);
+
+  // ASE-001 tiene dos comisiones: dos renglones. TKM-555 no tiene: uno vacío.
+  assert.equal(de('ASE-001').length, 2);
+  assert.equal(de('TKM-555').length, 1);
+  assert.equal(de('TKM-555')[0].comision_id, null);
+  assert.equal(de('TKM-555')[0].afianzadora_nombre, 'Tokio Marine');
+  assert.equal(de('PREV-01').length, 0, 'los previos no van');
+
+  // Lo pendiente incluye lo que no tiene comisión; lo conciliado, no.
+  const pendientes = await tablero(admin, '?estado=por_conciliar');
+  assert.ok(pendientes.some((p) => p.numero_poliza === 'TKM-555'));
+  assert.deepEqual(await tablero(admin, '?estado=conciliada'), []);
+
+  // El periodo es de conciliación: no esconde lo que todavía no la tiene.
+  const conPeriodo = await tablero(admin, '?desde=2099-01-01');
+  assert.equal(conPeriodo.length, todas.length);
+});
+
+test('en la lista, el vendedor ve lo suyo: lo que se le guardó y su cartera sin asignar', async () => {
+  const deAna = (await tablero(ana)).map((p) => `${p.numero_poliza}:${p.comision_neta}`).sort();
+  // La de 7,000 de ASE-001 se le guardó a Beto aunque UNO sea de Ana.
+  assert.deepEqual(deAna, ['0301121:null', 'ASE-001:150000', 'DUP-1:null']);
+
+  const deBeto = (await tablero(beto)).map((p) => `${p.numero_poliza}:${p.comision_neta}`).sort();
+  assert.deepEqual(deBeto, ['ASE-001:7000', 'ASE-002:99900', 'DUP-1:null']);
+
+  // Y el filtro de vendedor no le sirve para ver lo de otro.
+  const tanteo = await tablero(ana, `?vendedor_id=${BETO}`);
+  assert.equal(tanteo.length, deAna.length);
 });
 
 test('las fechas del Excel se leen con el día primero y en número de serie', () => {
@@ -337,9 +391,13 @@ test('un ID que no es de esa póliza se rechaza, no se mueve en silencio', async
 // El resumen, y que no se escapen por otro lado
 // ---------------------------------------------------------------------------
 
-test('el resumen cuenta el mes por fecha de pago y respeta al vendedor', async () => {
+// El mes cuenta por FECHA DE CONCILIACIÓN: es la que se captura siempre. Una
+// comisión pagada hoy pero sin conciliar todavía no entra en el mes.
+test('el resumen cuenta el mes por fecha de conciliación y respeta al vendedor', async () => {
   const hoy = todayISO();
-  assert.equal((await capturar(ASE_002, { fecha_pago: hoy, comision_neta: 25000 })).status, 201);
+  const antes = await (await pedir('/api/comisiones/resumen', beto)).json();
+  assert.equal((await capturar(ASE_002, { fecha_pago: '', fecha_conciliacion: hoy, comision_neta: 25000 })).status, 201);
+  assert.equal((await capturar(ASE_002, { fecha_pago: hoy, comision_neta: 3000 })).status, 201);
 
   const deAdmin = await (await pedir('/api/comisiones/resumen', admin)).json();
   assert.equal(deAdmin.mes.periodo, hoy.slice(0, 7));
@@ -348,9 +406,14 @@ test('el resumen cuenta el mes por fecha de pago y respeta al vendedor', async (
   const deAna = await (await pedir('/api/comisiones/resumen', ana)).json();
   assert.equal(deAna.mes.total, 0, 'la de este mes es de Beto');
   const deBeto = await (await pedir('/api/comisiones/resumen', beto)).json();
-  assert.equal(deBeto.mes.total, 25000);
+  assert.equal(deBeto.mes.total - antes.mes.total, 25000, 'la de 3,000 no está conciliada');
+  assert.equal(deBeto.por_conciliar.total - antes.por_conciliar.total, 3000);
+
   // ASE-001 y 0301121 ya tienen; DUP-1 de UNO no.
   assert.equal(deAna.polizas_sin_comision, 1);
+  // Lo pendiente de Ana: DUP-1 sin comisión más lo suyo sin conciliar.
+  const pendientesDeAna = await tablero(ana, '?estado=por_conciliar');
+  assert.equal(deAna.por_conciliar.cuantas, pendientesDeAna.length);
 });
 
 test('las comisiones no viajan en el detalle del cliente', async () => {

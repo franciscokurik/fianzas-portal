@@ -16,7 +16,7 @@ import { Router } from 'express';
 import { requireAuth, requireInterno, requireAdmin } from '../auth/middleware.js';
 import { esAdmin, esVendedor } from '../lib/permisos.js';
 import {
-  listarComisiones, resumenComisiones, buscarPolizas,
+  listarComisiones, resumenComisiones, tableroComisiones, buscarPolizas,
   crearComision, actualizarComision, borrarComision,
   baseParaDescargar, analizarImportacion, aplicarImportacion,
 } from '../services/comisiones.js';
@@ -44,6 +44,18 @@ router.get('/', async (req, res) => {
     vendedor_id: esAdmin(req.user) ? vendedor_id : undefined,
   });
   res.json({ comisiones });
+});
+
+// GET /api/comisiones/tablero -> la lista de la pantalla, por póliza: cada
+// comisión capturada y cada póliza emitida que todavía no tiene ninguna.
+router.get('/tablero', async (req, res) => {
+  const { desde, hasta, afianzadora_id, vendedor_id, estado } = req.query;
+  const polizas = await tableroComisiones(alcanceDe(req.user), {
+    desde, hasta, afianzadora_id, estado,
+    // Igual que en el listado: el filtro de vendedor solo es del admin.
+    vendedor_id: esAdmin(req.user) ? vendedor_id : undefined,
+  });
+  res.json({ polizas });
 });
 
 // GET /api/comisiones/resumen -> las cifras de arriba de la pantalla

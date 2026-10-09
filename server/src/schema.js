@@ -439,10 +439,12 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- Una póliza puede generar varias —emisión, renovación, endoso—, así que es una
 -- tabla aparte y no una columna de fianzas.
 --
---   fecha_pago         -> cuando el CLIENTE pagó la fianza. Es la que manda en
---                         "comisión del mes".
---   fecha_conciliacion -> cuando se concilió contra el estado de cuenta de la
---                         afianzadora. Vacía = por conciliar.
+--   fecha_conciliacion -> cuando Fortex asignó y concilió la comisión que pagó
+--                         la afianzadora. Es la que manda en "conciliado en el
+--                         mes". Vacía = por conciliar.
+--   fecha_pago         -> cuando el CLIENTE pagó la fianza. Opcional: es un
+--                         dato de referencia y no siempre se tiene a la mano
+--                         al conciliar.
 --   vendedor_id        -> el vendedor titular del cliente AL CAPTURARLA. Se
 --                         guarda y no se deriva: si mañana cambia el titular,
 --                         lo ya ganado no se le pasa al nuevo.
@@ -454,7 +456,7 @@ CREATE TABLE IF NOT EXISTS comisiones (
   id                 SERIAL PRIMARY KEY,
   fianza_id          INTEGER NOT NULL REFERENCES fianzas(id) ON DELETE CASCADE,
   vendedor_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  fecha_pago         TEXT    NOT NULL,
+  fecha_pago         TEXT,
   fecha_conciliacion TEXT,
   comision_neta      BIGINT  NOT NULL,
   notas              TEXT,
@@ -467,6 +469,10 @@ CREATE TABLE IF NOT EXISTS comisiones (
 CREATE INDEX IF NOT EXISTS idx_comisiones_fianza ON comisiones(fianza_id);
 CREATE INDEX IF NOT EXISTS idx_comisiones_vendedor ON comisiones(vendedor_id);
 CREATE INDEX IF NOT EXISTS idx_comisiones_pago ON comisiones(fecha_pago);
+CREATE INDEX IF NOT EXISTS idx_comisiones_conciliacion ON comisiones(fecha_conciliacion);
+-- En las bases que ya tienen la tabla, la fecha de pago nació obligatoria.
+-- Se suelta aquí: repetirlo no hace nada, así que puede correr en cada setup.
+ALTER TABLE comisiones ALTER COLUMN fecha_pago DROP NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- Datos base. Re-ejecutable sin efectos; el backfill de lo que ya existía

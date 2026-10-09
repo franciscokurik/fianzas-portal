@@ -89,13 +89,16 @@ function deAlcance(alcance, columna = 'c.vendedor_id') {
 // El listado, con los filtros de la pantalla. 'vendedor' solo lo usa el admin:
 // para el vendedor el alcance ya lo dejó en lo suyo y el filtro no puede
 // ampliarlo (se aplican los dos, así que a lo más lo vacía).
+//
+// El periodo es de CONCILIACIÓN, como las cifras de arriba: la fecha de pago
+// del cliente es opcional y no puede decidir en qué mes cae una comisión.
 export async function listarComisiones(alcance, filtros = {}) {
   const partes = [];
   const params = [];
   const a = deAlcance(alcance);
 
-  if (filtros.desde) { partes.push('c.fecha_pago >= ?'); params.push(filtros.desde); }
-  if (filtros.hasta) { partes.push('c.fecha_pago <= ?'); params.push(filtros.hasta); }
+  if (filtros.desde) { partes.push('c.fecha_conciliacion >= ?'); params.push(filtros.desde); }
+  if (filtros.hasta) { partes.push('c.fecha_conciliacion <= ?'); params.push(filtros.hasta); }
   if (filtros.afianzadora_id) { partes.push('f.afianzadora_id = ?'); params.push(Number(filtros.afianzadora_id)); }
   if (filtros.vendedor_id === 'sin') partes.push('c.vendedor_id IS NULL');
   else if (filtros.vendedor_id) { partes.push('c.vendedor_id = ?'); params.push(Number(filtros.vendedor_id)); }
@@ -110,16 +113,24 @@ export async function listarComisiones(alcance, filtros = {}) {
   return db.prepare(
     `${SELECT_COMISION}
      WHERE 1 = 1${a.sql}${where}
-     ORDER BY c.fecha_pago DESC, c.id DESC`
+     ORDER BY c.fecha_conciliacion DESC NULLS FIRST, c.id DESC`
   ).all(...a.params, ...params);
 }
 
 // Las cuatro cifras de arriba de la pantalla. No dependen de los filtros: son
 // la foto de hoy, y por eso se piden aparte.
 //
-// "Pólizas sin comisión" es de la cartera de HOY del vendedor (clients.
-// vendedor_id), no de comisiones.vendedor_id: una póliza sin comisión todavía
-// no tiene a quién guardarle el nombre, así que se le atribuye al titular.
+// "Conciliado" cuenta por FECHA DE CONCILIACIÓN —cuando Fortex asignó lo que
+// pagó la afianzadora—, que es la fecha que se captura siempre. La de pago
+// del cliente es opcional y no puede mandar en una cifra.
+//
+// "Por conciliar" son los PENDIENTES, en la misma unidad que la lista: pólizas
+// sin ninguna comisión más comisiones capturadas sin conciliar. Su monto es
+// solo el de las capturadas: lo que no se ha asignado todavía no tiene monto.
+//
+// Las pólizas sin comisión son de la cartera de HOY del vendedor (clients.
+// vendedor_id): todavía no tienen a quién guardarle el nombre, así que se le
+// atribuyen al titular.
 export async function resumenComisiones(alcance) {
   const hoy = todayISO();
   const mes = hoy.slice(0, 7);
@@ -139,12 +150,66 @@ export async function resumenComisiones(alcance) {
        ${deAlcance(alcance, 'cl.vendedor_id').sql}`
   ).get(...deAlcance(alcance, 'cl.vendedor_id').params);
 
+  const sinConciliar = await suma('c.fecha_conciliacion IS NULL');
+
   return {
-    mes: { periodo: mes, ...(await suma('c.fecha_pago LIKE ?', `${mes}%`)) },
-    anio: { periodo: anio, ...(await suma('c.fecha_pago LIKE ?', `${anio}%`)) },
-    por_conciliar: await suma('c.fecha_conciliacion IS NULL'),
+    mes: { periodo: mes, ...(await suma('c.fecha_conciliacion LIKE ?', `${mes}%`)) },
+    anio: { periodo: anio, ...(await suma('c.fecha_conciliacion LIKE ?', `${anio}%`)) },
+    por_conciliar: {
+      cuantas: sinComision.c + sinConciliar.cuantas,
+      total: sinConciliar.total,
+    },
     polizas_sin_comision: sinComision.c,
   };
+}
+
+// La lista de la pantalla: las PÓLIZAS, no las comisiones. Un renglón por cada
+// comisión capturada y uno por cada póliza emitida que todavía no tiene
+// ninguna —ese es el que se asigna—. Sin esto, mientras no hubiera comisiones
+// capturadas la pantalla salía vacía, aunque hubiera nueve pólizas esperando.
+//
+// El alcance del vendedor tiene dos mitades, como las cifras de arriba: las
+// comisiones que se le GUARDARON a él, y las pólizas sin comisión de su
+// cartera de hoy. Una comisión que se le guardó a otro vendedor no aparece
+// aunque el cliente sea suyo ahora.
+//
+// El periodo filtra por fecha de conciliación, así que solo toca a lo ya
+// conciliado: lo pendiente no tiene fecha y se enseña siempre.
+export async function tableroComisiones(alcance, filtros = {}) {
+  const partes = [];
+  const params = [];
+
+  if (alcance != null) {
+    partes.push('((c.id IS NOT NULL AND c.vendedor_id = ?) OR (c.id IS NULL AND cl.vendedor_id = ?))');
+    params.push(alcance, alcance);
+  }
+  if (filtros.estado === 'por_conciliar') partes.push('c.fecha_conciliacion IS NULL');
+  if (filtros.estado === 'conciliada') partes.push('c.fecha_conciliacion IS NOT NULL');
+  if (filtros.desde) { partes.push('(c.fecha_conciliacion IS NULL OR c.fecha_conciliacion >= ?)'); params.push(filtros.desde); }
+  if (filtros.hasta) { partes.push('(c.fecha_conciliacion IS NULL OR c.fecha_conciliacion <= ?)'); params.push(filtros.hasta); }
+  if (filtros.afianzadora_id) { partes.push('f.afianzadora_id = ?'); params.push(Number(filtros.afianzadora_id)); }
+  if (filtros.vendedor_id === 'sin') partes.push('COALESCE(c.vendedor_id, cl.vendedor_id) IS NULL');
+  else if (filtros.vendedor_id) {
+    partes.push('COALESCE(c.vendedor_id, cl.vendedor_id) = ?');
+    params.push(Number(filtros.vendedor_id));
+  }
+
+  const where = partes.map((p) => ` AND ${p}`).join('');
+  return db.prepare(
+    `SELECT f.id AS fianza_id, f.numero_poliza, f.afianzadora_id,
+            a.nombre AS afianzadora_nombre, f.client_id, cl.razon_social AS cliente,
+            f.prima_neta, c.id AS comision_id,
+            COALESCE(c.vendedor_id, cl.vendedor_id) AS vendedor_id, u.nombre AS vendedor_nombre,
+            c.fecha_pago, c.fecha_conciliacion, c.comision_neta, c.notas, c.origen
+     FROM fianzas f
+     JOIN afianzadoras a ON a.id = f.afianzadora_id
+     JOIN clients cl     ON cl.id = f.client_id
+     LEFT JOIN comisiones c ON c.fianza_id = f.id
+     LEFT JOIN users u      ON u.id = COALESCE(c.vendedor_id, cl.vendedor_id)
+     WHERE f.clase = 'fianza'${where}
+     ORDER BY (c.fecha_conciliacion IS NULL) DESC, c.fecha_conciliacion DESC,
+              cl.razon_social, f.numero_poliza, c.id`
+  ).all(...params);
 }
 
 // El buscador del alta individual: pólizas EMITIDAS por número o cliente. Los
@@ -176,9 +241,12 @@ export async function buscarPolizas(q) {
 // ---------------------------------------------------------------------------
 
 // Valida lo que se captura a mano. Devuelve los datos ya normalizados.
+//
+// Lo obligatorio es la comisión. La fecha de pago del cliente es opcional: al
+// conciliar no siempre se tiene, y pedirla obligaba a inventar una.
 function validar({ fecha_pago, fecha_conciliacion, comision_neta, notas }) {
   const pago = fechaISO(fecha_pago);
-  if (!pago) throw invalido('La fecha de pago es obligatoria y tiene que ser una fecha válida.');
+  if (pago === undefined) throw invalido('La fecha de pago no es una fecha válida.');
   const conciliacion = fechaISO(fecha_conciliacion);
   if (conciliacion === undefined) throw invalido('La fecha de conciliación no es una fecha válida.');
 
@@ -361,8 +429,8 @@ export async function analizarImportacion(filas = []) {
     }
     const poliza = emitidas[0];
 
+    // La fecha de pago es opcional, como en la captura a mano.
     const pago = fechaISO(crudo.pago);
-    if (pago === null) return error('Falta la fecha de pago.');
     if (pago === undefined) return error(`La fecha de pago "${crudo.pago}" no es una fecha válida.`);
     const conciliacion = fechaISO(crudo.conc);
     if (conciliacion === undefined) {

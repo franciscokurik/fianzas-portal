@@ -1,35 +1,45 @@
-// Comisiones: lo que genera cada póliza. Solo para Fortex.
+// Comisiones: lo que paga cada afianzadora por cada póliza. Solo para Fortex.
 //
-// El admin ve todas y las captura (una por una o con Excel); el vendedor ve
+// El admin ve todas y las asigna (una por una o con Excel); el vendedor ve
 // las suyas y nada más. Quien decide es el servidor (/api/comisiones): aquí
 // solo se deja de pintar lo que a cada quien le contestaría 403.
 //
-// La pantalla enseña poco a la vez, a propósito: cuatro cifras y un listado.
+// La pantalla enseña poco a la vez, a propósito: tres cifras y la lista.
 // El resumen por vendedor va en su pestaña, y la captura y la carga masiva en
 // ventanas que se abren cuando se piden.
 import { useEffect, useMemo, useState } from 'react';
 import {
   Plus, Download, Upload, Search, X, Pencil, Trash2, AlertTriangle, FileSpreadsheet,
-  HandCoins, CalendarClock, Clock, FileWarning, CheckCircle2, Eye,
+  HandCoins, CalendarClock, Clock, Eye,
 } from 'lucide-react';
 import { api } from '../api.js';
 import { mxn, mxnCents, fmtDate, InputPesos, guardarArchivo } from '../lib.jsx';
 
 // Arriba del archivo, como todos los mapas de etiquetas y colores.
 // "Por conciliar" va primero y es con la que abre la pantalla: es el trabajo
-// pendiente. Las conciliadas ya quedaron; se consultan, no se persiguen.
+// pendiente, y en él entran también las pólizas que no tienen comisión. Las
+// conciliadas ya quedaron; se consultan, no se persiguen.
 const FILTROS_ESTADO = [
   { key: 'por_conciliar', label: 'Por conciliar' },
   { key: 'conciliada', label: 'Conciliadas' },
   { key: 'todas', label: 'Todas' },
 ];
 
+// El periodo es de CONCILIACIÓN: la fecha que se captura al asignar. La de
+// pago del cliente es opcional y no puede decidir en qué mes cae.
 const PERIODOS = [
-  { key: 'mes', label: 'Este mes' },
-  { key: 'mes_anterior', label: 'Mes anterior' },
-  { key: 'anio', label: 'Este año' },
-  { key: 'todo', label: 'Todo' },
+  { key: 'todo', label: 'Conciliadas en cualquier fecha' },
+  { key: 'mes', label: 'Conciliadas este mes' },
+  { key: 'mes_anterior', label: 'Conciliadas el mes anterior' },
+  { key: 'anio', label: 'Conciliadas este año' },
 ];
+
+// Lo que va en la columna de conciliación cuando todavía no hay fecha. Ámbar
+// es "ya está capturada, falta cuadrarla"; gris, "ni siquiera se ha asignado".
+const ESTADO_RENGLON = {
+  por_conciliar: { label: 'Por conciliar', cls: 'bg-amber-100 text-amber-800' },
+  sin_comision: { label: 'Sin comisión', cls: 'bg-slate-100 text-slate-600' },
+};
 
 // El cuadro de color del KPI: el ÚNICO lugar de la tarjeta con color. La
 // tarjeta entera nunca se tiñe: cuatro tarjetas de colores se leen como un
@@ -41,9 +51,13 @@ const TONO_KPI = {
   neutral: 'bg-slate-100 text-slate-500',
 };
 
-// Columnas del listado, una vez para encabezado y renglones.
-const COLS = 'grid grid-cols-[minmax(0,1.3fr)_minmax(0,8rem)_minmax(0,8rem)_6.5rem_7.5rem_8rem_2rem] gap-x-4 items-center';
-const COLS_SIN_ACCIONES = 'grid grid-cols-[minmax(0,1.3fr)_minmax(0,8rem)_6.5rem_7.5rem_8rem] gap-x-4 items-center';
+// Columnas del listado, una vez para encabezado y renglones. La póliza tiene
+// piso: con siete columnas fijas, en una laptop se quedaba en 30px. La fecha de
+// pago del cliente no tiene columna propia (es opcional): va debajo de la de
+// conciliación cuando existe.
+const COLS = 'grid grid-cols-[minmax(10rem,1.5fr)_minmax(0,7rem)_minmax(0,7.5rem)_7.5rem_7.5rem_2rem] gap-x-4 items-center';
+const COLS_SIN_ACCIONES = 'grid grid-cols-[minmax(10rem,1.5fr)_minmax(0,8rem)_7.5rem_7.5rem] gap-x-4 items-center';
+const COLS_VENDEDOR = 'grid grid-cols-[minmax(0,1fr)_6rem_6rem_9rem_9rem] gap-x-4';
 
 // Los controles del sistema de FortexLink: 32px de alto, 6px de radio, y el
 // foco como borde más oscuro con un halo casi invisible.
@@ -175,7 +189,8 @@ async function leerArchivo(archivo) {
     const llave = llaveDeEncabezado(valorDeCelda(celda.value));
     if (llave && !columnas[llave]) columnas[llave] = col;
   });
-  const faltan = ['numero_poliza', 'afianzadora', 'fecha_pago', 'comision_neta']
+  // La fecha de pago no se exige: es opcional, también en el Excel.
+  const faltan = ['numero_poliza', 'afianzadora', 'comision_neta']
     .filter((k) => !columnas[k]);
   if (faltan.length) {
     throw new Error('No encontré estas columnas en el primer renglón: '
@@ -254,18 +269,25 @@ function Aviso({ tono = 'red', children }) {
 }
 
 /* --------------------------------------------------------------------------
-   Alta y corrección individual
-   -------------------------------------------------------------------------- */
+   Asignar y corregir
+   --------------------------------------------------------------------------
+   Asignar es lo de todos los días: llega lo que pagó la afianzadora por una
+   póliza y se captura con la fecha en que se concilia. Por eso, cuando se
+   abre desde un renglón de la lista, la póliza ya viene puesta y la fecha de
+   conciliación viene en hoy. La fecha de pago del cliente es opcional. */
 
-function ComisionModal({ inicial, onClose, onGuardado }) {
+function ComisionModal({ inicial, poliza: polizaDada, onClose, onGuardado }) {
   const editando = Boolean(inicial);
   const [busca, setBusca] = useState('');
   const [resultados, setResultados] = useState([]);
-  const [poliza, setPoliza] = useState(null);
+  const [poliza, setPoliza] = useState(polizaDada || null);
   const [f, setF] = useState({
-    fecha_pago: inicial?.fecha_pago || hoyLocal(),
-    fecha_conciliacion: inicial?.fecha_conciliacion || '',
-    comision_neta: inicial?.comision_neta ?? 0,
+    // Vacía y no en cero: con un 0 puesto, lo que se teclea queda pegado a él.
+    comision_neta: inicial?.comision_neta,
+    // Al corregir se respeta lo que hay: una vacía sigue vacía hasta que se
+    // concilie. Al asignar, lo normal es que se esté conciliando ahí mismo.
+    fecha_conciliacion: editando ? (inicial.fecha_conciliacion || '') : hoyLocal(),
+    fecha_pago: inicial?.fecha_pago || '',
     notas: inicial?.notas || '',
   });
   const [error, setError] = useState('');
@@ -274,7 +296,7 @@ function ComisionModal({ inicial, onClose, onGuardado }) {
   // El buscador espera a que se deje de teclear: una petición por letra no
   // sirve de nada y en Neon cada una es un viaje.
   useEffect(() => {
-    if (editando || busca.trim().length < 2) { setResultados([]); return undefined; }
+    if (editando || poliza || busca.trim().length < 2) { setResultados([]); return undefined; }
     let vigente = true;
     const t = setTimeout(() => {
       api.get(`/comisiones/polizas?q=${encodeURIComponent(busca.trim())}`)
@@ -282,16 +304,17 @@ function ComisionModal({ inicial, onClose, onGuardado }) {
         .catch((e) => { if (vigente) setError(e.message); });
     }, 250);
     return () => { vigente = false; clearTimeout(t); };
-  }, [busca, editando]);
+  }, [busca, editando, poliza]);
 
   async function guardar() {
     setError('');
     if (!editando && !poliza) return setError('Elige la póliza.');
+    if (!f.comision_neta) return setError('Captura la comisión que pagó la afianzadora.');
     setBusy(true);
     try {
       if (editando) await api.put(`/comisiones/${inicial.id}`, f);
       else await api.post('/comisiones', { ...f, fianza_id: poliza.id });
-      onGuardado(editando ? 'Comisión actualizada' : 'Comisión registrada');
+      onGuardado(editando ? 'Comisión actualizada' : `Comisión asignada a ${poliza.numero_poliza}`);
     } catch (e) {
       setError(e.message);
       setBusy(false);
@@ -311,14 +334,16 @@ function ComisionModal({ inicial, onClose, onGuardado }) {
   }
 
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const etiqueta = 'block text-sm font-medium text-slate-700 mb-1.5';
+  const ayuda = 'text-[11px] text-slate-400 mt-1';
 
   return (
     <Modal
       icono={<HandCoins className="h-5 w-5" />}
-      titulo={editando ? 'Corregir comisión' : 'Nueva comisión'}
+      titulo={editando ? 'Corregir comisión' : 'Asignar comisión'}
       sub={editando
         ? `${inicial.numero_poliza} · ${inicial.cliente}`
-        : 'Se le asigna al vendedor titular del cliente'}
+        : 'Lo que pagó la afianzadora por la póliza'}
       onClose={onClose}
       pie={(
         <>
@@ -339,14 +364,14 @@ function ComisionModal({ inicial, onClose, onGuardado }) {
             disabled={busy}
             className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
           >
-            {busy ? 'Guardando…' : 'Guardar'}
+            {busy ? 'Guardando…' : editando ? 'Guardar' : 'Asignar'}
           </button>
         </>
       )}
     >
       {!editando && (
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1.5">Póliza *</label>
+          <label className={etiqueta}>Póliza *</label>
           {poliza ? (
             <div className="flex items-start justify-between gap-3 p-3 rounded-lg border border-indigo-200 bg-indigo-50">
               <div className="min-w-0">
@@ -359,9 +384,13 @@ function ComisionModal({ inicial, onClose, onGuardado }) {
                   {poliza.comisiones > 0 && ` · ya tiene ${poliza.comisiones} por ${mxn(poliza.comisionado)}`}
                 </p>
               </div>
-              <button onClick={() => setPoliza(null)} className="text-xs text-indigo-700 hover:underline shrink-0">
-                Cambiar
-              </button>
+              {/* Abierta desde un renglón, la póliza es esa: cambiarla aquí
+                  sería asignarle a otra lo que se vio en esta. */}
+              {!polizaDada && (
+                <button onClick={() => setPoliza(null)} className="text-xs text-indigo-700 hover:underline shrink-0">
+                  Cambiar
+                </button>
+              )}
             </div>
           ) : (
             <>
@@ -402,29 +431,40 @@ function ComisionModal({ inicial, onClose, onGuardado }) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1.5">Fecha de pago *</label>
-          <input type="date" value={f.fecha_pago} onChange={set('fecha_pago')} className={inputCls} />
-          <p className="text-[11px] text-slate-400 mt-1">Cuando el cliente pagó la fianza.</p>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1.5">Fecha de conciliación</label>
-          <input type="date" value={f.fecha_conciliacion} onChange={set('fecha_conciliacion')} className={inputCls} />
-          <p className="text-[11px] text-slate-400 mt-1">Vacía = por conciliar.</p>
-        </div>
-      </div>
       <div>
-        <label className="block text-sm font-medium text-slate-700 mb-1.5">Comisión neta *</label>
+        <label className={etiqueta}>Comisión neta *</label>
         <InputPesos
+          autoFocus={Boolean(polizaDada) || editando}
           valor={f.comision_neta}
           onChange={(c) => setF((s) => ({ ...s, comision_neta: c }))}
           className={`${inputCls} tabular-nums`}
         />
-        <p className="text-[11px] text-slate-400 mt-1">Negativa si es una devolución.</p>
+        <p className={ayuda}>La que pagó la afianzadora. Negativa si es una devolución.</p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <div className="flex items-baseline justify-between">
+            <label className={etiqueta}>Fecha de conciliación</label>
+            {!f.fecha_conciliacion && (
+              <button
+                onClick={() => setF((s) => ({ ...s, fecha_conciliacion: hoyLocal() }))}
+                className="text-[11px] font-medium text-indigo-700 hover:underline"
+              >
+                Hoy
+              </button>
+            )}
+          </div>
+          <input type="date" value={f.fecha_conciliacion} onChange={set('fecha_conciliacion')} className={inputCls} />
+          <p className={ayuda}>Cuando la asignas. Vacía = por conciliar.</p>
+        </div>
+        <div>
+          <label className={etiqueta}>Pago del cliente</label>
+          <input type="date" value={f.fecha_pago} onChange={set('fecha_pago')} className={inputCls} />
+          <p className={ayuda}>Opcional · cuando pagó la fianza.</p>
+        </div>
       </div>
       <div>
-        <label className="block text-sm font-medium text-slate-700 mb-1.5">Notas</label>
+        <label className={etiqueta}>Notas</label>
         <input value={f.notas} onChange={set('notas')} className={inputCls} />
       </div>
 
@@ -572,7 +612,9 @@ function SubirBase({ onClose, onAplicado }) {
                       <span className="font-mono text-slate-700">{r.numero_poliza}</span>
                       <span className="text-slate-400"> · {r.cliente}</span>
                     </span>
-                    <span className="text-slate-500 tabular-nums">{fmtDate(r.fecha_pago)}</span>
+                    <span className="text-slate-500 tabular-nums">
+                      {r.fecha_conciliacion ? fmtDate(r.fecha_conciliacion) : 'Por conciliar'}
+                    </span>
                     <span className="text-right tabular-nums text-slate-800">{mxnCents(r.comision_neta)}</span>
                   </div>
                 ))}
@@ -586,37 +628,47 @@ function SubirBase({ onClose, onAplicado }) {
 
 /* --------------------------------------------------------------------------
    La pantalla
-   -------------------------------------------------------------------------- */
+   --------------------------------------------------------------------------
+   La lista es de PÓLIZAS (/comisiones/tablero): un renglón por cada comisión
+   capturada y uno por cada póliza emitida que todavía no tiene ninguna, con
+   su botón para asignarla. Antes era de comisiones, y mientras no hubiera una
+   capturada la pantalla salía vacía aunque hubiera pólizas esperando. */
+
+// Pendiente es todo lo que no tiene fecha de conciliación: lo capturado sin
+// conciliar y lo que ni siquiera tiene comisión.
+const pendiente = (p) => !p.fecha_conciliacion;
+const porEstado = (p, estado) => estado === 'todas'
+  || (estado === 'conciliada' ? !pendiente(p) : pendiente(p));
 
 export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = [], flash }) {
   const [resumen, setResumen] = useState(null);
-  const [comisiones, setComisiones] = useState([]);
+  const [polizas, setPolizas] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
-  // Abre en lo que falta conciliar, de CUALQUIER fecha. Con "este mes" de
-  // arranque, una comisión de agosto sin conciliar —justo la que hay que
-  // perseguir— quedaba fuera de la vista hasta que alguien cambiara el periodo.
+  // Abre en lo pendiente, de CUALQUIER fecha: es el trabajo por hacer.
   const [periodo, setPeriodo] = useState('todo');
   const [estado, setEstado] = useState('por_conciliar');
   const [afianzadora, setAfianzadora] = useState('');
   const [vendedor, setVendedor] = useState('');
   const [busca, setBusca] = useState('');
   const [vista, setVista] = useState('detalle');
-  const [modal, setModal] = useState(null); // null | 'nueva' | 'subir' | comisión a corregir
+  // null | 'nueva' | 'subir' | { asignar: póliza } | { corregir: comisión }
+  const [modal, setModal] = useState(null);
   const [descargando, setDescargando] = useState(false);
 
   const cargarResumen = () => api.get('/comisiones/resumen').then(setResumen).catch((e) => setError(e.message));
 
   // Lo que filtra el servidor: periodo, afianzadora y vendedor. El estado y la
   // búsqueda se filtran aquí, para poder contar las pestañas rápidas sin pedir
-  // tres veces lo mismo.
+  // tres veces lo mismo. El periodo solo toca a lo conciliado: lo pendiente no
+  // tiene fecha de conciliación y el servidor lo manda siempre.
   const cargarLista = () => {
     const q = new URLSearchParams({ ...rangoDe(periodo) });
     if (afianzadora) q.set('afianzadora_id', afianzadora);
     if (esAdmin && vendedor) q.set('vendedor_id', vendedor);
     setCargando(true);
-    return api.get(`/comisiones?${q}`)
-      .then((d) => setComisiones(d.comisiones))
+    return api.get(`/comisiones/tablero?${q}`)
+      .then((d) => setPolizas(d.polizas))
       .catch((e) => setError(e.message))
       .finally(() => setCargando(false));
   };
@@ -632,23 +684,24 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
   };
 
   const termino = busca.trim().toLowerCase();
-  const porEstado = (c, e = estado) => e === 'todas'
-    || (e === 'conciliada' ? Boolean(c.fecha_conciliacion) : !c.fecha_conciliacion);
-  const visibles = comisiones.filter((c) => porEstado(c)
-    && (!termino || `${c.numero_poliza} ${c.cliente}`.toLowerCase().includes(termino)));
-  const total = visibles.reduce((s, c) => s + c.comision_neta, 0);
+  const visibles = polizas.filter((p) => porEstado(p, estado)
+    && (!termino || `${p.numero_poliza} ${p.cliente}`.toLowerCase().includes(termino)));
+  const conComision = visibles.filter((p) => p.comision_id);
+  const sinComision = visibles.length - conComision.length;
+  const total = conComision.reduce((s, p) => s + p.comision_neta, 0);
 
   const porVendedor = useMemo(() => {
     const m = new Map();
-    for (const c of visibles) {
-      const k = c.vendedor_id ?? 'sin';
-      if (!m.has(k)) m.set(k, { nombre: c.vendedor_nombre || 'Sin vendedor', cuantas: 0, total: 0, porConciliar: 0 });
+    for (const p of visibles) {
+      const k = p.vendedor_id ?? 'sin';
+      if (!m.has(k)) m.set(k, { nombre: p.vendedor_nombre || 'Sin vendedor', sinComision: 0, cuantas: 0, total: 0, porConciliar: 0 });
       const v = m.get(k);
+      if (!p.comision_id) { v.sinComision += 1; continue; }
       v.cuantas += 1;
-      v.total += c.comision_neta;
-      if (!c.fecha_conciliacion) v.porConciliar += c.comision_neta;
+      v.total += p.comision_neta;
+      if (!p.fecha_conciliacion) v.porConciliar += p.comision_neta;
     }
-    return [...m.values()].sort((a, b) => b.total - a.total);
+    return [...m.values()].sort((a, b) => b.total - a.total || b.sinComision - a.sinComision);
   }, [visibles]);
 
   async function bajarBase() {
@@ -665,9 +718,17 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
 
   const cols = esAdmin ? COLS : COLS_SIN_ACCIONES;
   const encabezado = esAdmin
-    ? ['Póliza', 'Afianzadora', 'Vendedor', 'Pago', 'Conciliación', 'Comisión neta', '']
-    : ['Póliza', 'Afianzadora', 'Pago', 'Conciliación', 'Comisión neta'];
-  const derecha = esAdmin ? 5 : 4;
+    ? ['Póliza', 'Afianzadora', 'Vendedor', 'Conciliación', 'Comisión neta', '']
+    : ['Póliza', 'Afianzadora', 'Conciliación', 'Comisión neta'];
+  const derecha = esAdmin ? 4 : 3;
+
+  const vacio = !polizas.length
+    ? 'Todavía no hay pólizas emitidas.'
+    : estado === 'por_conciliar'
+      ? 'Nada pendiente con estos filtros: todas las pólizas tienen su comisión conciliada.'
+      : estado === 'conciliada'
+        ? 'No hay comisiones conciliadas con estos filtros.'
+        : 'No hay pólizas con los filtros seleccionados.';
 
   return (
     <div className="space-y-3">
@@ -678,7 +739,7 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
           </h2>
           <p className="text-slate-400 text-xs mt-0.5">
             {esAdmin
-              ? 'Lo que genera cada póliza · solo la ven el administrador y su vendedor'
+              ? 'Lo que paga cada afianzadora por póliza · solo la ven el administrador y su vendedor'
               : 'Las comisiones de las pólizas de tus clientes'}
           </p>
         </div>
@@ -701,7 +762,7 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
               onClick={() => setModal('nueva')}
               className="flex items-center gap-1 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors"
             >
-              <Plus className="h-3.5 w-3.5" /> Nueva comisión
+              <Plus className="h-3.5 w-3.5" /> Asignar comisión
             </button>
           </div>
         )}
@@ -720,35 +781,32 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
         </div>
       )}
 
-      {/* Las cuatro cifras. Cada una lleva al listado ya filtrado. */}
+      {/* Tres cifras, y cada una lleva a la lista ya filtrada. Lo conciliado
+          cuenta por la fecha en que se asignó, no por la del pago del cliente. */}
       {resumen && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <StatCard
-            icon={<CalendarClock className="h-5 w-5" />} tono="brand"
-            label={`Comisión de ${nombreDelMes(resumen.mes.periodo)}`}
-            value={mxn(resumen.mes.total)} sub={`${resumen.mes.cuantas} pago(s) este mes`}
-            activa={periodo === 'mes' && estado === 'todas'}
-            onClick={() => { setPeriodo('mes'); setEstado('todas'); setVista('detalle'); }}
-          />
-          <StatCard
-            icon={<HandCoins className="h-5 w-5" />} tono="ok"
-            label={`Comisión ${resumen.anio.periodo}`}
-            value={mxn(resumen.anio.total)} sub={`${resumen.anio.cuantas} en el año`}
-            activa={periodo === 'anio' && estado === 'todas'}
-            onClick={() => { setPeriodo('anio'); setEstado('todas'); setVista('detalle'); }}
-          />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatCard
             icon={<Clock className="h-5 w-5" />} tono="warn"
-            label="Por conciliar" value={mxn(resumen.por_conciliar.total)}
-            sub={`${resumen.por_conciliar.cuantas} sin conciliar con la afianzadora`}
-            activa={periodo === 'todo' && estado === 'por_conciliar'}
+            label="Por conciliar" value={resumen.por_conciliar.cuantas}
+            sub={resumen.por_conciliar.total
+              ? `${resumen.polizas_sin_comision} sin comisión · ${mxn(resumen.por_conciliar.total)} sin conciliar`
+              : `${resumen.polizas_sin_comision} póliza(s) sin comisión asignada`}
+            activa={estado === 'por_conciliar'}
             onClick={() => { setPeriodo('todo'); setEstado('por_conciliar'); setVista('detalle'); }}
           />
           <StatCard
-            icon={<FileWarning className="h-5 w-5" />} tono="neutral"
-            label="Pólizas sin comisión" value={resumen.polizas_sin_comision}
-            sub={esAdmin ? 'Emitidas y sin ninguna registrada' : 'De tus clientes, sin ninguna registrada'}
-            onClick={esAdmin ? bajarBase : undefined}
+            icon={<CalendarClock className="h-5 w-5" />} tono="brand"
+            label={`Conciliado en ${nombreDelMes(resumen.mes.periodo)}`}
+            value={mxn(resumen.mes.total)} sub={`${resumen.mes.cuantas} comisión(es)`}
+            activa={periodo === 'mes' && estado === 'conciliada'}
+            onClick={() => { setPeriodo('mes'); setEstado('conciliada'); setVista('detalle'); }}
+          />
+          <StatCard
+            icon={<HandCoins className="h-5 w-5" />} tono="ok"
+            label={`Conciliado ${resumen.anio.periodo}`}
+            value={mxn(resumen.anio.total)} sub={`${resumen.anio.cuantas} comisión(es) en el año`}
+            activa={periodo === 'anio' && estado === 'conciliada'}
+            onClick={() => { setPeriodo('anio'); setEstado('conciliada'); setVista('detalle'); }}
           />
         </div>
       )}
@@ -757,7 +815,7 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
           listado era una tabla más compitiendo por la vista. */}
       {esAdmin && (
         <div className="flex gap-1 border-b border-slate-200">
-          {[['detalle', 'Detalle'], ['vendedores', 'Por vendedor']].map(([k, l]) => (
+          {[['detalle', 'Pólizas'], ['vendedores', 'Por vendedor']].map(([k, l]) => (
             <button
               key={k}
               onClick={() => setVista(k)}
@@ -784,7 +842,7 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
             <span className={`text-[10px] rounded-full px-1 py-px font-semibold leading-none tabular-nums ${
               estado === t.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
             }`}>
-              {comisiones.filter((c) => porEstado(c, t.key)).length}
+              {polizas.filter((p) => porEstado(p, t.key)).length}
             </span>
           </button>
         ))}
@@ -800,9 +858,13 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
             className={`${filtroCls} w-full pl-8`}
           />
         </div>
-        <select value={periodo} onChange={(e) => setPeriodo(e.target.value)} className={`${filtroCls} flex-1 min-w-[8rem]`}>
-          {PERIODOS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-        </select>
+        {/* Lo pendiente no tiene fecha de conciliación: el periodo no le
+            cambiaría nada, así que ni se ofrece. */}
+        {estado !== 'por_conciliar' && (
+          <select value={periodo} onChange={(e) => setPeriodo(e.target.value)} className={`${filtroCls} flex-1 min-w-[11rem]`}>
+            {PERIODOS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+          </select>
+        )}
         <select value={afianzadora} onChange={(e) => setAfianzadora(e.target.value)} className={`${filtroCls} flex-1 min-w-[9rem]`}>
           <option value="">Todas las afianzadoras</option>
           {afianzadoras.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
@@ -818,19 +880,22 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
 
       {vista === 'vendedores' && esAdmin ? (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="grid grid-cols-[minmax(0,1fr)_6rem_9rem_9rem] gap-x-4 px-5 py-2.5 bg-slate-50 border-b border-slate-200">
-            {['Vendedor', 'Pagos', 'Por conciliar', 'Comisión neta'].map((t, i) => (
+          <div className={`${COLS_VENDEDOR} px-5 py-2.5 bg-slate-50 border-b border-slate-200`}>
+            {['Vendedor', 'Sin comisión', 'Comisiones', 'Por conciliar', 'Comisión neta'].map((t, i) => (
               <div key={t} className={`text-[10.5px] font-semibold text-slate-400 uppercase tracking-[0.06em] ${i ? 'text-right' : ''}`}>{t}</div>
             ))}
           </div>
           {!porVendedor.length ? (
-            <div className="py-16 text-center text-slate-400 text-sm">No hay comisiones con los filtros seleccionados.</div>
+            <div className="py-16 text-center text-slate-400 text-sm">No hay pólizas con los filtros seleccionados.</div>
           ) : (
             <div className="divide-y divide-slate-100" data-tabular>
               {porVendedor.map((v) => (
-                <div key={v.nombre} className="grid grid-cols-[minmax(0,1fr)_6rem_9rem_9rem] gap-x-4 px-5 py-3 items-center">
+                <div key={v.nombre} className={`${COLS_VENDEDOR} px-5 py-3 items-center`}>
                   <span className="text-sm font-medium text-slate-800 truncate">{v.nombre}</span>
-                  <span className="text-sm text-slate-600 text-right">{v.cuantas}</span>
+                  <span className={`text-sm text-right ${v.sinComision ? 'text-slate-600' : 'text-slate-400'}`}>
+                    {v.sinComision || '—'}
+                  </span>
+                  <span className="text-sm text-slate-600 text-right">{v.cuantas || '—'}</span>
                   <span className={`text-sm text-right ${v.porConciliar ? 'text-amber-700' : 'text-slate-400'}`}>
                     {v.porConciliar ? mxn(v.porConciliar) : '—'}
                   </span>
@@ -855,56 +920,25 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
               {cargando ? (
                 <div className="py-16 text-center text-slate-400 text-sm">Cargando…</div>
               ) : !visibles.length ? (
-                <div className="py-16 text-center text-slate-400 text-sm">
-                  {estado === 'por_conciliar' && comisiones.length
-                    ? 'Nada por conciliar con estos filtros: todo lo pagado ya cuadró con la afianzadora.'
-                    : comisiones.length
-                      ? 'No hay comisiones con los filtros seleccionados.'
-                      : 'No hay comisiones en este periodo.'}
-                </div>
+                <div className="py-16 text-center text-slate-400 text-sm">{vacio}</div>
               ) : (
                 <>
                   <div className="divide-y divide-slate-100" data-tabular>
-                    {visibles.map((c) => (
-                      <div key={c.id} className={`${cols} px-5 py-3 hover:bg-slate-50 transition-colors group`}>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-800 truncate font-mono">{c.numero_poliza}</p>
-                          <p className="text-xs text-slate-400 mt-0.5 truncate" title={c.notas || undefined}>{c.cliente}</p>
-                        </div>
-                        <div className="text-xs text-slate-600 truncate">{c.afianzadora_nombre}</div>
-                        {esAdmin && (
-                          <div className={`text-xs truncate ${c.vendedor_nombre ? 'text-slate-600' : 'text-slate-400'}`}>
-                            {c.vendedor_nombre || 'Sin vendedor'}
-                          </div>
-                        )}
-                        <div className="text-xs text-slate-600">{fmtDate(c.fecha_pago)}</div>
-                        <div>
-                          {c.fecha_conciliacion
-                            ? <span className="text-xs text-slate-600">{fmtDate(c.fecha_conciliacion)}</span>
-                            : (
-                              <span className="estado-pill bg-amber-100 text-amber-800">
-                                Por conciliar
-                              </span>
-                            )}
-                        </div>
-                        <div className={`text-sm font-semibold text-right ${c.comision_neta < 0 ? 'text-red-600' : 'text-slate-800'}`}>
-                          {mxnCents(c.comision_neta)}
-                        </div>
-                        {esAdmin && (
-                          <button
-                            onClick={() => setModal(c)}
-                            className="p-1 rounded text-slate-300 group-hover:text-slate-500 hover:!text-indigo-600 transition-colors"
-                            title="Corregir o borrar"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
+                    {visibles.map((p) => (
+                      <RenglonPoliza
+                        key={`${p.fianza_id}-${p.comision_id ?? 'sin'}`}
+                        p={p}
+                        cols={cols}
+                        esAdmin={esAdmin}
+                        onAsignar={() => setModal({ asignar: p })}
+                        onCorregir={() => setModal({ corregir: p })}
+                      />
                     ))}
                   </div>
                   <div className={`${cols} px-5 py-3 bg-slate-50 border-t border-slate-200`} data-tabular>
                     <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                      Total · {visibles.length} comisión(es)
+                      Total · {conComision.length} comisión(es)
+                      {sinComision > 0 && <span className="normal-case font-normal text-slate-400"> · {sinComision} sin asignar</span>}
                     </div>
                     {Array.from({ length: derecha - 1 }, (_, i) => <div key={i} />)}
                     <div className="text-sm font-bold text-slate-900 text-right">{mxnCents(total)}</div>
@@ -918,8 +952,19 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
       )}
 
       {modal === 'nueva' && <ComisionModal onClose={() => setModal(null)} onGuardado={recargar} />}
-      {modal && typeof modal === 'object' && (
-        <ComisionModal inicial={modal} onClose={() => setModal(null)} onGuardado={recargar} />
+      {modal?.asignar && (
+        <ComisionModal
+          poliza={{ ...modal.asignar, id: modal.asignar.fianza_id }}
+          onClose={() => setModal(null)}
+          onGuardado={recargar}
+        />
+      )}
+      {modal?.corregir && (
+        <ComisionModal
+          inicial={{ ...modal.corregir, id: modal.corregir.comision_id }}
+          onClose={() => setModal(null)}
+          onGuardado={recargar}
+        />
       )}
       {modal === 'subir' && (
         <SubirBase
@@ -928,6 +973,65 @@ export default function Comisiones({ esAdmin, vendedores = [], afianzadoras = []
             `Base aplicada: ${r.nuevas.length} nueva(s), ${r.corregidas.length} corregida(s)`
           )}
         />
+      )}
+    </div>
+  );
+}
+
+// Un renglón de la lista. Sin comisión, en lugar del monto va el botón para
+// asignarla (al vendedor, que no escribe, solo la raya).
+function RenglonPoliza({ p, cols, esAdmin, onAsignar, onCorregir }) {
+  const tiene = Boolean(p.comision_id);
+  return (
+    <div className={`${cols} px-5 py-3 hover:bg-slate-50 transition-colors group`}>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-slate-800 truncate font-mono">{p.numero_poliza}</p>
+        <p className="text-xs text-slate-400 mt-0.5 truncate" title={p.notas || undefined}>{p.cliente}</p>
+      </div>
+      <div className="text-xs text-slate-600 truncate">{p.afianzadora_nombre}</div>
+      {esAdmin && (
+        <div className={`text-xs truncate ${p.vendedor_nombre ? 'text-slate-600' : 'text-slate-400'}`}>
+          {p.vendedor_nombre || 'Sin vendedor'}
+        </div>
+      )}
+      <div className="min-w-0">
+        {p.fecha_conciliacion
+          ? <p className="text-xs text-slate-600">{fmtDate(p.fecha_conciliacion)}</p>
+          : (
+            <span className={`estado-pill ${ESTADO_RENGLON[tiene ? 'por_conciliar' : 'sin_comision'].cls}`}>
+              {ESTADO_RENGLON[tiene ? 'por_conciliar' : 'sin_comision'].label}
+            </span>
+          )}
+        {p.fecha_pago && (
+          <p className="text-[11px] text-slate-400 mt-0.5 truncate">Pagó {fmtDate(p.fecha_pago)}</p>
+        )}
+      </div>
+      {tiene ? (
+        <div className={`text-sm font-semibold text-right ${p.comision_neta < 0 ? 'text-red-600' : 'text-slate-800'}`}>
+          {mxnCents(p.comision_neta)}
+        </div>
+      ) : esAdmin ? (
+        <div className="text-right">
+          <button
+            onClick={onAsignar}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-indigo-700 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" /> Asignar
+          </button>
+        </div>
+      ) : (
+        <div className="text-sm text-right text-slate-300">—</div>
+      )}
+      {esAdmin && (
+        tiene ? (
+          <button
+            onClick={onCorregir}
+            className="p-1 rounded text-slate-300 group-hover:text-slate-500 hover:!text-indigo-600 transition-colors"
+            title="Corregir o borrar"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+        ) : <div />
       )}
     </div>
   );
