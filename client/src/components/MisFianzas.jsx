@@ -159,8 +159,11 @@ export default function MisFianzas() {
                     <th className="text-left px-3 py-2">Afianzadora</th>
                     <th className="text-left px-3 py-2">Tipo de fianza</th>
                     <th className="text-right px-3 py-2">Monto afianzado</th>
-                    {/* Las dos primas en una columna: la total (lo que pagas)
-                        arriba y la neta debajo, para no ensanchar la tabla. */}
+                    {/* Las dos primas en columnas propias, igual que en el panel
+                        de Fortex: la neta primero porque la total sale de ella
+                        (+ derecho de póliza + IVA). Antes la neta iba en letra
+                        chica debajo de la total y no se alcanzaba a leer. */}
+                    <th className="text-right px-3 py-2">Prima neta</th>
                     <th className="text-right px-3 py-2">Prima total</th>
                     <th className="text-left px-3 py-2">Vigencia</th>
                     <th className="text-left px-3 py-2">Estado</th>
@@ -181,10 +184,8 @@ export default function MisFianzas() {
                       <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-slate-800">
                         {mxnCents(f.monto_afianzado)}
                       </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">
-                        {mxnCents(f.prima_total)}
-                        <span className="block text-[10px] text-slate-400">neta {mxnCents(f.prima_neta)}</span>
-                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxnCents(f.prima_neta)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{mxnCents(f.prima_total)}</td>
                       <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{fmtDate(f.fecha_vigencia)}</td>
                       <td className="px-3 py-1.5"><EstadoBadge estado={f.estado} /></td>
                       <td className="px-3 py-1.5"><Documentos documentos={f.documentos} /></td>
@@ -199,12 +200,8 @@ export default function MisFianzas() {
                     <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-slate-800">
                       {mxnCents(g.monto_afianzado)}
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">
-                      {mxnCents(g.suma_prima_total)}
-                      <span className="block text-[10px] text-slate-400 font-normal">
-                        neta {mxnCents(g.suma_prima_neta)}
-                      </span>
-                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{mxnCents(g.suma_prima_neta)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{mxnCents(g.suma_prima_total)}</td>
                     <td colSpan={3} />
                   </tr>
                 </tfoot>
