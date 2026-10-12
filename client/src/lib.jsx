@@ -35,12 +35,19 @@ export function centavosATexto(centavos) {
 // Input de captura en PESOS que reporta CENTAVOS hacia arriba.
 // Mantiene su propio texto mientras está enfocado para no pelearse con lo que
 // se está tecleando (p.ej. el punto de "1200.").
-export function InputPesos({ valor, onChange, className, ...rest }) {
-  const [texto, setTexto] = useState(() => centavosATexto(valor));
+//
+// `vacioEsNulo`: el campo vacío reporta null en vez de 0, y null se pinta
+// vacío. Hace falta donde el cero es una respuesta válida y distinta de "no lo
+// capturé" —la comisión de una póliza puede ser $0—. Es opcional porque en el
+// resto de los montos vacío y cero significan lo mismo.
+export function InputPesos({ valor, onChange, className, vacioEsNulo = false, ...rest }) {
+  const aTexto = (v) => (vacioEsNulo && v == null ? '' : centavosATexto(v));
+  const [texto, setTexto] = useState(() => aTexto(valor));
   const [enfocado, setEnfocado] = useState(false);
 
   useEffect(() => {
-    if (!enfocado) setTexto(centavosATexto(valor));
+    if (!enfocado) setTexto(aTexto(valor));
+    // aTexto solo depende de vacioEsNulo, que no cambia en la vida del campo.
   }, [valor, enfocado]);
 
   return (
@@ -49,8 +56,11 @@ export function InputPesos({ valor, onChange, className, ...rest }) {
       inputMode="decimal"
       value={texto}
       onFocus={() => setEnfocado(true)}
-      onBlur={() => { setEnfocado(false); setTexto(centavosATexto(valor)); }}
-      onChange={(e) => { setTexto(e.target.value); onChange(pesosACentavos(e.target.value)); }}
+      onBlur={() => { setEnfocado(false); setTexto(aTexto(valor)); }}
+      onChange={(e) => {
+        setTexto(e.target.value);
+        onChange(vacioEsNulo && e.target.value.trim() === '' ? null : pesosACentavos(e.target.value));
+      }}
       className={className}
       {...rest}
     />

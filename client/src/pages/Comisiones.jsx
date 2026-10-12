@@ -311,7 +311,8 @@ function ComisionModal({ inicial, poliza: polizaDada, onClose, onGuardado }) {
   async function guardar() {
     setError('');
     if (!editando && !poliza) return setError('Elige la póliza.');
-    if (!f.comision_neta) return setError('Captura la comisión que pagó la afianzadora.');
+    // Con == null y no con !: un $0 es una comisión válida, no un campo vacío.
+    if (f.comision_neta == null) return setError('Captura la comisión que pagó la afianzadora. Puede ser $0.');
     setBusy(true);
     try {
       if (editando) await api.put(`/comisiones/${inicial.id}`, f);
@@ -437,11 +438,12 @@ function ComisionModal({ inicial, poliza: polizaDada, onClose, onGuardado }) {
         <label className={etiqueta}>Comisión neta *</label>
         <InputPesos
           autoFocus={Boolean(polizaDada) || editando}
+          vacioEsNulo
           valor={f.comision_neta}
           onChange={(c) => setF((s) => ({ ...s, comision_neta: c }))}
           className={`${inputCls} tabular-nums`}
         />
-        <p className={ayuda}>La que pagó la afianzadora. Negativa si es una devolución.</p>
+        <p className={ayuda}>La que pagó la afianzadora. Puede ser $0, o negativa si es una devolución.</p>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>

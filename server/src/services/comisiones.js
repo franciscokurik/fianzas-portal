@@ -280,6 +280,11 @@ export async function buscarPolizas(q) {
 //
 // Lo obligatorio es la comisión. La fecha de pago del cliente es opcional: al
 // conciliar no siempre se tiene, y pedirla obligaba a inventar una.
+//
+// La comisión puede ser $0 —la afianzadora no pagó nada por esa póliza, y
+// conciliarla en cero la saca de "por conciliar"— y negativa si es una
+// devolución. Lo que no puede es faltar: por eso se pregunta por vacío ANTES
+// de convertir, porque Number(null) y Number('') también dan 0.
 function validar({ fecha_pago, fecha_conciliacion, comision_neta, notas }) {
   const pago = fechaISO(fecha_pago);
   if (pago === undefined) throw invalido('La fecha de pago no es una fecha válida.');
@@ -287,10 +292,11 @@ function validar({ fecha_pago, fecha_conciliacion, comision_neta, notas }) {
   if (conciliacion === undefined) throw invalido('La fecha de conciliación no es una fecha válida.');
 
   // Del front llega en centavos, ya convertida por InputPesos.
-  const monto = Number(comision_neta);
-  if (!Number.isInteger(monto) || monto === 0) {
-    throw invalido('Captura la comisión neta. Puede ser negativa si es una devolución, pero no cero.');
+  if (comision_neta == null || String(comision_neta).trim() === '') {
+    throw invalido('Captura la comisión neta. Puede ser $0, o negativa si es una devolución.');
   }
+  const monto = Number(comision_neta);
+  if (!Number.isInteger(monto)) throw invalido('La comisión neta no es un monto válido.');
   return {
     fecha_pago: pago,
     fecha_conciliacion: conciliacion,
@@ -472,10 +478,11 @@ export async function analizarImportacion(filas = []) {
     if (conciliacion === undefined) {
       return error(`La fecha de conciliación "${crudo.conc}" no es una fecha válida.`);
     }
+    // $0 y negativas pasan, igual que en la captura a mano. Lo que no pasa es
+    // la celda vacía: eso es que faltó llenarla, no que valga cero.
     const monto = pesosACentavos(crudo.monto);
-    if (monto === null) return error('Falta la comisión neta.');
+    if (monto === null) return error('Falta la comisión neta. Si fue $0, escribe 0.');
     if (Number.isNaN(monto)) return error(`La comisión "${crudo.monto}" no es un monto.`);
-    if (monto === 0) return error('La comisión no puede ser cero.');
 
     const datos = {
       fila, fianza_id: poliza.id, numero_poliza: poliza.numero_poliza,

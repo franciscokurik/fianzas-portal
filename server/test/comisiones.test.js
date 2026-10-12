@@ -200,10 +200,41 @@ test('un previo no genera comisión', async () => {
   assert.match((await r.json()).error, /previo/);
 });
 
-test('con fecha imposible o en cero no pasa', async () => {
+test('con fecha imposible no pasa, ni sin comisión', async () => {
   assert.equal((await capturar(ASE_001, { fecha_pago: '2026-02-31' })).status, 400);
-  assert.equal((await capturar(ASE_001, { comision_neta: 0 })).status, 400);
   assert.equal((await capturar(ASE_001, { fecha_conciliacion: 'ayer' })).status, 400);
+  // Vacía no es cero: Number(null) y Number('') dan 0, y antes se colaban.
+  for (const vacia of [null, '', undefined]) {
+    const r = await capturar(ASE_001, { comision_neta: vacia });
+    assert.equal(r.status, 400, String(vacia));
+    assert.match((await r.json()).error, /Puede ser \$0/);
+  }
+});
+
+// La afianzadora puede no pagar nada por una póliza, y conciliarla en $0 la
+// saca de "por conciliar". Las devoluciones van en negativo.
+test('la comisión puede ser $0 o negativa', async () => {
+  const ids = [];
+  try {
+    for (const monto of [0, -25000]) {
+      const r = await capturar(ASE_001, {
+        comision_neta: monto, fecha_pago: '2026-05-05', fecha_conciliacion: '2026-05-06',
+      });
+      assert.equal(r.status, 201, String(monto));
+      const { id } = await r.json();
+      ids.push(id);
+      const [guardada] = await memoria.query('SELECT comision_neta FROM comisiones WHERE id = ?', [id]);
+      assert.equal(guardada.comision_neta, monto);
+    }
+    // Corregir una a $0 también pasa.
+    const r = await mandar('PUT', `/api/comisiones/${ids[1]}`, admin, {
+      fecha_pago: '2026-05-05', fecha_conciliacion: '2026-05-06', comision_neta: 0,
+    });
+    assert.equal(r.status, 200);
+  } finally {
+    // Las demás pruebas cuentan renglones: se deja la base como estaba.
+    for (const id of ids) await mandar('DELETE', `/api/comisiones/${id}`, admin);
+  }
 });
 
 // Al conciliar no siempre se sabe cuándo pagó el cliente: pedirla obligaba a
@@ -328,6 +359,24 @@ test('la vista previa dice qué pasaría con cada renglón, y no guarda nada', a
   assert.match(a.errores[2].motivo, /previo/);
 
   assert.equal(await cuantasHay(), antes, 'la vista previa no guarda');
+});
+
+test('en el Excel, $0 y negativas pasan; la celda vacía no', async () => {
+  const r = await mandar('POST', '/api/comisiones/importar', admin, {
+    aplicar: false,
+    filas: [
+      { fila: 2, numero_poliza: 'TKM-555', afianzadora: 'Tokio Marine',
+        fecha_conciliacion: '2026-06-01', comision_neta: 0 },
+      { fila: 3, numero_poliza: 'TKM-555', afianzadora: 'Tokio Marine',
+        fecha_conciliacion: '2026-06-02', comision_neta: '-$1,000.00' },
+      { fila: 4, numero_poliza: 'TKM-555', afianzadora: 'Tokio Marine',
+        fecha_conciliacion: '2026-06-03', comision_neta: '' },
+    ],
+  });
+  const a = await r.json();
+  assert.deepEqual(a.nuevas.map((n) => [n.fila, n.comision_neta]), [[2, 0], [3, -100000]]);
+  assert.deepEqual(a.errores.map((e) => e.fila), [4]);
+  assert.match(a.errores[0].motivo, /escribe 0/);
 });
 
 test('con un solo renglón con error no se guarda NADA', async () => {
