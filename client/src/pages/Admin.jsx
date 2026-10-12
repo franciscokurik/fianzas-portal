@@ -4067,27 +4067,32 @@ function TablaFianzas({ clienteId, fianzas, fianzaEnfocada, proyectos, afianzado
       <table className="w-full text-xs">
         <thead className="text-slate-400 uppercase tracking-wide text-[10px] font-semibold whitespace-nowrap">
           <tr>
-            <th className="text-left px-3 py-2 pl-5">Póliza</th>
-            <th className="text-left px-3 py-2">Afianzadora</th>
-            <th className="text-left px-3 py-2">Tipo</th>
-            <th className="text-right px-3 py-2">Monto</th>
-            {/* Una sola columna con las dos primas: la total arriba (lo que se
-                paga) y la neta debajo. Separarlas en dos columnas volvía a
-                sacar scroll horizontal en la tabla. */}
-            <th className="text-right px-3 py-2">Prima total</th>
+            <th className="text-left px-2 py-2 pl-5">Póliza</th>
+            <th className="text-left px-2 py-2">Afianzadora</th>
+            <th className="text-left px-2 py-2">Tipo</th>
+            <th className="text-right px-2 py-2">Monto</th>
+            {/* Las dos primas en columnas propias, la neta primero porque la
+                total sale de ella (+ derecho de póliza + IVA). Antes la neta iba
+                en letra chica debajo de la total para ahorrar ancho, y no se
+                alcanzaba a leer: es la que reporta la afianzadora y contra la
+                que se concilia la comisión. Para que la columna de más no
+                volviera a sacar scroll horizontal en una laptop de 1280, toda
+                la tabla lleva px-2 en vez de px-3. */}
+            <th className="text-right px-2 py-2">Prima neta</th>
+            <th className="text-right px-2 py-2">Prima total</th>
             {/* El recordatorio va debajo de la vigencia y no en su columna: era
                 una columna casi siempre vacía que empujaba la tabla a lo ancho. */}
-            <th className="text-left px-3 py-2">Vigencia</th>
-            <th className="text-left px-3 py-2">Estado</th>
-            <th className="text-center px-3 py-2">Docs</th>
-            <th className="px-3 py-2"></th>
+            <th className="text-left px-2 py-2">Vigencia</th>
+            <th className="text-left px-2 py-2">Estado</th>
+            <th className="text-center px-2 py-2">Docs</th>
+            <th className="px-2 py-2"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {fianzas.map((f) => (
             editandoId === f.id ? (
               <tr key={f.id}>
-                <td colSpan={9} className="p-0">
+                <td colSpan={10} className="p-0">
                   <FormFianza
                     inicial={f}
                     proyectos={proyectos}
@@ -4111,20 +4116,18 @@ function TablaFianzas({ clienteId, fianzas, fianzaEnfocada, proyectos, afianzado
                 ref={f.id === fianzaEnfocada ? enfocada : undefined}
                 className={f.id === fianzaEnfocada ? 'bg-indigo-50' : 'hover:bg-white/70'}
               >
-                <td className="px-3 py-1.5 pl-5 text-slate-700 whitespace-nowrap">
+                <td className="px-2 py-1.5 pl-5 text-slate-700 whitespace-nowrap">
                   <span className="flex items-center gap-1.5">
                     <span className="font-mono">{f.numero_poliza}</span>
                     <ClaseBadge clase={f.clase} />
                   </span>
                 </td>
-                <td className="px-3 py-1.5 text-slate-600">{f.afianzadora_nombre}</td>
-                <td className="px-3 py-1.5 text-slate-700 font-medium">{f.tipo_fianza}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-slate-800">{mxnCents(f.monto_afianzado)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">
-                  {mxnCents(f.prima_total)}
-                  <span className="block text-[10px] text-slate-400">neta {mxnCents(f.prima_neta)}</span>
-                </td>
-                <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">
+                <td className="px-2 py-1.5 text-slate-600">{f.afianzadora_nombre}</td>
+                <td className="px-2 py-1.5 text-slate-700 font-medium">{f.tipo_fianza}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-slate-800">{mxnCents(f.monto_afianzado)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{mxnCents(f.prima_neta)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{mxnCents(f.prima_total)}</td>
+                <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">
                   {fmtDate(f.fecha_vigencia)}
                   {f.fecha_recordatorio && (
                     <span
@@ -4139,8 +4142,8 @@ function TablaFianzas({ clienteId, fianzas, fianzaEnfocada, proyectos, afianzado
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-1.5"><EstadoBadge estado={f.estado} /></td>
-                <td className="px-3 py-1.5 text-center">
+                <td className="px-2 py-1.5"><EstadoBadge estado={f.estado} /></td>
+                <td className="px-2 py-1.5 text-center">
                   <button
                     onClick={() => setDocsAbiertos((d) => (d === f.id ? null : f.id))}
                     className={`inline-flex items-center gap-1 px-1.5 py-1 rounded-md border text-[11px] ${
@@ -4154,7 +4157,7 @@ function TablaFianzas({ clienteId, fianzas, fianzaEnfocada, proyectos, afianzado
                     <span className="tabular-nums">{f.documentos?.length || 0}</span>
                   </button>
                 </td>
-                <td className="px-3 py-1.5">
+                <td className="px-2 py-1.5">
                   <div className="flex items-center justify-end gap-1.5">
                     <button onClick={() => setEditandoId(f.id)} className={btnSecondary} title={f.clase === 'previo' ? 'Editar previo' : 'Editar fianza'}>
                       <Pencil className="h-3.5 w-3.5" />
@@ -4171,7 +4174,7 @@ function TablaFianzas({ clienteId, fianzas, fianzaEnfocada, proyectos, afianzado
             if (docsAbiertos !== f.id || editandoId === f.id) return [fila];
             return [fila, (
               <tr key={`docs-${f.id}`} className="bg-indigo-50/20">
-                <td colSpan={9} className="px-4 py-3">
+                <td colSpan={10} className="px-4 py-3">
                   <p className="text-xs font-medium text-slate-600 mb-2">
                     {f.clase === 'previo' ? 'Documentos del previo' : 'Documentos de la fianza'}{' '}
                     <span className="font-mono text-slate-400">{f.numero_poliza}</span>
