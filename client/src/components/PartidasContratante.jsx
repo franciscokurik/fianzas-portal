@@ -58,7 +58,7 @@ export function FormPartida({ inicial, tiposFianza = [], onSubmit, onCancel }) {
   }
 
   return (
-    <div className="portal-card bg-white border border-indigo-200 rounded-lg p-4 mb-3">
+    <div className="bg-white border border-indigo-200 rounded-xl p-4 mb-3">
       <p className="text-sm font-medium text-slate-700 mb-3">
         {inicial ? 'Editar partida' : 'Nueva partida'}
       </p>
@@ -173,7 +173,7 @@ function Partida({
   const sinNadie = !pa.contratos.length;
 
   return (
-    <div className={`portal-card bg-white border rounded-lg overflow-hidden ${
+    <div className={`bg-white border rounded-xl overflow-hidden ${
       enFalta ? 'border-rose-200' : sinNadie ? 'border-slate-300 border-dashed' : 'border-slate-200'
     }`}>
       <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60">
@@ -362,7 +362,7 @@ export default function PartidasContratante({
           de todo lo capturado antes de que las partidas existieran, así que se
           dice en vez de esconderlo. */}
       {sinPartida.length > 0 && (
-        <div className="portal-card bg-white border border-amber-200 rounded-lg overflow-hidden mt-4">
+        <div className="bg-white border border-amber-200 rounded-xl overflow-hidden mt-4">
           <div className="px-4 py-2.5 border-b border-amber-200 bg-amber-50 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-600" />
             <h3 className="text-sm font-semibold text-amber-800">

@@ -53,7 +53,7 @@ function FormProyecto({ inicial, onSubmit, onCancel }) {
   }
 
   return (
-    <div className="portal-card bg-white border border-indigo-200 rounded-lg p-4 mb-4">
+    <div className="bg-white border border-indigo-200 rounded-xl p-4 mb-4">
       <p className="text-sm font-medium text-slate-700 mb-3">
         {inicial ? 'Editar proyecto' : 'Nuevo proyecto'}
       </p>
@@ -134,7 +134,7 @@ function Consumo({ consumo }) {
   if (!consumo?.length) return null;
 
   return (
-    <div className="portal-card bg-white border border-slate-200 rounded-lg overflow-hidden mb-4">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-4">
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
         <CreditCard className="w-4 h-4 text-slate-500" />
         <h3 className="text-sm font-semibold text-slate-700">
@@ -188,7 +188,7 @@ function DetalleProyecto({
         <ArrowLeft className="h-3.5 w-3.5" /> Volver a mis proyectos
       </button>
 
-      <div className="portal-card bg-white border border-slate-200 rounded-lg p-4 mb-4">
+      <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
@@ -401,7 +401,7 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
         {(data?.proyectos || []).map((p) => (
           <div
             key={p.id}
-            className={`portal-card bg-white border rounded-lg ${
+            className={`bg-white border rounded-xl ${
               p.pendientes_sin_fianza > 0 ? 'border-rose-200' : 'border-slate-200'
             }`}
           >
@@ -476,7 +476,7 @@ export default function ProyectosContratante({ clienteId, tipos, onCambio, avisa
           proyecto. Se dicen para que no se pierdan de vista: son captura
           pendiente, no un proyecto vacío. */}
       {data?.obras_sin_proyecto?.length > 0 && (
-        <div className="portal-card bg-white border border-amber-200 rounded-lg overflow-hidden mt-4">
+        <div className="bg-white border border-amber-200 rounded-xl overflow-hidden mt-4">
           <div className="px-4 py-2.5 border-b border-amber-200 bg-amber-50 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-600" />
             <h3 className="text-sm font-semibold text-amber-800">

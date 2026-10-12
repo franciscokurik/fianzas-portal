@@ -13,7 +13,7 @@ function Renglon({ proveedor, onAbrir }) {
   return (
     <button
       onClick={onAbrir}
-      className={`portal-card w-full text-left bg-white border rounded-lg px-4 py-3 hover:bg-slate-50/60 flex flex-wrap items-center gap-x-3 gap-y-1 ${
+      className={`w-full text-left bg-white border rounded-xl px-4 py-3 hover:bg-slate-50/60 flex flex-wrap items-center gap-x-3 gap-y-1 ${
         enFalta ? 'border-rose-200' : 'border-slate-200'
       }`}
     >
@@ -48,7 +48,7 @@ function DetalleProveedor({ detalle, clienteId, tipos, onVolver, onCambio, avisa
         <ArrowLeft className="h-3.5 w-3.5" /> Volver al padrón
       </button>
 
-      <div className="portal-card bg-white border border-slate-200 rounded-lg p-4 mb-4">
+      <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-slate-800">{proveedor?.razon_social}</h2>
@@ -64,7 +64,7 @@ function DetalleProveedor({ detalle, clienteId, tipos, onVolver, onCambio, avisa
 
       <div className="space-y-4">
         {obras.map((o) => (
-          <div key={o.id} className="portal-card bg-white border border-slate-200 rounded-lg overflow-hidden">
+          <div key={o.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
             <Obra
               obra={o}
               clienteId={clienteId}

@@ -5,40 +5,27 @@
 // cosa: cuál de sus proveedores no le ha presentado la fianza. Por eso lo
 // primero de la pantalla es el renglón en falta, no un total de dinero.
 //
-// Este archivo es la cáscara —topbar, cifras, pestañas y avisos— y cada pestaña
-// es un componente, igual que Dashboard.jsx con MisFianzas y Documentos:
+// Este archivo es la cáscara —encabezado, cifras, pestañas y avisos— y cada
+// pestaña es un componente, igual que Dashboard.jsx con MisFianzas y Documentos:
 //
 //   PROYECTOS  -> sus desarrollos, con los proveedores adentro. Es lo que pidió:
 //                 la torre completa en un lugar. Y es lo ÚNICO que él captura.
 //   PROVEEDORES -> el padrón, la misma información vista por empresa. Sirve para
 //                 la pregunta de la mañana: ¿a quién le falta la fianza?
+//
+// Usa el mismo sistema de diseño que el panel de Fortex (ClienteShell y las
+// piezas de components/fx.jsx), igual que el portal del fiado.
 import { useCallback, useEffect, useState } from 'react';
 import {
-  LogOut, ShieldCheck, AlertTriangle, Building2, Users, CheckCircle2, Layers,
+  ShieldCheck, ShieldAlert, AlertTriangle, Building2, Users, CheckCircle2, Layers, CalendarClock, X,
 } from 'lucide-react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { mxn } from '../lib.jsx';
+import ClienteShell from '../components/ClienteShell.jsx';
+import { Cifra, EncabezadoPagina, TiraPestanas } from '../components/fx.jsx';
 import ProyectosContratante from '../components/ProyectosContratante.jsx';
 import PadronContratante from '../components/PadronContratante.jsx';
-
-const TONES = {
-  emerald: { bg: 'bg-emerald-50', label: 'text-emerald-700', value: 'text-emerald-900' },
-  sky:     { bg: 'bg-sky-50',     label: 'text-sky-700',     value: 'text-sky-900' },
-  amber:   { bg: 'bg-amber-50',   label: 'text-amber-700',   value: 'text-amber-900' },
-  rose:    { bg: 'bg-rose-50',    label: 'text-rose-700',    value: 'text-rose-900' },
-};
-
-function Kpi({ label, value, sub, tone = 'sky' }) {
-  const t = TONES[tone];
-  return (
-    <div className={`portal-kpi portal-kpi-${tone} ${t.bg} rounded-xl p-3 border border-slate-100`}>
-      <div className={`portal-kpi-label text-[10px] uppercase tracking-wider font-medium ${t.label}`}>{label}</div>
-      <div className={`portal-kpi-value text-xl font-bold tabular-nums mt-0.5 ${t.value}`}>{value}</div>
-      {sub && <div className="portal-kpi-sub text-[10px] text-slate-500 mt-0.5">{sub}</div>}
-    </div>
-  );
-}
 
 export default function Proveedores() {
   const { user, logout } = useAuth();
@@ -66,67 +53,41 @@ export default function Proveedores() {
   const m = data?.metricas;
 
   return (
-    <div className="portal-shell portal-client min-h-screen">
-      <header className="portal-topbar bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="portal-topbar-inner max-w-7xl mx-auto px-6 py-3">
-          <span className="portal-monogram" aria-hidden="true">F</span>
-          <div className="portal-brand">
-            <span className="portal-brand-name text-sm font-semibold text-slate-700">
-              <strong>FORTEX</strong>
-              <small>CONTROL DE PROVEEDORES</small>
-            </span>
-          </div>
-          <div className="portal-topbar-actions flex items-center gap-3">
-            <span className="portal-user-chip text-sm text-slate-500 hidden sm:inline">
-              {data?.razon_social || user?.razon_social}
-            </span>
-            <button
-              onClick={logout}
-              className="portal-logout flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300"
-            >
-              <LogOut className="h-3.5 w-3.5" /> Salir
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="portal-main max-w-7xl mx-auto px-6 py-6">
-        <div className="portal-page-heading flex flex-wrap items-end justify-between gap-3 mb-5">
-          <div>
-            <p className="portal-eyebrow">Cumplimiento de contratistas</p>
-            <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-indigo-600" />
-              Mis proyectos y proveedores
-            </h1>
-            <p className="text-sm text-slate-500 mt-0.5">
-              La fianza que cada proveedor presentó por tus obras
-              {m ? ` · ${m.proyectos} proyecto(s), ${m.proveedores} proveedor(es)` : ''}
-            </p>
-          </div>
-        </div>
+    <ClienteShell nombre={user?.nombre} empresa={data?.razon_social || user?.razon_social} onSalir={logout}>
+      <div className="space-y-5">
+        <EncabezadoPagina
+          titulo="Mis proyectos y proveedores"
+          sub={`La fianza que cada proveedor presentó por tus obras${
+            m ? ` · ${m.proyectos} proyecto(s), ${m.proveedores} proveedor(es)` : ''
+          }`}
+        />
 
         {msg && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 flex items-center gap-2 mb-4">
+          <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 shrink-0" /> {msg}
           </div>
         )}
 
         {error && (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 flex items-start gap-2 mb-5">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
             <div className="flex-1">
               <p className="font-medium">No se pudo cargar la información.</p>
               <p className="text-xs mt-0.5">{error}</p>
             </div>
-            <button onClick={() => setError('')} className="text-rose-400 hover:text-rose-700 shrink-0">✕</button>
+            <button onClick={() => setError('')} className="text-red-400 hover:text-red-700 shrink-0" title="Cerrar">
+              <X className="h-4 w-4" />
+            </button>
           </div>
         )}
 
         {aviso && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-start gap-2 mb-5">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
             <span className="flex-1">{aviso}</span>
-            <button onClick={() => setAviso('')} className="text-amber-500 hover:text-amber-800 shrink-0">✕</button>
+            <button onClick={() => setAviso('')} className="text-amber-500 hover:text-amber-800 shrink-0" title="Cerrar">
+              <X className="h-4 w-4" />
+            </button>
           </div>
         )}
 
@@ -135,7 +96,7 @@ export default function Proveedores() {
             obra puede tener su fianza y aun así faltarle la que la partida
             exige. Ver el comentario en services/proveedores.js. */}
         {m?.pendientes_sin_fianza > 0 && (
-          <div className="portal-alert rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 flex items-start gap-2 mb-5">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
             <div>
               <span className="font-medium">
@@ -155,7 +116,7 @@ export default function Proveedores() {
         {/* El verde solo cuando no falta NADA en ningún nivel. Con el número de
             obras, una partida incompleta lo dejaba decir "todas tienen fianza". */}
         {m?.pendientes_sin_fianza === 0 && m?.obras_vivas > 0 && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex items-center gap-2 mb-5">
+          <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
             {m.partidas > 0
               ? 'Cada partida tiene vigente lo que le exiges.'
@@ -163,10 +124,10 @@ export default function Proveedores() {
           </div>
         )}
 
-        {/* Aparte, y en ámbar y no en rojo: contratar es pendiente TUYO, no de
+        {/* Aparte, y en gris y no en rojo: contratar es pendiente TUYO, no de
             un proveedor que incumplió. */}
         {m?.partidas_sin_contratista > 0 && (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 flex items-start gap-2 mb-5">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 flex items-start gap-2">
             <Layers className="w-4 h-4 mt-0.5 shrink-0 text-slate-400" />
             <span>
               <span className="font-medium">
@@ -177,91 +138,97 @@ export default function Proveedores() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {/* "Vigentes" y no "en curso": el conjunto incluye las terminadas y
               entregadas a propósito, porque ahí vive la fianza de vicios
               ocultos. Las cerradas y canceladas se listan pero no cuentan. */}
           {/* La unidad cambia con lo que el desarrollador capturó: si armó
               partidas, el pendiente es la partida —es donde exige la fianza—; si
               no, la obra. La etiqueta dice cuál para que el número no se lea
-              contra la otra cifra de la pantalla. */}
+              contra la otra cifra de la pantalla. El cuadro va en rojo solo si
+              falta algo: en cero no es una alarma. */}
           {m?.partidas > 0 ? (
-            <Kpi tone="rose" label="Partidas sin fianza completa"
-                 value={m?.pendientes_sin_fianza ?? '—'}
-                 sub={m ? `de ${m.partidas} partida(s)`
-                        + (m.pendientes_sueltos ? ` · ${m.pendientes_sueltos} obra(s) sin partida` : '')
-                        : null} />
+            <Cifra tono={m?.pendientes_sin_fianza > 0 ? 'bad' : 'ok'} icono={<ShieldAlert className="h-5 w-5" />}
+                   label="Partidas sin fianza completa"
+                   valor={m?.pendientes_sin_fianza ?? '—'}
+                   sub={m ? `de ${m.partidas} partida(s)`
+                          + (m.pendientes_sueltos ? ` · ${m.pendientes_sueltos} obra(s) sin partida` : '')
+                          : null} />
           ) : (
-            <Kpi tone="rose" label="Obras sin fianza vigente" value={m?.obras_descubiertas ?? '—'}
-                 sub={m ? `de ${m.obras_vivas} obra(s) vigente(s)` : null} />
+            <Cifra tono={m?.obras_descubiertas > 0 ? 'bad' : 'ok'} icono={<ShieldAlert className="h-5 w-5" />}
+                   label="Obras sin fianza vigente" valor={m?.obras_descubiertas ?? '—'}
+                   sub={m ? `de ${m.obras_vivas} obra(s) vigente(s)` : null} />
           )}
-          <Kpi tone="emerald" label="Obras con fianza" value={m?.obras_cubiertas ?? '—'}
-               sub="fianza emitida y vigente" />
-          <Kpi tone="amber" label="Por vencer (< 60 días)" value={m?.obras_por_vencer ?? '—'}
-               sub={m ? (m.obras_por_vencer > 0
-                 ? 'pídele la renovación al proveedor'
-                 : 'ninguna renovación urgente') : null} />
+          <Cifra tono="ok" icono={<ShieldCheck className="h-5 w-5" />}
+                 label="Obras con fianza" valor={m?.obras_cubiertas ?? '—'}
+                 sub="fianza emitida y vigente" />
+          <Cifra tono={m?.obras_por_vencer > 0 ? 'warn' : 'neutral'} icono={<CalendarClock className="h-5 w-5" />}
+                 label="Por vencer (< 60 días)" valor={m?.obras_por_vencer ?? '—'}
+                 sub={m ? (m.obras_por_vencer > 0
+                   ? 'pídele la renovación al proveedor'
+                   : 'ninguna renovación urgente') : null} />
           {/* Es la cobertura A TU FAVOR: lo que las fianzas vigentes de tus
               proveedores cubren hoy. No es dinero tuyo ni un pasivo tuyo. */}
-          <Kpi tone="sky" label="Cobertura a tu favor" value={mxn(m?.monto_afianzado)}
-               sub={m?.previos_en_tramite > 0
-                 ? `${m.previos_en_tramite} previo(s) en trámite`
-                 : 'suma de las fianzas vigentes'} />
+          <Cifra tono="brand" icono={<Building2 className="h-5 w-5" />}
+                 label="Cobertura a tu favor" valor={mxn(m?.monto_afianzado)}
+                 sub={m?.previos_en_tramite > 0
+                   ? `${m.previos_en_tramite} previo(s) en trámite`
+                   : 'suma de las fianzas vigentes'} />
         </div>
 
-        <div className="portal-tabs flex items-center gap-1 border-b border-slate-200 mb-5">
-          {[
-            ['proyectos', 'Mis proyectos', Building2, m?.proyectos],
-            ['padron', 'Proveedores', Users, m?.proveedores],
-          ].map(([key, label, Icono, cuenta]) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`portal-tab px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
-                tab === key
-                  ? 'border-indigo-600 text-indigo-700'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              <Icono className="h-3.5 w-3.5" />
-              {label}
-              {cuenta != null && <span className="tabular-nums text-slate-400">({cuenta})</span>}
-            </button>
-          ))}
-          {tab === 'padron' && soloEnFalta && (
-            <button
-              onClick={() => setSoloEnFalta(false)}
-              className="ml-auto text-xs text-slate-500 underline hover:no-underline"
-            >
-              Ver todos los proveedores
-            </button>
-          )}
-        </div>
+        <div>
+          <div className="flex items-end gap-3">
+            <div className="flex-1 min-w-0">
+              <TiraPestanas
+                pestanas={[
+                  { key: 'proyectos', label: 'Mis proyectos', icono: Building2, cuenta: m?.proyectos },
+                  {
+                    key: 'padron', label: 'Proveedores', icono: Users, cuenta: m?.proveedores,
+                    // En ámbar si alguno debe fianza: la pestaña no puede esconderlo.
+                    alerta: m?.proveedores_en_falta > 0,
+                  },
+                ]}
+                activa={tab}
+                onCambiar={setTab}
+              />
+            </div>
+            {tab === 'padron' && soloEnFalta && (
+              <button
+                onClick={() => setSoloEnFalta(false)}
+                className="pb-2.5 text-xs text-slate-500 hover:text-slate-800 underline hover:no-underline shrink-0"
+              >
+                Ver todos los proveedores
+              </button>
+            )}
+          </div>
 
-        {tab === 'proyectos' ? (
-          <ProyectosContratante
-            clienteId={user?.client_id}
-            tipos={tipos}
-            onCambio={cargar}
-            avisar={setAviso}
-            flash={flash}
-          />
-        ) : (
-          <PadronContratante
-            proveedores={data?.proveedores || []}
-            clienteId={user?.client_id}
-            tipos={tipos}
-            soloEnFalta={soloEnFalta}
-            onCambio={cargar}
-            avisar={setAviso}
-          />
-        )}
+          <div className="pt-4">
+            {tab === 'proyectos' ? (
+              <ProyectosContratante
+                clienteId={user?.client_id}
+                tipos={tipos}
+                onCambio={cargar}
+                avisar={setAviso}
+                flash={flash}
+              />
+            ) : (
+              <PadronContratante
+                proveedores={data?.proveedores || []}
+                clienteId={user?.client_id}
+                tipos={tipos}
+                soloEnFalta={soloEnFalta}
+                onCambio={cargar}
+                avisar={setAviso}
+              />
+            )}
+          </div>
+        </div>
 
         {/* Se dice en la pantalla y no solo en el README: el portal sabe de las
             fianzas que colocó Fortex, y de ninguna otra. Sin esta línea, un
             "Sin registro" se lee como "tu proveedor no cumplió". */}
         {data && (
-          <p className="mt-6 text-[11px] text-slate-400 leading-relaxed">
+          <p className="text-[11px] text-slate-400 leading-relaxed">
             Este portal muestra las fianzas registradas en Fortex. Si un proveedor contrató
             su fianza con otro agente, aquí aparecerá como
             <span className="font-medium"> sin registro</span> aunque la tenga: puedes subir
@@ -269,7 +236,7 @@ export default function Proveedores() {
             dentro de la obra, y pedirle a Fortex que la capture.
           </p>
         )}
-      </main>
-    </div>
+      </div>
+    </ClienteShell>
   );
 }
