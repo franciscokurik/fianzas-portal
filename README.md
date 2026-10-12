@@ -576,6 +576,26 @@ POST http://localhost:4000/api/alertas/correr
 Para producción: en `.env` pon `EMAIL_MODE=smtp` y las credenciales SMTP de SendGrid.
 Para automatizar diariamente, programa un cron que llame a ese endpoint o a `correrAlertas()`.
 
+## Comisiones en Fortex HRM
+
+El estado de cuenta de cada asesor vive en Fortex HRM (`hr-system`), y ahí se
+suman las comisiones de sus fianzas. HRM se las pide al portal:
+
+```
+GET /api/integracion/comisiones?desde=2026-01-01&hasta=2026-12-31
+Authorization: Bearer <HRM_API_KEY>
+```
+
+- Del otro lado no hay una persona sino un servidor, así que no entra con JWT
+  sino con una **llave compartida**: `HRM_API_KEY` aquí y `FIANZAS_API_KEY` en
+  HRM, la misma cadena (`openssl rand -hex 32`). Sin ella, o con menos de 32
+  caracteres, la ruta contesta 503 a todo: falla cerrado.
+- Manda solo las comisiones **conciliadas** del periodo, por fecha de
+  conciliación, con el **correo** del vendedor guardado al capturarlas. HRM liga
+  ese correo con el corporativo del empleado.
+- Manda la comisión neta **completa**. El porcentaje del asesor lo aplica HRM,
+  donde viven las reglas de comisión: cambiarlo no toca el portal.
+
 ## Próximos pasos sugeridos
 
 - Avisarle **al contratante** por correo que a su proveedor se le vence la fianza

@@ -14,6 +14,7 @@ import documentosRoutes from './routes/documentos.js';
 import subidasRoutes from './routes/subidas.js';
 import adminRoutes from './routes/admin.js';
 import comisionesRoutes from './routes/comisiones.js';
+import integracionRoutes from './routes/integracion.js';
 import { correrAlertas } from './services/alerts.js';
 import { probarCorreo } from './services/email.js';
 import { seed, seedIfEmpty, reiniciarVacio } from './seed.js';
@@ -125,6 +126,9 @@ app.use('/api/admin', capturarAsync(adminRoutes));
 // Las comisiones van aparte del panel y no colgadas de /api/admin: allá entra
 // el operador, y aquí no.
 app.use('/api/comisiones', capturarAsync(comisionesRoutes));
+// Lo que leen otros sistemas de Fortex (hoy, HRM). Entra otro servidor con una
+// llave compartida, no una persona con sesión: ver routes/integracion.js.
+app.use('/api/integracion', capturarAsync(integracionRoutes));
 
 // Dispara alertas manualmente (útil en MVP/demo)
 app.post('/api/alertas/correr', async (req, res) => {

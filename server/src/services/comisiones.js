@@ -212,6 +212,42 @@ export async function tableroComisiones(alcance, filtros = {}) {
   ).all(...params);
 }
 
+// Lo que Fortex HRM suma al estado de cuenta de cada asesor (ver
+// routes/integracion.js). Aquí no hay alcance: quien pregunta es otro servidor
+// y la llave ya se revisó en la ruta.
+//
+// Solo las CONCILIADAS, y el periodo es por fecha de conciliación: es la fecha
+// que manda en las cifras de esta pantalla, y la que HRM usa para decidir en
+// qué mes cae cada comisión. Lo que está por conciliar todavía no se le debe a
+// nadie.
+//
+// El vendedor va por CORREO y no por id: los ids de este portal no significan
+// nada en HRM, y el correo @fortex.mx es con el que esa persona entra allá. Es
+// el vendedor guardado al capturar (c.vendedor_id), no el titular de hoy, por la
+// misma razón que en el resto del archivo. Las que no tienen vendedor no se
+// mandan: no hay a quién sumárselas.
+//
+// Va la comisión neta COMPLETA. Lo que le toca al asesor lo decide HRM, que es
+// donde viven las reglas de comisión: si el porcentaje cambia, no hay que tocar
+// el portal.
+export async function comisionesParaHrm({ desde, hasta }) {
+  return db.prepare(
+    `SELECT c.id, c.fianza_id, f.numero_poliza, a.nombre AS afianzadora,
+            t.nombre AS tipo_fianza, cl.razon_social AS cliente,
+            f.prima_neta, c.comision_neta, c.fecha_conciliacion, c.fecha_pago,
+            LOWER(u.email) AS vendedor_email, u.nombre AS vendedor_nombre
+     FROM comisiones c
+     JOIN fianzas f          ON f.id = c.fianza_id
+     JOIN afianzadoras a     ON a.id = f.afianzadora_id
+     JOIN clients cl         ON cl.id = f.client_id
+     JOIN users u            ON u.id = c.vendedor_id
+     LEFT JOIN tipos_fianza t ON t.id = f.tipo_fianza_id
+     WHERE c.fecha_conciliacion IS NOT NULL
+       AND c.fecha_conciliacion >= ? AND c.fecha_conciliacion <= ?
+     ORDER BY c.fecha_conciliacion, c.id`
+  ).all(desde, hasta);
+}
+
 // El buscador del alta individual: pólizas EMITIDAS por número o cliente. Los
 // previos no generan comisión —la afianzadora todavía no emite—, así que no
 // se ofrecen.
